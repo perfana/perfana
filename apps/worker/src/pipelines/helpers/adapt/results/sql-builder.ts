@@ -274,7 +274,7 @@ export class AdaptResultsSQLBuilder {
                   ELSE wcc.test_median  -- Default to median
               END as test_stat_value,
 
-              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+              ${this.fragments.wrapControlStatValue(`CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.control_mean
                   WHEN 'median' THEN wcc.control_median
                   WHEN 'min' THEN wcc.control_min
@@ -293,7 +293,9 @@ export class AdaptResultsSQLBuilder {
                   WHEN 'q99' THEN wcc.control_q99
                   WHEN 'p99' THEN wcc.control_q99
                   ELSE wcc.control_median  -- Default to median
-              END as control_stat_value
+              END`)},
+
+              ${this.fragments.buildDefaultValueColumns()}
           FROM with_compare_config wcc
       ),
 

@@ -145,7 +145,7 @@ to the default still counts. Leaving a field out leaves the row's own value alon
 | `aggregation` | `mean`, `median`, `min`, `max`, `last`, `q10`, `q25`, `q75`, `q90`, `q95`, `q99` | `thresholds.aggregation` |
 | `minSampleCount` | number; floored, at least 1 | `thresholds.minSampleCount` |
 | `ignore` | `true` or `false` | `ignore` |
-| `defaultValueIfControlGroupMissing` | number | `defaultValueIfControlGroupMissing` (stored, but ADAPT does not apply it yet; filed in TODOS.md) |
+| `defaultValueIfControlGroupMissing` | number | `defaultValueIfControlGroupMissing`. Since v0.2.97.66 ADAPT compares a series that no baseline run has with this value instead of reporting it incomparable; leave it out to keep that off |
 
 `ignoreMeanDiffSmallerThan` was removed in v0.2.97.64: ADAPT never read it, and `absThreshold` is how a
 small difference is ignored. A file item that still names it is provisioned without it, with a warning

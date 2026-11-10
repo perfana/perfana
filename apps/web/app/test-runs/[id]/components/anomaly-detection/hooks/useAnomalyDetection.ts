@@ -604,7 +604,12 @@ export function useAnomalyDetection({
           iqrThreshold: configData.thresholds.iqrThreshold,
           absoluteThreshold: configData.thresholds.absoluteThreshold
         },
-        defaultValueIfControlGroupMissing: configData.defaultValueIfControlGroupMissing || 0
+        // Only an explicit number is written. ADAPT reads the key since v0.2.97.66, so a default
+        // of 0 would judge every series with no baseline against zero.
+        ...(typeof configData.defaultValueIfControlGroupMissing === 'number' &&
+        Number.isFinite(configData.defaultValueIfControlGroupMissing)
+          ? { defaultValueIfControlGroupMissing: configData.defaultValueIfControlGroupMissing }
+          : {})
       };
 
       const configHash = generateConfigHash(configDataPayload);

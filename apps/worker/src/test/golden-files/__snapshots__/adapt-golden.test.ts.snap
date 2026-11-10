@@ -117,9 +117,13 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           -- pair regardless of which statistic was chosen.
           SELECT
               wcc.*,
-              wcc.control_row_exists
+              ((wcc.control_row_exists
                 AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2))
-                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)) as control_exists,
+                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)))
+              OR (COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)))) as control_exists,
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -141,7 +145,11 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
                   ELSE wcc.test_median  -- Default to median
               END as test_stat_value,
 
-              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+              CASE WHEN COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+                   ELSE CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.control_mean
                   WHEN 'median' THEN wcc.control_median
                   WHEN 'min' THEN wcc.control_min
@@ -160,7 +168,17 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
                   WHEN 'q99' THEN wcc.control_q99
                   WHEN 'p99' THEN wcc.control_q99
                   ELSE wcc.control_median  -- Default to median
-              END as control_stat_value
+              END
+              END as control_stat_value,
+
+              COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false) as uses_default_value,
+              CASE WHEN COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+              END as default_value
           FROM with_compare_config wcc
       ),
 
@@ -581,7 +599,8 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           statistic, thresholds,
           jsonb_build_object('controlExists', control_exists, 'testStatValue', test_stat_value, 'controlStatValue', control_stat_value, 'configuredAggregation', compare_config->'thresholds'->>'aggregation') as conditions,
           checks, conclusion,
-          false as uses_default_value, NULL as default_value,
+          (uses_default_value AND control_exists) as uses_default_value,
+          CASE WHEN uses_default_value AND control_exists THEN default_value END as default_value,
           metrics_source_id,
           organization_id,
           team_id,
@@ -749,9 +768,13 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           -- pair regardless of which statistic was chosen.
           SELECT
               wcc.*,
-              wcc.control_row_exists
+              ((wcc.control_row_exists
                 AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2))
-                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)) as control_exists,
+                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)))
+              OR (COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)))) as control_exists,
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -773,7 +796,11 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
                   ELSE wcc.test_median  -- Default to median
               END as test_stat_value,
 
-              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+              CASE WHEN COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+                   ELSE CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.control_mean
                   WHEN 'median' THEN wcc.control_median
                   WHEN 'min' THEN wcc.control_min
@@ -792,7 +819,17 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
                   WHEN 'q99' THEN wcc.control_q99
                   WHEN 'p99' THEN wcc.control_q99
                   ELSE wcc.control_median  -- Default to median
-              END as control_stat_value
+              END
+              END as control_stat_value,
+
+              COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false) as uses_default_value,
+              CASE WHEN COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+              END as default_value
           FROM with_compare_config wcc
       ),
 
@@ -1213,7 +1250,8 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           statistic, thresholds,
           jsonb_build_object('controlExists', control_exists, 'testStatValue', test_stat_value, 'controlStatValue', control_stat_value, 'configuredAggregation', compare_config->'thresholds'->>'aggregation') as conditions,
           checks, conclusion,
-          false as uses_default_value, NULL as default_value,
+          (uses_default_value AND control_exists) as uses_default_value,
+          CASE WHEN uses_default_value AND control_exists THEN default_value END as default_value,
           metrics_source_id,
           organization_id,
           team_id,
@@ -1532,9 +1570,13 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
       with_dynamic_statistics AS (
           SELECT
               wcc.*,
-              wcc.control_row_exists
+              ((wcc.control_row_exists
                 AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2))
-                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)) as control_exists,
+                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)))
+              OR (COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)))) as control_exists,
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -1549,7 +1591,11 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
                   WHEN 'q99' THEN wcc.test_q99 WHEN 'p99' THEN wcc.test_q99
                   ELSE wcc.test_median
               END as test_stat_value,
-              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+              CASE WHEN COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+                   ELSE CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.control_mean
                   WHEN 'median' THEN wcc.control_median
                   WHEN 'min' THEN wcc.control_min
@@ -1562,7 +1608,16 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
                   WHEN 'q95' THEN wcc.control_q95 WHEN 'p95' THEN wcc.control_q95
                   WHEN 'q99' THEN wcc.control_q99 WHEN 'p99' THEN wcc.control_q99
                   ELSE wcc.control_median
-              END as control_stat_value
+              END
+              END as control_stat_value,
+              COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false) as uses_default_value,
+              CASE WHEN COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(wcc.compare_config->'defaultValueIfControlGroupMissing') = 'number'
+                AND abs((wcc.compare_config->'defaultValueIfControlGroupMissing')::text::numeric) <= 1e300, false)
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+              END as default_value
           FROM with_compare_config wcc
       ),
       with_threshold_calculations AS (
@@ -1700,8 +1755,8 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
           jsonb_build_object('test', test_all_missing, 'control', control_all_missing) as all_missing,
           jsonb_build_object('test', test_last, 'control', control_last) as last_value,
           jsonb_build_object('test', NOT COALESCE(test_all_missing, true), 'control', NOT COALESCE(control_all_missing, true)) as exists_flags,
-          false as uses_default_value,
-          NULL as default_value,
+          (uses_default_value AND control_exists) as uses_default_value,
+          CASE WHEN uses_default_value AND control_exists THEN default_value END as default_value,
           compare_config,
           compare_config->'metricClassification' as metric_classification,
           statistic,

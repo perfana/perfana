@@ -2298,7 +2298,8 @@ export class ReportDataFetcherService {
           metric_name,
           unit,
           conclusion,
-          statistic
+          statistic,
+          uses_default_value
         FROM ds_adapt_results
         WHERE test_run_id = $1
         ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
@@ -2322,6 +2323,7 @@ export class ReportDataFetcherService {
           conclusionLabel,
           testValue,
           controlValue,
+          ...(row.uses_default_value === true ? { controlIsConfigured: true } : {}),
           difference: diff,
           differencePercent: controlValue && controlValue !== 0 && diff != null
             ? (diff / Math.abs(controlValue)) * 100

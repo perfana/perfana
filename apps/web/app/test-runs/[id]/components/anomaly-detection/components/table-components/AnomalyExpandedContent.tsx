@@ -430,7 +430,7 @@ export function AnomalyExpandedContent({
                         configSource: existingConfig.source ?? 'global'
                         // Assembled field by field out of `unknown` drawer data, so this
                         // is a construction, not a narrowing — TS needs the unknown hop.
-                      } as unknown as { ignore?: boolean; metricClassification?: { classification: string; higherIsBetter: boolean }; thresholds?: { aggregation: string; percentageThreshold: number; iqrThreshold: number; absoluteThreshold: number }; configSource?: string };
+                      } as unknown as { ignore?: boolean; metricClassification?: { classification: string; higherIsBetter: boolean }; thresholds?: { aggregation: string; percentageThreshold: number; iqrThreshold: number; absoluteThreshold: number }; defaultValueIfControlGroupMissing?: number | null; configSource?: string };
                     })()
                   }}
                   onSave={onConfigSave}

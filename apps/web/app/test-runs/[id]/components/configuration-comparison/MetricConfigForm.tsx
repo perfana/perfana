@@ -43,6 +43,8 @@ export interface MetricConfigData {
       iqrThreshold: number | null;
       absoluteThreshold: number | null;
     };
+    /** Absent or null: off, the series reads incomparable when the baseline has no row for it. */
+    defaultValueIfControlGroupMissing?: number | null;
     configSource?: string;
   };
 }
@@ -62,6 +64,7 @@ interface MetricConfigFormProps {
         iqrThreshold: number | null;
         absoluteThreshold: number | null;
       };
+      defaultValueIfControlGroupMissing: number | null;
     },
     scope: ConfigScope
   ) => Promise<void>;
@@ -106,6 +109,8 @@ export default function MetricConfigForm({
   const [percentageThreshold, setPercentageThreshold] = useState<string>('');
   const [iqrThreshold, setIqrThreshold] = useState<string>('');
   const [absoluteThreshold, setAbsoluteThreshold] = useState<string>('');
+  // Text, so an empty field means "off" and a typed 0 means "compare against 0".
+  const [defaultValue, setDefaultValue] = useState<string>('');
 
   // Initialize form state from current config
   useEffect(() => {
@@ -136,6 +141,8 @@ export default function MetricConfigForm({
       setPercentageThreshold(config.thresholds?.percentageThreshold?.toString() || '');
       setIqrThreshold(config.thresholds?.iqrThreshold?.toString() || '');
       setAbsoluteThreshold(config.thresholds?.absoluteThreshold?.toString() || '');
+      const storedDefault = configData.currentConfig?.defaultValueIfControlGroupMissing;
+      setDefaultValue(typeof storedDefault === 'number' ? String(storedDefault) : '');
 
 
       // Determine scope based on existing config source or metric availability
@@ -153,6 +160,13 @@ export default function MetricConfigForm({
   }, [configData?.rowKey]);
 
   const handleSave = async () => {
+    const trimmedDefault = defaultValue.trim();
+    const parsedDefault = trimmedDefault === '' ? null : Number(trimmedDefault);
+    if (parsedDefault !== null && !Number.isFinite(parsedDefault)) {
+      setError('The value to compare against without a baseline must be a number, or empty to leave it off.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -169,6 +183,7 @@ export default function MetricConfigForm({
           iqrThreshold: iqrThreshold ? parseFloat(iqrThreshold) : null,
           absoluteThreshold: absoluteThreshold ? parseFloat(absoluteThreshold) : null,
         },
+        defaultValueIfControlGroupMissing: parsedDefault,
       };
 
       await onSave(configData?.rowKey || '', config, scope);
@@ -391,6 +406,29 @@ export default function MetricConfigForm({
             />
           </Grid>
         </Grid>
+      </Paper>
+
+      {/* No baseline */}
+      <Paper sx={{ p: 2 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+          When the baseline has no data
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          A series with no data in any baseline run is reported as incomparable. Enter a value to compare it
+          against instead, for example 0 for an error count that should stay at zero. The thresholds above
+          apply, except the IQR threshold, which needs a baseline. A baseline with too few samples is still
+          reported as incomparable.
+        </Typography>
+        <TextField
+          label="Compare against"
+          type="number"
+          size="small"
+          value={defaultValue}
+          onChange={(e) => setDefaultValue(e.target.value)}
+          placeholder="Off"
+          helperText="Leave empty to report incomparable"
+          sx={{ maxWidth: 260 }}
+        />
       </Paper>
 
       {/* Action Buttons */}

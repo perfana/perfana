@@ -51,6 +51,6 @@ export function forcedFields(d: CompareTemplateDefinition): string[] {
   if (has('iqrThreshold')) out.push(`IQR × ${d.iqrThreshold}`);
   if (has('aggregation')) out.push(optionLabel(AGGREGATION_OPTIONS, d.aggregation!));
   if (has('minSampleCount')) out.push(`At least ${d.minSampleCount} sample${d.minSampleCount === 1 ? '' : 's'}`);
-  if (has('defaultValueIfControlGroupMissing')) out.push(`Default without control group ${d.defaultValueIfControlGroupMissing}`);
+  if (has('defaultValueIfControlGroupMissing')) out.push(`Without a baseline, compared with ${d.defaultValueIfControlGroupMissing}`);
   return out;
 }

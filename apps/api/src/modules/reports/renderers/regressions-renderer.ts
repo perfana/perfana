@@ -129,7 +129,10 @@ export class RegressionsRenderer {
     const rows = metrics.map((m) => {
       const status = statusFromConclusion(m.conclusionLabel);
       const testStr = formatMetricValue(m.testValue, m.unit);
-      const controlStr = formatMetricValue(m.controlValue, m.unit);
+      // A configured value stands in for a baseline the series never had; say so, so nobody goes
+      // looking for control runs that hold it.
+      const controlStr = formatMetricValue(m.controlValue, m.unit) +
+        (m.controlIsConfigured ? `<div style="font-size: 8pt; color: ${REPORT_COLORS.mutedInk};">configured, no baseline</div>` : '');
 
       return `
         <tr style="background: white;">

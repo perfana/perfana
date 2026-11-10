@@ -136,7 +136,6 @@ describe('TestRunsMetricsService', () => {
               classification: 'RED_rate',
               higherIsBetter: true,
             },
-            defaultValueIfControlGroupMissing: 0,
           },
           created_by: 'system:golden-path',
         }),
@@ -260,7 +259,6 @@ describe('TestRunsMetricsService', () => {
       const seededData = {
         thresholds: { aggregation: 'mean', percentageThreshold: 0.15, iqrThreshold: 2, absoluteThreshold: null, minSampleCount: 1 },
         metricClassification: { classification: 'RED_duration', higherIsBetter: false },
-        defaultValueIfControlGroupMissing: 0,
       };
 
       it('merges the template into a row the perf-test pipeline seeded, keeping the worker keys', async () => {
@@ -689,7 +687,8 @@ describe('TestRunsMetricsService', () => {
         absoluteThreshold: null,
         percentageThreshold: 0.15,
       });
-      expect(createdArg.config_data.defaultValueIfControlGroupMissing).toBe(0);
+      // Absent, never 0: ADAPT reads it since v0.2.97.66, and a 0 would judge new series against zero.
+      expect(createdArg.config_data).not.toHaveProperty('defaultValueIfControlGroupMissing');
     });
 
     /**
@@ -808,7 +807,6 @@ describe('TestRunsMetricsService', () => {
         const base = {
           thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
           metricClassification: { classification: 'none', higherIsBetter: null },
-          defaultValueIfControlGroupMissing: 0,
         };
         templateRepo.find.mockResolvedValue([tmpl({ id: 'p-tmpl', profile_id: 'p-jvm', organization_id: 'org-a', config_overrides: { absThreshold: 3 } })] as any);
         templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
@@ -842,7 +840,6 @@ describe('TestRunsMetricsService', () => {
         const base = {
           thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
           metricClassification: { classification: 'none', higherIsBetter: null },
-          defaultValueIfControlGroupMissing: 0,
         };
         templateRepo.find.mockResolvedValue([tmpl({ id: 'p-tmpl', profile_id: 'p-jvm', organization_id: 'org-a', config_overrides: { absThreshold: 3 } })] as any);
         templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
@@ -874,7 +871,6 @@ describe('TestRunsMetricsService', () => {
         const base = {
           thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
           metricClassification: { classification: 'none', higherIsBetter: null },
-          defaultValueIfControlGroupMissing: 0,
         };
         const errorSpy = jest.spyOn((service as any).logger, 'error');
         templateRepo.find.mockResolvedValue([]);
@@ -900,7 +896,6 @@ describe('TestRunsMetricsService', () => {
         const base = {
           thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
           metricClassification: { classification: 'none', higherIsBetter: null },
-          defaultValueIfControlGroupMissing: 0,
         };
         templateRepo.find.mockResolvedValue([]);
         compareConfigRepo.find.mockResolvedValue([
@@ -934,7 +929,6 @@ describe('TestRunsMetricsService', () => {
       const base = {
         thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
         metricClassification: { classification: 'none', higherIsBetter: null },
-        defaultValueIfControlGroupMissing: 0,
       };
       const tmpl = (over: Record<string, unknown>) => ({
         id: 'tmpl', system_under_test_id: null, dashboard_uid: 'jvm-prod-1', regex: false, panel_id: 7,

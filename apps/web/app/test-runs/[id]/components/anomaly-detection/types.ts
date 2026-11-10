@@ -18,6 +18,11 @@ export interface AnomalyData {
   conclusion_label: string;
   test_value: string;
   control_group_value: string;
+  /**
+   * The baseline had no data for this series, so control_group_value is the compare config's
+   * defaultValueIfControlGroupMissing rather than a measured value. Absent on an older API.
+   */
+  uses_default_value?: boolean;
   difference: string | null;
   application_dashboard_id: string;
   metrics_source_id?: string;
@@ -189,7 +194,8 @@ export interface ConfigFormData {
     iqrThreshold?: number;
     absoluteThreshold?: number;
   };
-  defaultValueIfControlGroupMissing?: number;
+  /** null or absent: off. */
+  defaultValueIfControlGroupMissing?: number | null;
   [key: string]: unknown;
 }
 

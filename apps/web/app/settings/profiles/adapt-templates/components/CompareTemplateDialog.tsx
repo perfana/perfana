@@ -2,9 +2,6 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -26,7 +23,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { ExpandMore, Lock } from '@mui/icons-material';
+import { Lock } from '@mui/icons-material';
 import { AGGREGATION_OPTIONS, CLASSIFICATION_OPTIONS } from '@/lib/compare-config-options';
 import type { CompareTemplateDefinition, CompareTemplateScopeKind } from '@/lib/compare-templates';
 import { toDefinition, toFormState, type Direction, type TemplateFormErrors, type TemplateFormState } from '../template-form';
@@ -374,30 +371,16 @@ export function CompareTemplateDialog({
             );
           })()}
 
-          <Accordion
-            disableGutters
-            elevation={0}
-            defaultExpanded={state.defaultValueIfControlGroupMissing.set}
-            sx={{ mt: 1, '&:before': { display: 'none' }, border: 1, borderColor: 'divider', borderRadius: 1 }}
-            slotProps={{ transition: { unmountOnExit: true } }}
-          >
-            <AccordionSummary expandIcon={<ExpandMore />}>
-              <Typography variant="body2">Stored but not yet read by ADAPT</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1 }}>
-                Kept so a template round-trips through the YAML file unchanged. ADAPT does not apply it yet.
-              </Typography>
-              {(() => {
-                const f = numberField('defaultValueIfControlGroupMissing');
-                return (
-                  <OverrideRow label="Default without a control group" set={f.set} disabled={locked} onSet={f.onSet}>
-                    {numberInput(f, 'Value', errors.defaultValueIfControlGroupMissing)}
-                  </OverrideRow>
-                );
-              })()}
-            </AccordionDetails>
-          </Accordion>
+          {(() => {
+            const f = numberField('defaultValueIfControlGroupMissing');
+            return (
+              <OverrideRow label="Compare against, with no baseline" set={f.set} disabled={locked} onSet={f.onSet}>
+                {numberInput(f, 'Value', errors.defaultValueIfControlGroupMissing, {
+                  helper: 'A series no baseline run has is compared with this value instead of reading as incomparable',
+                })}
+              </OverrideRow>
+            );
+          })()}
         </Paper>
       </DialogContent>
       <DialogActions>

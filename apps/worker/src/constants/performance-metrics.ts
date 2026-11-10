@@ -211,11 +211,6 @@ export const DEFAULT_PERFORMANCE_THRESHOLDS = {
 } as const;
 
 /**
- * Default value to use if control group is missing
- */
-export const DEFAULT_VALUE_IF_CONTROL_GROUP_MISSING = 0;
-
-/**
  * Metric name templates for different performance metrics
  * Used to generate consistent metric names in ds_metrics table
  *

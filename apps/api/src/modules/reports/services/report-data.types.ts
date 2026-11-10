@@ -308,6 +308,8 @@ export interface RegressionsMetric {
   conclusionLabel: string;
   testValue: number | null;
   controlValue: number | null;
+  /** controlValue is the compare config's defaultValueIfControlGroupMissing, not a measured baseline. */
+  controlIsConfigured?: boolean;
   difference: number | null;
   differencePercent: number | null;
 }
@@ -343,6 +345,7 @@ export interface AdaptResultRow {
   unit: string | null;
   conclusion: Record<string, unknown> | null;
   statistic: Record<string, unknown> | null;
+  uses_default_value?: boolean | null;
 }
 
 /** Raw transaction row from database query */
