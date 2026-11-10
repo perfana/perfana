@@ -76,7 +76,7 @@ const THRESHOLD_FIELDS: Record<string, string> = {
   minSampleCount: 'minSampleCount',
 };
 /** Template override keys stored at the top level of `config_data`. */
-const TOP_LEVEL_FIELDS = ['ignore', 'ignoreMeanDiffSmallerThan', 'defaultValueIfControlGroupMissing'];
+const TOP_LEVEL_FIELDS = ['ignore', 'defaultValueIfControlGroupMissing'];
 
 /**
  * A deep copy of a jsonb value. Not `structuredClone`: under Jest that returns objects from Node's

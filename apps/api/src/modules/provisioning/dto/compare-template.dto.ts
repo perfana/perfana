@@ -93,11 +93,6 @@ export class CompareTemplateDefinitionDto {
   @IsBoolean()
   ignore?: boolean;
 
-  @ApiPropertyOptional({ minimum: 0, description: 'Stored, but ADAPT does not read it yet.' })
-  @IsOptional()
-  @IsNumber()
-  ignoreMeanDiffSmallerThan?: number;
-
   @ApiPropertyOptional({ minimum: 0, maximum: 1, description: 'A fraction, as stored: 0.15 is 15 %.' })
   @IsOptional()
   @IsNumber()

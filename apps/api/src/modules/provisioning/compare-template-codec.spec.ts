@@ -124,6 +124,12 @@ describe('compare-template codec', () => {
         .toEqual({ minSampleCount: stored });
     });
 
+    it('ignores the retired ignoreMeanDiffSmallerThan with a warning pointing at absThreshold', () => {
+      const parsed = ok({ panelId: 1, metricClassification: 'x', ignoreMeanDiffSmallerThan: 5 });
+      expect(parsed.values.config_overrides).toEqual({});
+      expect(parsed.warnings).toEqual([expect.stringMatching(/field "ignoreMeanDiffSmallerThan" ignored: .*use absThreshold/)]);
+    });
+
     it('ignores a non-numeric minSampleCount with a warning instead of failing the item', () => {
       const parsed = ok({ panelId: 1, metricClassification: 'x', minSampleCount: 'x' });
       expect(parsed.values.config_overrides).toEqual({});
@@ -401,7 +407,6 @@ describe('compare-template codec', () => {
         '    metricName: heap used',
         '    metricClassification: USE_saturation',
         '    ignore: true',
-        '    ignoreMeanDiffSmallerThan: 5',
         '    iqrThreshold: 3',
         '    defaultValueIfControlGroupMissing: 0',
         '',

@@ -38,7 +38,6 @@ export interface TemplateFormState {
   /** `none` forces "no absolute threshold" (`absThreshold: null`). */
   absThreshold: NumberField & { none: boolean };
   minSampleCount: NumberField;
-  ignoreMeanDiffSmallerThan: NumberField;
   defaultValueIfControlGroupMissing: NumberField;
 }
 
@@ -74,7 +73,6 @@ export function toFormState(definition?: CompareTemplateDefinition): TemplateFor
     iqrThreshold: numberField(d.iqrThreshold),
     absThreshold: { ...numberField(d.absThreshold), set: has('absThreshold'), none: has('absThreshold') && d.absThreshold === null },
     minSampleCount: numberField(d.minSampleCount),
-    ignoreMeanDiffSmallerThan: numberField(d.ignoreMeanDiffSmallerThan),
     defaultValueIfControlGroupMissing: numberField(d.defaultValueIfControlGroupMissing),
   };
 }
@@ -124,7 +122,7 @@ export function toDefinition(state: TemplateFormState): { definition?: CompareTe
 
   /** A set numeric field: the stored number while untouched, else the typed one, validated. */
   const read = (
-    key: 'percentageThreshold' | 'iqrThreshold' | 'absThreshold' | 'minSampleCount' | 'ignoreMeanDiffSmallerThan' | 'defaultValueIfControlGroupMissing',
+    key: 'percentageThreshold' | 'iqrThreshold' | 'absThreshold' | 'minSampleCount' | 'defaultValueIfControlGroupMissing',
     check: (n: number) => string | null,
     store: (n: number) => number = (n) => n,
   ): number | undefined => {
@@ -157,10 +155,6 @@ export function toDefinition(state: TemplateFormState): { definition?: CompareTe
   if (state.minSampleCount.set) {
     const v = read('minSampleCount', (n) => (!Number.isInteger(n) || n < 1 ? 'A whole number of at least 1' : null));
     if (v !== undefined) def.minSampleCount = v;
-  }
-  if (state.ignoreMeanDiffSmallerThan.set) {
-    const v = read('ignoreMeanDiffSmallerThan', (n) => (n < 0 ? 'At least 0' : null));
-    if (v !== undefined) def.ignoreMeanDiffSmallerThan = v;
   }
   if (state.defaultValueIfControlGroupMissing.set) {
     const v = read('defaultValueIfControlGroupMissing', () => null);

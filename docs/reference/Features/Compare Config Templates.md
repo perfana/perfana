@@ -145,8 +145,11 @@ to the default still counts. Leaving a field out leaves the row's own value alon
 | `aggregation` | `mean`, `median`, `min`, `max`, `last`, `q10`, `q25`, `q75`, `q90`, `q95`, `q99` | `thresholds.aggregation` |
 | `minSampleCount` | number; floored, at least 1 | `thresholds.minSampleCount` |
 | `ignore` | `true` or `false` | `ignore` |
-| `ignoreMeanDiffSmallerThan` | number of at least 0 | `ignoreMeanDiffSmallerThan` (stored, but ADAPT does not read it yet) |
-| `defaultValueIfControlGroupMissing` | number | `defaultValueIfControlGroupMissing` (stored, but ADAPT does not read it yet) |
+| `defaultValueIfControlGroupMissing` | number | `defaultValueIfControlGroupMissing` (stored, but ADAPT does not apply it yet; filed in TODOS.md) |
+
+`ignoreMeanDiffSmallerThan` was removed in v0.2.97.64: ADAPT never read it, and `absThreshold` is how a
+small difference is ignored. A file item that still names it is provisioned without it, with a warning
+saying so; the API answers 400 for a body that sends it.
 
 `higherIsBetter: null` is how a template forces "no direction", which ADAPT can never report as a
 regression. Leaving `higherIsBetter` out keeps whatever direction the row already had.
