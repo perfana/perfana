@@ -24,6 +24,9 @@ this file ([Managing templates in the UI](#managing-templates-in-the-ui)).
 Since v0.2.97.57 a template can belong to a **profile**, and then applies only to runs whose tags match
 that profile ([Profile templates](#profile-templates)).
 
+Since v0.2.97.67 a row on the anomaly card can be saved as a template
+([Save as template from the anomaly card](#save-as-template-from-the-anomaly-card)).
+
 ## The file
 
 The API reads `template_ds_compare_configs.yaml` from `PROVISIONING_DIR` (default
@@ -236,6 +239,31 @@ next completed run. With none, a row the template system inserted (since v0.2.97
 ADAPT's default applies again, and any other row is rebuilt from its own base configuration, which for a
 row from before v0.2.97.54 keeps the template's values (see the table under
 [When templates are applied](#when-templates-are-applied)).
+
+### Save as template from the anomaly card
+
+Since v0.2.97.67 the ADAPT settings form of an anomaly-card row (the gear, **Configure Metric**) has
+**Save as template**. It turns the values in the form, unsaved edits included, into a template, so a
+threshold you tuned on one run reaches every workload with that panel. The row itself is not changed: it
+stays a hand edit, and the workload it came from keeps exactly what you saved (or did not save) there.
+
+The dialog asks three things:
+
+- **Save to:** a profile this run matches (it shares a tag with the run, in the run's organization),
+  **All runs in &lt;the run's organization&gt;**, or, for a global admin, **All runs on this install**. A
+  matching profile is the default. Writing needs the same rights as in the templates table.
+- **Dashboards:** **This dashboard** (its exact uid, with the panel id) or **Every dashboard with a panel
+  titled "…"** (no uid; the panel title is the identity). A Dynatrace host and a performance-test scenario
+  each have their own dashboard uid, so for those the panel title is the default. A row with no recorded
+  uid can only use the title.
+- **Series** (only on a row with a series name): every series on the panel, or only this one. The form's
+  **Single Metric** scope makes "only this one" the default.
+
+The template forces the classification, direction, aggregation, the percentage and IQR thresholds when
+set, and the absolute threshold (`null` when empty). It forces **Ignore** only when on, and the
+no-baseline value only when set, because the form cannot tell "off" from "not chosen" for those. A
+template that already has the same dashboard, panel and series in that scope is refused with the
+server's 409, shown in the dialog; edit that template in the table instead.
 
 ### The API
 

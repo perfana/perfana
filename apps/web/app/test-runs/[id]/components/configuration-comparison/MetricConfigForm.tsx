@@ -20,6 +20,8 @@ import {
 import {} from '@/lib/api';
 import { AGGREGATION_OPTIONS, CLASSIFICATION_OPTIONS } from '@/lib/compare-config-options';
 import type { ConfigScope } from '../anomaly-detection/types';
+import { PromoteTemplateDialog } from './PromoteTemplateDialog';
+import type { PromotedConfig } from './promote-template';
 
 export interface MetricConfigData {
   rowKey: string;
@@ -31,6 +33,11 @@ export interface MetricConfigData {
   panelTitle: string;
   metricName: string | null;
   dashboardLabel: string;
+  /** The row's dashboard uid (from its ADAPT result); without it a template can only match by panel title. */
+  dashboardUid?: string | null;
+  /** The run's organization and tags: they decide which profiles "Save as template" offers. */
+  organizationId?: string | null;
+  runTags?: string[];
   currentConfig?: {
     ignore?: boolean;
     metricClassification?: {
@@ -69,6 +76,8 @@ interface MetricConfigFormProps {
     scope: ConfigScope
   ) => Promise<void>;
   onCancel: () => void;
+  /** Shows "Save as template" when given; called with a confirmation once one is created. */
+  onTemplateSaved?: (message: string) => void;
 }
 
 // Shared with the ADAPT template dialog (settings/profiles/adapt-templates), so both offer one list.
@@ -80,6 +89,7 @@ export default function MetricConfigForm({
   configData,
   onSave,
   onCancel,
+  onTemplateSaved,
 }: MetricConfigFormProps) {
   // Form state - determine scope based on existing config source or metricName availability
   const [scope, setScope] = useState<ConfigScope>(() => {
@@ -96,6 +106,8 @@ export default function MetricConfigForm({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The form values "Save as template" was opened with; null while its dialog is closed.
+  const [promoting, setPromoting] = useState<PromotedConfig | null>(null);
 
   // Ignore toggle state
   const [ignore, setIgnore] = useState<boolean>(false);
@@ -159,31 +171,54 @@ export default function MetricConfigForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configData?.rowKey]);
 
-  const handleSave = async () => {
+  /** The form's values, or null (with the error shown) when the no-baseline value is not a number. */
+  const readValues = (): PromotedConfig | null => {
     const trimmedDefault = defaultValue.trim();
     const parsedDefault = trimmedDefault === '' ? null : Number(trimmedDefault);
     if (parsedDefault !== null && !Number.isFinite(parsedDefault)) {
       setError('The value to compare against without a baseline must be a number, or empty to leave it off.');
-      return;
+      return null;
     }
+    return {
+      ignore,
+      classification,
+      higherIsBetter,
+      aggregation,
+      percentageThreshold: percentageThreshold ? parseFloat(percentageThreshold) : null,
+      iqrThreshold: iqrThreshold ? parseFloat(iqrThreshold) : null,
+      absoluteThreshold: absoluteThreshold ? parseFloat(absoluteThreshold) : null,
+      defaultValueIfControlGroupMissing: parsedDefault,
+    };
+  };
+
+  const handlePromote = () => {
+    const values = readValues();
+    if (!values) return;
+    setError(null);
+    setPromoting(values);
+  };
+
+  const handleSave = async () => {
+    const values = readValues();
+    if (!values) return;
 
     setSaving(true);
     setError(null);
 
     try {
       const config = {
-        ignore,
+        ignore: values.ignore,
         metricClassification: {
-          classification,
-          higherIsBetter,
+          classification: values.classification,
+          higherIsBetter: values.higherIsBetter,
         },
         thresholds: {
-          aggregation,
-          percentageThreshold: percentageThreshold ? parseFloat(percentageThreshold) : null,
-          iqrThreshold: iqrThreshold ? parseFloat(iqrThreshold) : null,
-          absoluteThreshold: absoluteThreshold ? parseFloat(absoluteThreshold) : null,
+          aggregation: values.aggregation,
+          percentageThreshold: values.percentageThreshold,
+          iqrThreshold: values.iqrThreshold,
+          absoluteThreshold: values.absoluteThreshold,
         },
-        defaultValueIfControlGroupMissing: parsedDefault,
+        defaultValueIfControlGroupMissing: values.defaultValueIfControlGroupMissing,
       };
 
       await onSave(configData?.rowKey || '', config, scope);
@@ -433,6 +468,17 @@ export default function MetricConfigForm({
 
       {/* Action Buttons */}
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', pt: 1 }}>
+        {onTemplateSaved && (
+          <Button
+            variant="text"
+            onClick={handlePromote}
+            disabled={saving}
+            sx={{ mr: 'auto' }}
+            title="Make these settings a template for other workloads; this row is not changed"
+          >
+            Save as template
+          </Button>
+        )}
         <Button
           variant="outlined"
           onClick={onCancel}
@@ -449,6 +495,27 @@ export default function MetricConfigForm({
           {saving ? 'Saving...' : 'Save Configuration'}
         </Button>
       </Box>
+
+      {onTemplateSaved && promoting && (
+        <PromoteTemplateDialog
+          open
+          source={{
+            dashboardUid: configData.dashboardUid,
+            dashboardLabel: configData.dashboardLabel,
+            panelId: configData.panelId,
+            panelTitle: configData.panelTitle,
+            metricName: configData.metricName,
+          }}
+          config={promoting}
+          formScope={scope}
+          run={{ organizationId: configData.organizationId, tags: configData.runTags }}
+          onClose={() => setPromoting(null)}
+          onSaved={(label) => {
+            setPromoting(null);
+            onTemplateSaved(`Saved as an ADAPT template in ${label}. It applies from the next completed run.`);
+          }}
+        />
+      )}
     </Box>
   );
 }

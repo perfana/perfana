@@ -572,6 +572,27 @@ Changed at /ship review (2026-11-09), each decided by the user:
     analysis starts, so a differently tagged completion in between, or a later re-evaluate, judges a run on
     another set. Recording the run's matched profiles and re-applying under the scope lock is filed.
 
+## Implementation deviations (PR 3, Promote, 2026-11-10)
+
+PR 3 (v0.2.97.67) ships §6 as a web-only change: the `/compare-templates` and
+`/profiles/:id/compare-templates` POST routes from PR 2 and 2b already validate, scope, authorize and
+map a key collision to 409, so Promote is a client of them and adds no API. It differs from §6 here:
+
+1. **The dashboard uid comes from the row's ADAPT result** (`ds_adapt_results.dashboard_uid`, already on
+   every anomaly row), not from a lookup of `application_dashboard_id`. A row without one can only be
+   promoted by panel title.
+2. **"Profiles matching this run"** are the run organization's profiles (`GET /profiles?organizationId=`)
+   that `profileMatchesRun` matches against the run's tags, the applier's own rule. The run's organization
+   is `test_runs.organization_id`; the applier reads the dashboard's, and the two agree whenever a run's
+   organization is its system's (the shared matcher's docblock).
+3. **The template is built from the form's current values, unsaved edits included,** and the row is not
+   saved. `ignore` is named only when on and the no-baseline value only when set: the form writes both on
+   every save and cannot express "not chosen", so naming them off would override other panels' own setting.
+   `absThreshold: null` is named, since an empty absolute threshold is the tuned value.
+4. **"Every dashboard with this panel title" is the default** for a `dynatrace-` or
+   `performance-test-metrics-` uid, for the form's "This Panel On All Dashboards" scope, and for a row with no
+   uid. The title template carries no panel id: a panel id is unique only within one dashboard.
+
 ## Open Questions
 
 1. **`percentageThreshold` unit in YAML.** `config_data` stores a fraction (0.15), the form shows a
