@@ -92,8 +92,9 @@ describe('control_exists carries the sample floor', () => {
     const results = controlExistsColumn(new AdaptResultsSQLBuilder().buildAdaptResultsSQL('$1', '', 1));
     const tracked = controlExistsColumn(new TrackedResultsSQLBuilder().buildTrackedResultsSQL('$1', 1));
     expect(results).toBe(tracked);
-    // the deployment floor is the COALESCE fallback on both counts, never a hardcoded 2
-    expect(results.match(/END, 4\)\)/g)).toHaveLength(2);
+    // the deployment floor is the COALESCE fallback on both counts, and again on the test
+    // count of the default-value arm, never a hardcoded 2
+    expect(results.match(/END, 4\)\)/g)).toHaveLength(3);
     expect(results).not.toContain('END, 2))');
   });
 

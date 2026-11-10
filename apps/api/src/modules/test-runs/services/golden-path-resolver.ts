@@ -126,5 +126,6 @@ export function rebuildConfig(
 export const INSERT_BASE: Readonly<Record<string, unknown>> = Object.freeze({
   thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
   metricClassification: { classification: 'none', higherIsBetter: null },
-  defaultValueIfControlGroupMissing: 0,
+  // No defaultValueIfControlGroupMissing: ADAPT reads it since v0.2.97.65, so absent means "off".
+  // Migration 1824 stripped the 0 earlier versions stored here and in config_data.
 });

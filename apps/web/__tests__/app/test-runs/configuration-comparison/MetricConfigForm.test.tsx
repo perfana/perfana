@@ -492,6 +492,40 @@ describe('MetricConfigForm', () => {
     });
   });
 
+  describe('Value to compare against with no baseline', () => {
+    const save = async () => {
+      mockOnSave.mockResolvedValue(undefined);
+      fireEvent.click(screen.getByText('Save Configuration'));
+    };
+
+    it('saves null when the field is left empty, which keeps the series incomparable', async () => {
+      render(<MetricConfigForm {...defaultProps} />);
+      await save();
+      await waitFor(() =>
+        expect(mockOnSave).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ defaultValueIfControlGroupMissing: null }), 'metric'),
+      );
+    });
+
+    it('saves a typed 0 as 0, not as empty', async () => {
+      render(<MetricConfigForm {...defaultProps} />);
+      fireEvent.change(screen.getByLabelText('Compare against'), { target: { value: '0' } });
+      await save();
+      await waitFor(() =>
+        expect(mockOnSave).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ defaultValueIfControlGroupMissing: 0 }), 'metric'),
+      );
+    });
+
+    it('shows the stored value, including 0', () => {
+      render(
+        <MetricConfigForm
+          {...defaultProps}
+          configData={{ ...mockConfigData, currentConfig: { ...mockConfigData.currentConfig!, defaultValueIfControlGroupMissing: 0 } }}
+        />,
+      );
+      expect(screen.getByLabelText('Compare against')).toHaveValue(0);
+    });
+  });
+
   describe('Form Saving', () => {
     it('should call onSave with correct data when save button is clicked', async () => {
       mockOnSave.mockResolvedValue(undefined);
@@ -516,6 +550,7 @@ describe('MetricConfigForm', () => {
               iqrThreshold: 2,
               absoluteThreshold: null,
             },
+            defaultValueIfControlGroupMissing: null,
           },
           'metric'
         );
@@ -926,6 +961,7 @@ describe('MetricConfigForm', () => {
               iqrThreshold: 2.5,
               absoluteThreshold: 100,
             },
+            defaultValueIfControlGroupMissing: null,
           },
           'metric'
         );

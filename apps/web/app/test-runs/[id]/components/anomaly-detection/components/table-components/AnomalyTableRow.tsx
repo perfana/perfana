@@ -234,6 +234,13 @@ export function AnomalyTableRow({
         fontFamily: 'monospace'
       }}>
         {row.control_group_value ? formatValueWithUnit(parseFloat(row.control_group_value), row.unit || undefined) : '-'}
+        {row.uses_default_value && (
+          <Tooltip title="No baseline run has data for this series, so it is compared with the value set in its ADAPT settings">
+            <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', fontFamily: 'inherit' }}>
+              configured
+            </Typography>
+          </Tooltip>
+        )}
       </Typography>
 
       {/* Difference */}

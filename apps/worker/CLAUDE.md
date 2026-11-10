@@ -1042,6 +1042,34 @@ verdicts until the group fills. And the request id is 219, not 210, because 210-
 routed through the sampler-URL rollup — `isRequestPanel` lists the stored ids (201-209, 219-220) for
 the same reason.
 
+### `defaultValueIfControlGroupMissing` stands in for an ABSENT baseline, never a thin one
+
+Since v0.2.97.65 a compare config may carry `defaultValueIfControlGroupMissing`, and both ADAPT
+builders (`sql-builder.ts`, `tracked-results-sql-builder.ts`) substitute it for `control_stat_value`
+when the baseline has no row for the series. The expressions live once, in `sql-fragments.ts`
+(`usesDefaultValueExpr`, `wrapControlStatValue`, `buildDefaultValueColumns`,
+`buildStoredDefaultValueColumns`). Five things that are easy to undo:
+
+1. **Only `NOT control_row_exists`.** A row with too few samples stays `incomparable`: the sample
+   floor reports a thin baseline, and a constant in its place would hide exactly that. The test
+   side's floor still applies in the default arm of `control_exists`.
+2. **The expression is wrapped in `COALESCE(…, false)`.** `jsonb_typeof(NULL)` is NULL, so with the key
+   absent `control_exists` became `false OR NULL` = NULL, which skips the `incomparable` branch and
+   lands on `no difference`, and the NOT NULL `uses_default_value` insert fails. The probe that
+   found it is in the PR; the unit spec pins the wrapper.
+3. **Only an explicit number counts.** A string, a JSON null or a value outside float8's range
+   (`abs > 1e300`) is off, rather than a cast error that aborts the batch. Three writers used to
+   store `0` as "unset" (the anomaly card's `|| 0`, the applier's `INSERT_BASE`, the perf-test
+   seed); they no longer write the key, and migration 1824 stripped the stored 0s. A new writer
+   must not default it, or every new series on its panels is judged against that value.
+4. **The IQR check is invalid against a default** (`control_iqr` is NULL with no row), the
+   percentage and absolute checks are not. With a default of 0 the percentage check reads any
+   nonzero test value as a difference; `pctDiff` stays NULL (division guard).
+5. **`uses_default_value` is stored only when the default reached a verdict** (`AND control_exists`),
+   so a row that took the default but missed the test-side floor is not badged. The API returns it as
+   `uses_default_value` on the anomaly rows and the report fetcher as `controlIsConfigured`; both
+   UIs mark the control value "configured".
+
 ### ADAPT runs with JIT off, on purpose
 
 `AdaptPipeline` sets `jit = off` for its own transaction (`set_config('jit','off',true)`, first

@@ -140,7 +140,6 @@ describe('golden-path resolver', () => {
       expect(rebuildConfig({ ...INSERT_BASE }, t({ id: 'x', metric_classification: 'RED_rate', higher_is_better: true }))).toEqual({
         thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
         metricClassification: { classification: 'RED_rate', higherIsBetter: true },
-        defaultValueIfControlGroupMissing: 0,
       });
     });
 
@@ -152,7 +151,7 @@ describe('golden-path resolver', () => {
      *   without the resolver mapping it;
      * why_new=the cases above name 5 of the 9 keys and nothing ties the resolver to the codec's list;
      * seam=none;
-     * no_claim=that the worker reads each key (defaultValueIfControlGroupMissing has no worker reader yet); pure
+     * no_claim=that the worker reads each key; pure
      *   functions, unit only
      */
     describe('agrees with the codec on every override key', () => {

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.65] - 2026-11-10
+
+### Added
+- **ADAPT can compare a series that has no baseline with a value you set.** A series that no baseline run has (a new transaction, a new pod) was always reported as incomparable, so it could never fail a run however far it moved. Set **When the baseline has no data → Compare against** in a panel's or series' ADAPT settings on the anomaly card, or `defaultValueIfControlGroupMissing` in an ADAPT template, and ADAPT compares the run with that value instead: for example 0 for an error count that should stay at zero. The percentage and absolute thresholds apply; the IQR threshold needs a baseline and is skipped. A baseline that has the series with too few samples is still reported as incomparable. The anomaly table and the report's Regressions section mark such a control value as configured.
+
+### Changed
+- **Configs no longer carry a default of 0 for that setting.** The anomaly card, the ADAPT template applier and the performance-test pipeline wrote `defaultValueIfControlGroupMissing: 0` on every config, though nothing read it. Leaving it out now means off. Migration 1824 removes the stored 0s, so existing panels keep reporting a series without a baseline as incomparable; it does not mark any ADAPT result stale, since no verdict changes. A value other than 0, set through the API, and a template that names the setting, are kept and take effect from this version. Run the migration before the new worker: a worker that runs first compares new series on those panels with 0 until it does.
+
 ## [0.2.97.64] - 2026-11-10
 
 ### Removed

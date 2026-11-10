@@ -119,7 +119,7 @@ export interface DsCompareConfigRecord {
       iqrThreshold: number;
       absoluteThreshold: number | null;
     };
-    defaultValueIfControlGroupMissing: number;
+    defaultValueIfControlGroupMissing?: number;
   };
 }
 

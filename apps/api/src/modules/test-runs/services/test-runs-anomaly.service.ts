@@ -170,7 +170,8 @@ export class TestRunsAnomalyService {
           'is_stale',
           'stale_reason',
           'stale_at',
-          'config_hash_used'
+          'config_hash_used',
+          'uses_default_value'
         ],
         relations: ['metrics_source'],
         order: {
@@ -252,6 +253,9 @@ export class TestRunsAnomalyService {
           conclusion_label: (conclusion && typeof conclusion.label === 'string' ? conclusion.label : 'unknown'),
           test_value: statistic?.test ?? null,
           control_group_value: statistic?.control ?? null,
+          // The baseline had no row for the series and the config's defaultValueIfControlGroupMissing
+          // stood in for control_group_value, so the card can say the value is configured, not measured.
+          uses_default_value: row.uses_default_value === true,
           difference: statistic?.diff ?? null,
           application_dashboard_id: row.application_dashboard_id,
           metrics_source_id: row.metrics_source_id || null,

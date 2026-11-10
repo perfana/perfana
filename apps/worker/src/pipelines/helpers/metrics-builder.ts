@@ -16,7 +16,6 @@ import {
   AGGREGATION_TYPES as _AGGREGATION_TYPES,
   PERFORMANCE_METRIC_CLASSIFICATIONS as _PERFORMANCE_METRIC_CLASSIFICATIONS,
   DEFAULT_PERFORMANCE_THRESHOLDS,
-  DEFAULT_VALUE_IF_CONTROL_GROUP_MISSING,
 } from '../../constants/performance-metrics.js';
 import type { MetricClassification } from '../../constants/performance-metrics.js';
 import type {
@@ -128,7 +127,8 @@ export function createDsCompareConfigRecordPanelLevel(
         absoluteThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.absoluteThreshold,
         ...(minSampleCount !== undefined ? { minSampleCount } : {}),
       },
-      defaultValueIfControlGroupMissing: DEFAULT_VALUE_IF_CONTROL_GROUP_MISSING,
+      // No defaultValueIfControlGroupMissing: since v0.2.97.65 ADAPT reads it, and a stored 0
+      // would judge every new series against zero instead of reporting it incomparable.
     },
   };
 }

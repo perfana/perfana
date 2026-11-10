@@ -62,9 +62,70 @@ export class AdaptSQLFragments {
     const floor =
       `GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(${configured}) = 'number' ` +
       `THEN floor((${configured})::text::numeric) END, ${adaptMinSampleCount()}))`;
-    return `wcc.control_row_exists
+    return `((wcc.control_row_exists
                 AND COALESCE(wcc.test_n, 0) >= ${floor}
-                AND COALESCE(wcc.control_n, 0) >= ${floor} as control_exists`;
+                AND COALESCE(wcc.control_n, 0) >= ${floor})
+              OR (${this.usesDefaultValueExpr()}
+                AND COALESCE(wcc.test_n, 0) >= ${floor})) as control_exists`;
+  }
+
+  /**
+   * Whether this row stands in `defaultValueIfControlGroupMissing` for the control value.
+   *
+   * Only when the baseline has NO row for the series (`control_row_exists` false) and the
+   * resolved config carries an explicit number. A control row with too few samples stays
+   * `incomparable`: the floor is about a thin baseline, the default about an absent one, and
+   * substituting a constant for a thin baseline would hide exactly what the floor exists to
+   * report. Absent or null means off, which is how every config written before v0.2.97.65
+   * reads once migration 1824 has stripped the `0` three writers used to store by default.
+   *
+   * `config_data` is untrusted (a bare `@IsObject()` on the API body), so a non-number is
+   * ignored and a value outside float8's range is refused here rather than raising
+   * `value out of range` and aborting the whole batch.
+   */
+  usesDefaultValueExpr(): string {
+    const v = "wcc.compare_config->'defaultValueIfControlGroupMissing'";
+    // COALESCE is load-bearing: jsonb_typeof(NULL) is NULL, and an absent key would make
+    // control_exists `false OR NULL` = NULL, which skips the incomparable branch and falls
+    // through to `no difference` (and fails the NOT NULL on uses_default_value).
+    return `COALESCE(NOT wcc.control_row_exists
+                AND jsonb_typeof(${v}) = 'number'
+                AND abs((${v})::text::numeric) <= 1e300, false)`;
+  }
+
+  /**
+   * `uses_default_value` and `default_value` for with_dynamic_statistics. They ride through
+   * `wtc.*` to the insert, so the stored row says which verdicts were judged against a constant.
+   */
+  buildDefaultValueColumns(): string {
+    return `${this.usesDefaultValueExpr()} as uses_default_value,
+              CASE WHEN ${this.usesDefaultValueExpr()}
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+              END as default_value`;
+  }
+
+  /**
+   * The two stored columns, as the INSERT selects them from final_results. A row that took the
+   * default but missed the TEST-side floor is still `incomparable`, so it is stored as not having
+   * used one: the flag answers "was this verdict judged against a constant", and the anomaly card
+   * badges a row on it.
+   */
+  buildStoredDefaultValueColumns(): string {
+    return `(uses_default_value AND control_exists) as uses_default_value,
+          CASE WHEN uses_default_value AND control_exists THEN default_value END as default_value`;
+  }
+
+  /**
+   * Wraps the control statistic chosen by aggregation, so a missing baseline reads as the
+   * configured default. Every check, the conclusion and `conditions.controlStatValue` key on
+   * this one column. The IQR check stays invalid on a default (`control_iqr` is NULL with no
+   * row), because a spread around a constant does not exist.
+   */
+  wrapControlStatValue(controlCase: string): string {
+    return `CASE WHEN ${this.usesDefaultValueExpr()}
+                   THEN (wcc.compare_config->>'defaultValueIfControlGroupMissing')::float
+                   ELSE ${controlCase}
+              END as control_stat_value`;
   }
 
   /**
@@ -398,7 +459,7 @@ export class AdaptSQLFragments {
     columns.push(`statistic, thresholds`);
     columns.push(`jsonb_build_object('controlExists', control_exists, 'testStatValue', test_stat_value, 'controlStatValue', control_stat_value, 'configuredAggregation', compare_config->'thresholds'->>'aggregation') as conditions`);
     columns.push(`checks, conclusion`);
-    columns.push(`false as uses_default_value, NULL as default_value`);
+    columns.push(this.buildStoredDefaultValueColumns());
 
     return columns.join(',\n          ');
   }

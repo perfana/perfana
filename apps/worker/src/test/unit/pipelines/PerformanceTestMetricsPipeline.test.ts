@@ -112,7 +112,6 @@ const createMockCompareConfig = (overrides: Partial<DsCompareConfigRecord> = {})
   config_data: {
     metricClassification: { classification: 'RED_duration', higherIsBetter: false },
     thresholds: { aggregation: 'mean', percentageThreshold: 0.15, iqrThreshold: 2.0, absoluteThreshold: null },
-    defaultValueIfControlGroupMissing: 0,
   },
   ...overrides,
 });

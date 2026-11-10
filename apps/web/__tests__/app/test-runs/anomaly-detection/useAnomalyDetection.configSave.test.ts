@@ -58,7 +58,6 @@ const configData: ConfigFormData = {
   ignore: false,
   metricClassification: { classification: 'use_utilization', higherIsBetter: false },
   thresholds: { aggregation: 'mean', percentageThreshold: 10, iqrThreshold: 2, absoluteThreshold: undefined },
-  defaultValueIfControlGroupMissing: 0,
 };
 
 function mockAnomalyRows(rows: AnomalyData[]) {
@@ -105,6 +104,32 @@ async function setupExpanded(rows: AnomalyData[]) {
 describe('useAnomalyDetection — handleConfigSave', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  /**
+   * ADAPT reads defaultValueIfControlGroupMissing since v0.2.97.65, so the save must not invent one:
+   * the old `|| 0` judged every series with no baseline against zero.
+   */
+  it.each([
+    ['absent', undefined, undefined],
+    ['null', null, undefined],
+    ['an explicit 0', 0, 0],
+    ['a number', 12.5, 12.5],
+  ])('writes defaultValueIfControlGroupMissing only when it is a number (%s)', async (_, given, expected) => {
+    const { result } = await setupExpanded([row({})]);
+    const posted: Record<string, unknown>[] = [];
+    mockComparConfigPost((payload) => {
+      posted.push(payload);
+      return { ok: true };
+    });
+
+    await act(async () => {
+      await result.current.handleConfigSave('row_0', { ...configData, defaultValueIfControlGroupMissing: given }, 'metric');
+    });
+
+    const data = (posted[0] as { configData: Record<string, unknown> }).configData;
+    if (expected === undefined) expect(data).not.toHaveProperty('defaultValueIfControlGroupMissing');
+    else expect(data.defaultValueIfControlGroupMissing).toBe(expected);
   });
 
   it('all-dashboards: POSTs one panel-level config per dashboard sharing the panel title', async () => {
