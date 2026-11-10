@@ -17,6 +17,9 @@ import {
   PERF_TEST_PROFILE_SOURCE,
   PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
   PERF_TEST_PROFILE_PANELS,
+  DYNATRACE_HOSTS_PROFILE_SOURCE,
+  DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
+  DYNATRACE_HOST_PROFILE_PANELS,
 } from '@perfana/shared/constants';
 import { validateRegexPattern } from '@perfana/shared/utils';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
@@ -884,7 +887,7 @@ export class ProfilesService {
 
   /**
    * The dashboard-side columns of a profile benchmark depend on its source. A perf-test
-   * benchmark has no Grafana template: it matches app dashboards by a uid regex, so
+   * (or Dynatrace hosts) benchmark has no Grafana template: it matches app dashboards by a uid regex, so
    * `profile_dashboard_id` and `grafana_instance` are NULL and `dashboard_uid` is the
    * pattern (validated here, because grafana-sync hands it straight to Postgres `~`).
    * Anything else needs a profile dashboard of this profile. Shared by create and update
@@ -909,6 +912,20 @@ export class ProfilesService {
       }
       if (dto.panelId !== undefined && !PERF_TEST_PROFILE_PANELS.some((p) => p.id === dto.panelId)) {
         throw new BadRequestException(`panelId ${dto.panelId} is not a performance-test panel`);
+      }
+      return { profile_dashboard_id: null, grafana_instance: null, dashboard_uid: pattern };
+    }
+    // Same shape for the Dynatrace host dashboards. A host panel's real id differs per host
+    // (hashed from the host's dashboard label), so `panelId` is one of the synthetic ids in
+    // DYNATRACE_HOST_PROFILE_PANELS and grafana-sync resolves it by title per host.
+    if (source === DYNATRACE_HOSTS_PROFILE_SOURCE) {
+      const pattern = dto.dashboardUid || DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT;
+      const check = validateRegexPattern(pattern, { maxLength: 255 });
+      if (!check.safe) {
+        throw new BadRequestException(`dashboardUid must be a valid regex: ${check.error}`);
+      }
+      if (dto.panelId !== undefined && !DYNATRACE_HOST_PROFILE_PANELS.some((p) => p.id === dto.panelId)) {
+        throw new BadRequestException(`panelId ${dto.panelId} is not a Dynatrace host panel`);
       }
       return { profile_dashboard_id: null, grafana_instance: null, dashboard_uid: pattern };
     }
@@ -1084,6 +1101,15 @@ export class ProfilesService {
       // values, so a PUT that switches source cannot leave a Grafana template on a perf-test
       // row or strip the template from a Grafana one. Only touched when one of them is sent.
       const source = updateDto.source ?? benchmark.source;
+      // resolveDashboardColumns checks the synthetic host panel id, but a PUT that sends only
+      // `panelId` never reaches it.
+      if (
+        source === DYNATRACE_HOSTS_PROFILE_SOURCE &&
+        updateDto.panelId !== undefined &&
+        !DYNATRACE_HOST_PROFILE_PANELS.some((p) => p.id === updateDto.panelId)
+      ) {
+        throw new BadRequestException(`panelId ${updateDto.panelId} is not a Dynatrace host panel`);
+      }
       if (
         updateDto.source !== undefined ||
         updateDto.profileDashboardId !== undefined ||
@@ -1100,7 +1126,9 @@ export class ProfilesService {
         if (updateDto.source !== undefined && updateDto.source !== benchmark.source) {
           merged.dashboardUid = updateDto.dashboardUid;
           merged.grafanaInstance = updateDto.grafanaInstance;
-          if (updateDto.source === PERF_TEST_PROFILE_SOURCE) merged.profileDashboardId = undefined;
+          if (updateDto.source === PERF_TEST_PROFILE_SOURCE || updateDto.source === DYNATRACE_HOSTS_PROFILE_SOURCE) {
+            merged.profileDashboardId = undefined;
+          }
         }
         const cols = await this.resolveDashboardColumns(source, merged, profile.name);
         benchmark.source = source;

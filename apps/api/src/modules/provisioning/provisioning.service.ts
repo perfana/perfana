@@ -16,6 +16,9 @@ import { withRequestEm } from '../../common/db/request-em';
 import {
   PERF_TEST_PROFILE_SOURCE,
   PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+  DYNATRACE_HOSTS_PROFILE_SOURCE,
+  DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
+  DYNATRACE_HOST_PROFILE_PANELS,
 } from '@perfana/shared/constants';
 import { validateRegexPattern } from '@perfana/shared/utils';
 import { PROFILE_BENCHMARK_SOURCES } from '../profiles/dto/profile-benchmark.dto';
@@ -400,16 +403,26 @@ export class ProvisioningService implements OnApplicationBootstrap {
           result.skipped++;
           continue;
         }
-        const isPerfTest = source === PERF_TEST_PROFILE_SOURCE;
-        if (!isPerfTest && !item.dashboardUid) {
+        // Both pattern sources target worker/API-written dashboards rather than a Grafana
+        // template: `dashboardUid` is a regex and there is no profile dashboard.
+        const isDynatraceHosts = source === DYNATRACE_HOSTS_PROFILE_SOURCE;
+        const isPatternSource = source === PERF_TEST_PROFILE_SOURCE || isDynatraceHosts;
+        if (isDynatraceHosts && !DYNATRACE_HOST_PROFILE_PANELS.some((p) => p.id === item.panel?.id)) {
+          this.logger.warn(
+            `Benchmark skipped: panel id ${item.panel?.id} is not a Dynatrace host panel for profile "${item.profile}"`,
+          );
+          result.skipped++;
+          continue;
+        }
+        if (!isPatternSource && !item.dashboardUid) {
           this.logger.warn(`Benchmark skipped: dashboardUid missing for profile "${item.profile}"`);
           result.skipped++;
           continue;
         }
         // Resolve profile + dashboardUid + grafana → profile_dashboard_id. A perf-test
-        // benchmark has no profile dashboard: its uid is a regex over the scenario uids.
+        // or Dynatrace-hosts benchmark has no profile dashboard: its uid is a regex over generated uids.
         let dashboardId: string | null = null;
-        if (!isPerfTest) {
+        if (!isPatternSource) {
           const dashboard = await withRequestEm(this.dashboardRepo).findOne({
             where: {
               profile: item.profile,
@@ -426,10 +439,12 @@ export class ProvisioningService implements OnApplicationBootstrap {
           }
           dashboardId = dashboard.id;
         }
-        const dashboardUid = isPerfTest
-          ? item.dashboardUid ?? PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
-          : item.dashboardUid;
-        if (isPerfTest) {
+        const dashboardUid = isDynatraceHosts
+          ? item.dashboardUid ?? DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT
+          : isPatternSource
+            ? item.dashboardUid ?? PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
+            : item.dashboardUid;
+        if (isPatternSource) {
           const check = validateRegexPattern(dashboardUid, { maxLength: 255 });
           if (!check.safe) {
             this.logger.warn(`Benchmark skipped: dashboardUid is not a valid regex (${check.error}) for profile "${item.profile}"`);
@@ -445,7 +460,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
           where: {
             profile_id: profile.id,
             profile_dashboard_id: dashboardId ?? IsNull(),
-            ...(isPerfTest ? { dashboard_uid: dashboardUid } : {}),
+            ...(isPatternSource ? { dashboard_uid: dashboardUid } : {}),
             panel_id: item.panel.id,
             workload_pattern: workloadPattern,
           },
@@ -456,7 +471,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
           profile_dashboard_id: dashboardId,
           workload_pattern: workloadPattern,
           source,
-          grafana_instance: isPerfTest ? undefined : grafanaLabel,
+          grafana_instance: isPatternSource ? undefined : grafanaLabel,
           dashboard_uid: dashboardUid,
           panel_id: item.panel.id,
           panel_title: item.panel.title,

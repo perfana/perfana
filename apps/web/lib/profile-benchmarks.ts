@@ -3,6 +3,8 @@ import { ProfileDashboard } from './profiles';
 import {
   PERF_TEST_PROFILE_SOURCE,
   PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+  DYNATRACE_HOSTS_PROFILE_SOURCE,
+  DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
 } from '@perfana/shared/constants';
 
 /**
@@ -23,6 +25,29 @@ export const PERF_TEST_PROFILE_DASHBOARD: ProfileDashboard = {
 
 export const isPerfTestProfileDashboard = (d: ProfileDashboard | null): boolean =>
   d?.id === PERF_TEST_PROFILE_DASHBOARD.id;
+
+/**
+ * Synthetic dropdown entry for an SLO on every mapped Dynatrace host — the Dynatrace twin of
+ * PERF_TEST_PROFILE_DASHBOARD. Stored with `source = 'dynatrace-hosts'`, no profile dashboard,
+ * and `dashboardUid` holding the regex over the `dynatrace-dynatrace-host-metrics-<host>` uids
+ * that grafana-sync fans out over.
+ */
+export const DYNATRACE_HOSTS_PROFILE_DASHBOARD: ProfileDashboard = {
+  id: DYNATRACE_HOSTS_PROFILE_SOURCE,
+  profile: '',
+  dashboardName: 'Dynatrace — all hosts',
+  dashboardUid: DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
+  grafanaLabel: 'Dynatrace',
+  createdAt: '',
+  updatedAt: '',
+};
+
+export const isDynatraceHostsProfileDashboard = (d: ProfileDashboard | null): boolean =>
+  d?.id === DYNATRACE_HOSTS_PROFILE_DASHBOARD.id;
+
+/** Either pseudo-dashboard: a uid regex over generated dashboards, no Grafana template behind it. */
+export const isPatternProfileDashboard = (d: ProfileDashboard | null): boolean =>
+  isPerfTestProfileDashboard(d) || isDynatraceHostsProfileDashboard(d);
 
 
 /**

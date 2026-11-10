@@ -21,6 +21,10 @@ import {
 } from '@perfana/shared/services/metrics-source-upsert';
 import type { OwnedResource } from '@perfana/shared/entities';
 import { isDuplicateSloTargetError } from '@perfana/shared/utils';
+import {
+  DYNATRACE_HOSTS_PROFILE_SOURCE,
+  DYNATRACE_BENCHMARK_SOURCE,
+} from '@perfana/shared/constants';
 import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
 import { DashboardVariable } from './types';
 import { resolveGrafanaInstanceByLabel } from './grafana-instance-resolver';
@@ -363,6 +367,9 @@ export class AutoConfigUpdatesService {
     profileBenchmark: ProfileBenchmark,
     testRun: TestRun,
     applicationDashboard: ApplicationDashboard,
+    // A `dynatrace-hosts` profile row carries a synthetic panel id; the caller resolves the
+    // host's real panel id and title and passes them here.
+    panel?: { panelId: number; panelTitle: string },
   ): Promise<{ insertedId: string; wasCreated?: boolean; skippedDuplicateTarget?: boolean }> {
     try {
       this.logger.log(
@@ -403,9 +410,16 @@ export class AutoConfigUpdatesService {
         },
       });
 
+      const isDynatraceHosts = profileBenchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE;
+      const panelId = panel?.panelId ?? profileBenchmark.panel_id;
+      const panelTitle = panel?.panelTitle ?? profileBenchmark.panel_title;
+
       // Resolve grafana_instance
       let grafanaInstanceValue: string | undefined;
-      if (typeof applicationDashboard.grafanaInstance === 'string') {
+      if (isDynatraceHosts) {
+        // What the SUT SLO dialog stores for a hand-made Dynatrace SLO.
+        grafanaInstanceValue = 'Dynatrace';
+      } else if (typeof applicationDashboard.grafanaInstance === 'string') {
         grafanaInstanceValue = applicationDashboard.grafanaInstance;
       } else if (applicationDashboard.grafanaInstance) {
         grafanaInstanceValue = applicationDashboard.grafanaInstance.label;
@@ -423,19 +437,26 @@ export class AutoConfigUpdatesService {
         system_under_test: sut,
         test_environment: testRun.testEnvironment,
         workload: testRun.workload,
-        source: profileBenchmark.source,
+        // A provisioned host SLO is an ordinary Dynatrace SLO from here on, so the run view
+        // and the SUT edit dialog treat it like one made by hand.
+        source: isDynatraceHosts ? DYNATRACE_BENCHMARK_SOURCE : profileBenchmark.source,
         grafana_instance: grafanaInstanceValue,
         dashboard_label: applicationDashboard.dashboardLabel,
         dashboard_id: applicationDashboard.dashboardId,
         dashboard_uid: applicationDashboard.dashboardUid,
         application_dashboard_id: applicationDashboard.id,
         generic_check_id: profileBenchmark.id,
-        panel_title: profileBenchmark.panel_title,
+        panel_title: panelTitle,
         configuration: {
-          id: profileBenchmark.panel_id?.toString(),
+          id: panelId?.toString(),
           dashboardUid: applicationDashboard.dashboardUid,
-          type: profileBenchmark.panel_type,
-          title: profileBenchmark.panel_title,
+          type: isDynatraceHosts ? DYNATRACE_BENCHMARK_SOURCE : profileBenchmark.panel_type,
+          // A hand-made Dynatrace SLO is titled '<dashboard label> - <panel title>' and the SUT
+          // edit dialog finds its dashboard and panel by splitting on ' - ', so match that shape.
+          title: isDynatraceHosts
+            ? `${applicationDashboard.dashboardLabel} - ${panelTitle}`
+            : panelTitle,
+          ...(isDynatraceHosts ? { yAxesFormat: profileBenchmark.metric_unit ?? null } : {}),
           evaluateType: profileBenchmark.evaluate_type,
           requirement: {
             operator: profileBenchmark.requirement_operator,
@@ -512,7 +533,7 @@ export class AutoConfigUpdatesService {
       if (isDuplicateSloTargetError(e)) {
         this.logger.warn(
           `Skipped profile benchmark ${profileBenchmark.id} on dashboard ${applicationDashboard.id} ` +
-            `(panel ${profileBenchmark.panel_id ?? 'unknown'}): an enabled SLO already evaluates the ` +
+            `(panel ${panel?.panelId ?? profileBenchmark.panel_id ?? 'unknown'}): an enabled SLO already evaluates the ` +
             'same series with the same aggregation on this panel. Remove or disable that manual SLO ' +
             'for the profile SLO to take over.',
         );

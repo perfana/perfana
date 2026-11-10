@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.61] - 2026-11-09
+
+### Added
+- **"Dynatrace — all hosts" profile SLO.** The profile SLO form has a new dashboard entry beside **Performance test metrics — every scenario**. Pick it and a host panel (CPU Usage, Memory Usage, the disk latency, IOPS and queue panels, Network Traffic, or the older Disk Utilization), and every Dynatrace host mapped on a system gets that SLO on its next test run, including hosts mapped later. Each host's SLO is an ordinary Dynatrace SLO on that host's own panel, so it shows, edits and evaluates like one you made by hand. Only enabled host queries in the run's own workload and organization are covered.
+- **`source: dynatrace-hosts` in the profile API and `profile_benchmarks.yaml`.** `dashboardUid` is a regex over the host dashboard uids (default `^dynatrace-dynatrace-host-metrics-`), and it can only ever narrow the Dynatrace host dashboards. `panelId` must be one of the host panel ids listed in `@perfana/shared/constants` (`DYNATRACE_HOST_PROFILE_PANELS`). Any other id is refused by the API, including on an update that changes only the panel, and skipped with a warning by provisioning.
+
+### Known limitations
+- **Host SLOs are written once.** As with the "every scenario" option, changing or deleting the profile SLO later does not change or remove the host SLOs it already created; edit or delete those on the system. Renaming a host query's panel in the Queries tab leaves its SLO with nothing to evaluate.
+
 ## [0.2.97.60] - 2026-11-09
 
 ### Fixed

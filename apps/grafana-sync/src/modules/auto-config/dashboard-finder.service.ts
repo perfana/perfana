@@ -282,6 +282,69 @@ export class DashboardFinderService {
   }
 
   /**
+   * The artificial `Dynatrace host metrics <host>` dashboards of a system whose uid matches
+   * `uidPattern`, each paired with the id of its panel titled `panelTitle`.
+   *
+   * A host panel's id is hashed from the host's dashboard label, so it differs per host and a
+   * profile benchmark cannot carry it; it is read from the host's own `dynatrace_queries` row.
+   * Host dashboards are per workload (their id hashes the workload in) while
+   * `application_dashboards` has no workload column, so the scope comes from the query row.
+   * A disabled query collects nothing, so an SLO on it could only ever read as no data.
+   */
+  async findDynatraceHostPanelsByUidPattern(
+    uidPattern: string,
+    panelTitle: string,
+    application: string,
+    testEnvironment: string,
+    workload: string,
+    organizationId: string | undefined,
+  ): Promise<Array<{ applicationDashboard: ApplicationDashboard; panelId: number }>> {
+    // Same fail-closed rule as findApplicationDashboardsByUidPattern.
+    if (!organizationId) return [];
+    const { entities, raw } = await this.applicationDashboardRepo
+      .createQueryBuilder('ad')
+      .innerJoin('ad.systemUnderTest', 'sut')
+      .innerJoin(
+        'dynatrace_queries',
+        'dq',
+        'dq.application_dashboard_id = ad.id AND dq.system_under_test_id = sut.id',
+      )
+      .addSelect('dq.panel_id', 'dq_panel_id')
+      // The regex can only narrow the Dynatrace set: a stray `.` must not fan an SLO out
+      // over the SUT's Grafana and perf-test dashboards.
+      .where("ad.dashboardUid LIKE 'dynatrace-%'")
+      .andWhere('ad.dashboardUid ~ :uidPattern', { uidPattern })
+      .andWhere('sut.name = :application', { application })
+      .andWhere('ad.testEnvironment = :testEnvironment', { testEnvironment })
+      .andWhere('ad.organization_id = :organizationId', { organizationId })
+      .andWhere('dq.test_environment = :testEnvironment', { testEnvironment })
+      .andWhere('dq.workload = :workload', { workload })
+      .andWhere('dq.panel_title = :panelTitle', { panelTitle })
+      .andWhere('dq.enabled = true')
+      .orderBy('ad.id')
+      .getRawAndEntities();
+
+    // One SLO per dashboard: a host added twice can carry the same query twice.
+    const byDashboard = new Map<
+      string,
+      { applicationDashboard: ApplicationDashboard; panelId: number }
+    >();
+    const entityById = new Map(entities.map((e) => [e.id, e]));
+    raw.forEach((row: { ad_id?: string; dq_panel_id?: number | string }) => {
+      const applicationDashboard = row.ad_id ? entityById.get(row.ad_id) : undefined;
+      const panelId = Number(row.dq_panel_id);
+      if (
+        !applicationDashboard ||
+        !Number.isFinite(panelId) ||
+        byDashboard.has(applicationDashboard.id)
+      )
+        return;
+      byDashboard.set(applicationDashboard.id, { applicationDashboard, panelId });
+    });
+    return [...byDashboard.values()];
+  }
+
+  /**
    * Find application dashboards via the generated dashboard uid
    */
   async findApplicationDashboards(

@@ -441,6 +441,45 @@ describe('ProvisioningService', () => {
       );
     });
 
+    it('provisions a dynatrace-hosts benchmark without a profile dashboard', async () => {
+      profileRepo.findOne.mockResolvedValue(profileMock);
+      benchmarkRepo.findOne.mockResolvedValue(null);
+      benchmarkRepo.insert.mockResolvedValue(undefined as any);
+
+      const result = await service.provisionProfileBenchmarks(
+        [{
+          profile: 'gatling',
+          source: 'dynatrace-hosts',
+          panel: { id: 1, title: 'CPU Usage', evaluateType: 'avg', requirement: { operator: 'lt', value: 80 } },
+        }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 1, updated: 0, skipped: 0, errors: 0 });
+      expect(dashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(benchmarkRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile_dashboard_id: null,
+          grafana_instance: undefined,
+          source: 'dynatrace-hosts',
+          dashboard_uid: '^dynatrace-dynatrace-host-metrics-',
+          panel_id: 1,
+        }),
+      );
+    });
+
+    it('skips a dynatrace-hosts benchmark whose panel id is not a host panel', async () => {
+      profileRepo.findOne.mockResolvedValue(profileMock);
+
+      const result = await service.provisionProfileBenchmarks(
+        [{ profile: 'gatling', source: 'dynatrace-hosts', panel: { id: 105, title: 'Transaction Error Rate' } }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 0, updated: 0, skipped: 1, errors: 0 });
+      expect(benchmarkRepo.insert).not.toHaveBeenCalled();
+    });
+
     it('should skip when profile not found', async () => {
       profileRepo.findOne.mockResolvedValue(null);
 

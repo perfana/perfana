@@ -8,9 +8,17 @@ import {
   UpdateProfileBenchmarkData,
   ProfileBenchmark,
   PERF_TEST_PROFILE_DASHBOARD,
+  DYNATRACE_HOSTS_PROFILE_DASHBOARD,
   isPerfTestProfileDashboard,
+  isDynatraceHostsProfileDashboard,
 } from '@/lib/profile-benchmarks';
-import { PERF_TEST_PROFILE_SOURCE, PERF_TEST_PROFILE_PANELS } from '@perfana/shared/constants';
+import {
+  PERF_TEST_PROFILE_SOURCE,
+  PERF_TEST_PROFILE_PANELS,
+  DYNATRACE_HOSTS_PROFILE_SOURCE,
+  DYNATRACE_BENCHMARK_SOURCE,
+  DYNATRACE_HOST_PROFILE_PANELS,
+} from '@perfana/shared/constants';
 import { ProfileDashboard } from '@/lib/profiles';
 import {
   BenchmarkFormData,
@@ -73,6 +81,12 @@ export function useBenchmarkForm({
   const fetchDashboardPanels = useCallback(async (dashboard: ProfileDashboard) => {
     if (isPerfTestProfileDashboard(dashboard)) {
       setAvailablePanels(PERF_TEST_PROFILE_PANELS.map((p) => ({ ...p, type: PERF_TEST_PROFILE_SOURCE })));
+      return;
+    }
+    // Dynatrace host dashboards likewise: the fixed metric set every mapped host carries. The
+    // ids are synthetic (a host's real panel id differs per host); grafana-sync resolves them.
+    if (isDynatraceHostsProfileDashboard(dashboard)) {
+      setAvailablePanels(DYNATRACE_HOST_PROFILE_PANELS.map((p) => ({ ...p, type: DYNATRACE_BENCHMARK_SOURCE })));
       return;
     }
     const dashboardUid = dashboard.dashboardUid;
@@ -143,7 +157,9 @@ export function useBenchmarkForm({
     if (mode === 'edit' && benchmark && open) {
       const dashboard = benchmark.source === PERF_TEST_PROFILE_SOURCE
         ? { ...PERF_TEST_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || PERF_TEST_PROFILE_DASHBOARD.dashboardUid }
-        : profileDashboards.find(d => d.id === benchmark.profileDashboardId);
+        : benchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE
+          ? { ...DYNATRACE_HOSTS_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || DYNATRACE_HOSTS_PROFILE_DASHBOARD.dashboardUid }
+          : profileDashboards.find(d => d.id === benchmark.profileDashboardId);
 
       setFormData({
         selectedDashboard: dashboard || null,
@@ -262,12 +278,14 @@ export function useBenchmarkForm({
         : '';
 
       const isPerfTest = isPerfTestProfileDashboard(formData.selectedDashboard);
+      const isDynatraceHosts = isDynatraceHostsProfileDashboard(formData.selectedDashboard);
+      const isPattern = isPerfTest || isDynatraceHosts;
       const payload: CreateProfileBenchmarkData | UpdateProfileBenchmarkData = {
-        profileDashboardId: isPerfTest ? undefined : formData.selectedDashboard!.id,
+        profileDashboardId: isPattern ? undefined : formData.selectedDashboard!.id,
         workloadPattern: formData.workloadPattern,
-        source: isPerfTest ? PERF_TEST_PROFILE_SOURCE : 'grafana',
-        grafanaInstance: isPerfTest ? undefined : formData.selectedDashboard!.grafanaLabel,
-        // For perf-test this is the uid regex grafana-sync fans out over, not a dashboard uid.
+        source: isPerfTest ? PERF_TEST_PROFILE_SOURCE : isDynatraceHosts ? DYNATRACE_HOSTS_PROFILE_SOURCE : 'grafana',
+        grafanaInstance: isPattern ? undefined : formData.selectedDashboard!.grafanaLabel,
+        // For perf-test / Dynatrace hosts this is the uid regex grafana-sync fans out over, not a dashboard uid.
         dashboardUid: formData.selectedDashboard!.dashboardUid,
         panelId: formData.selectedPanel?.id,
         panelTitle: formData.selectedPanel?.title || '',

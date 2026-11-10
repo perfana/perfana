@@ -669,6 +669,66 @@ describe('AutoConfigUpdatesService', () => {
         expect(createArg).not.toHaveProperty('organization_id');
       });
 
+      it("writes a dynatrace-hosts profile SLO as an ordinary Dynatrace SLO on the host's own panel", async () => {
+        const profileBenchmark: any = {
+          id: 'pb-dt',
+          source: 'dynatrace-hosts',
+          dashboard_uid: '^dynatrace-dynatrace-host-metrics-',
+          panel_id: 1, // synthetic profile id, not the host's panel
+          panel_title: 'CPU Usage',
+          panel_type: 'dynatrace',
+          metric_unit: 'percent',
+          requirement_operator: 'lt',
+          requirement_value: 80,
+          tags: [],
+          metadata: {},
+          read_only: false,
+        };
+        const testRun: any = {
+          testRunId: 'test-1',
+          systemUnderTest: { name: 'shop' },
+          testEnvironment: 'acc',
+          workload: 'load',
+          organizationId: 'org-1',
+        };
+        const applicationDashboard = {
+          id: 'ad-host-a',
+          dashboardLabel: 'Dynatrace host metrics host-a',
+          dashboardUid: 'dynatrace-dynatrace-host-metrics-host-a',
+        } as any;
+
+        systemUnderTestRepo.findOne.mockResolvedValue({ id: 'sut-1' });
+        benchmarkRepo.create.mockReturnValue({});
+        benchmarkRepo.save.mockResolvedValue({ id: 'b-1' });
+
+        await service.insertBenchmarkBasedOnProfileBenchmark(
+          profileBenchmark,
+          testRun,
+          applicationDashboard,
+          {
+            panelId: 41234,
+            panelTitle: 'CPU Usage',
+          },
+        );
+
+        expect(benchmarkRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            source: 'dynatrace',
+            grafana_instance: 'Dynatrace',
+            application_dashboard_id: 'ad-host-a',
+            generic_check_id: 'pb-dt',
+            panel_title: 'CPU Usage',
+            configuration: expect.objectContaining({
+              id: '41234',
+              type: 'dynatrace',
+              // The hand-made shape the SUT edit dialog splits on ' - '.
+              title: 'Dynatrace host metrics host-a - CPU Usage',
+              yAxesFormat: 'percent',
+            }),
+          }),
+        );
+      });
+
       it('should handle grafana instance from applicationDashboard object', async () => {
         // Arrange
         const mockSut = { id: 'sut-1' };
