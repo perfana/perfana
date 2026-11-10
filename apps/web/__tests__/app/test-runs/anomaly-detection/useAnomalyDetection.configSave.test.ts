@@ -107,7 +107,7 @@ describe('useAnomalyDetection — handleConfigSave', () => {
   });
 
   /**
-   * ADAPT reads defaultValueIfControlGroupMissing since v0.2.97.65, so the save must not invent one:
+   * ADAPT reads defaultValueIfControlGroupMissing since v0.2.97.66, so the save must not invent one:
    * the old `|| 0` judged every series with no baseline against zero.
    */
   it.each([

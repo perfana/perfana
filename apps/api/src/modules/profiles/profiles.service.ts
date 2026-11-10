@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import {
   Organization,
   Profile,
@@ -11,7 +11,7 @@ import {
   GenericDeepLink,
   ProvisionedTemplateDsCompareConfig,
 } from '../../entities';
-import { withRequestEm } from '../../common/db/request-em';
+import { withRequestEm, withRequestQuery } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared/entities';
 import {
   PERF_TEST_PROFILE_SOURCE,
@@ -20,8 +20,10 @@ import {
   DYNATRACE_HOSTS_PROFILE_SOURCE,
   DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
   DYNATRACE_HOST_PROFILE_PANELS,
+  PROVISIONED_SLO_AUTO_DISABLED_KEY,
+  dynatraceHostPanelTitle,
 } from '@perfana/shared/constants';
-import { validateRegexPattern } from '@perfana/shared/utils';
+import { validateRegexPattern, isDuplicateSloTargetError, DUPLICATE_TARGET_MESSAGE } from '@perfana/shared/utils';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto, ProfileBenchmarkResponse } from './dto/profile-benchmark.dto';
@@ -107,6 +109,7 @@ export class ProfilesService {
     private compareTemplateRepo: Repository<ProvisionedTemplateDsCompareConfig>,
     @InjectRepository(Organization)
     private organizationRepo: Repository<Organization>,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -1196,6 +1199,10 @@ export class ProfilesService {
 
       this.logger.debug(`Updating benchmark ${benchmark.id} for profile ${profile.name}`);
 
+      // Before the save: with RLS off there is no request transaction, so a 409 here must
+      // leave the profile row unchanged too.
+      await this.propagateToProvisioned(benchmarkBefore, benchmark);
+
       const savedBenchmark = await withRequestEm(this.profileBenchmarkRepo).save(benchmark);
 
       this.auditService.logUpdate(
@@ -1240,6 +1247,139 @@ export class ProfilesService {
   }
 
   /**
+   * Switch off every SLO grafana-sync provisioned from profile benchmark `id` that nobody has
+   * edited since (`updated_by IS NULL`: the sweep never sets it, every API write does). A row a
+   * person tweaked is theirs and is left alone. Disabled, never deleted: the rows' check results
+   * are run history. The marker lets the sweep turn a row back on if the profile SLO still
+   * matches its dashboard (see PROVISIONED_SLO_AUTO_DISABLED_KEY).
+   *
+   * Scoped to the profile's organization: provisioning matches profiles by NAME, so a profile's
+   * rows can sit in another organization's runs, and an org admin's request must not write those.
+   * There is no RLS backstop on a default deploy. Such rows keep the old behaviour (TODOS.md).
+   */
+  private async disableProvisioned(id: string, organizationId: string, reason: string): Promise<number> {
+    const res = await withRequestQuery(this.dataSource).query(
+      `UPDATE benchmarks
+          SET enabled = false,
+              metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
+              updated_at = now()
+        WHERE generic_check_id = $1 AND organization_id = $4 AND updated_by IS NULL AND enabled`,
+      [id, PROVISIONED_SLO_AUTO_DISABLED_KEY, reason, organizationId],
+    );
+    return affectedCount(res);
+  }
+
+  /**
+   * Carry an edit of profile benchmark `before` -> `after` to the SLOs provisioned from it.
+   * Same ownership rule as disableProvisioned: only rows with `updated_by IS NULL`.
+   *
+   * - A retarget (source, template/uid pattern, workload pattern) cannot be applied in place:
+   *   which dashboards the profile SLO covers is decided by the sweep. The rows are disabled
+   *   with the marker, and the next sweep re-enables and re-syncs the ones still matched.
+   * - A panel change moves the rows in place. A `dynatrace-hosts` row's panel id differs per
+   *   host, so it is read from that host's `dynatrace_queries` row; a host without the new
+   *   panel has its row disabled.
+   * - Threshold, operator, evaluate type, unit, match pattern and the other evaluation fields
+   *   are written in place, in the same shape the sweep writes them.
+   *
+   * A move onto a panel that already carries an enabled SLO for the same series and
+   * aggregation is refused by uq_benchmarks_active_metric_target; that is a 409 and rolls the
+   * whole request back.
+   */
+  private async propagateToProvisioned(before: ProfileBenchmark, after: ProfileBenchmark): Promise<void> {
+    const differs = (a: unknown, b: unknown) => String(a ?? '') !== String(b ?? '');
+    const retargeted = (
+      ['source', 'dashboard_uid', 'grafana_instance', 'profile_dashboard_id', 'workload_pattern'] as const
+    ).some((k) => differs(before[k], after[k]));
+    if (retargeted) {
+      const n = await this.disableProvisioned(after.id, after.organizationId, 'profile-slo-retargeted');
+      if (n > 0) this.logger.log(`Disabled ${n} provisioned SLO(s) of retargeted profile benchmark ${after.id}`);
+      return;
+    }
+    const panelChanged = (['panel_id', 'panel_title', 'panel_type'] as const).some((k) => differs(before[k], after[k]));
+    const valuesChanged = (
+      [
+        'requirement_operator', 'requirement_value', 'evaluate_type', 'metric_unit', 'match_pattern',
+        'average_all', 'exclude_ramp_up_time', 'validate_with_default_if_no_data',
+        'validate_with_default_if_no_data_value',
+      ] as const
+    ).some((k) => differs(before[k], after[k]));
+    if (!panelChanged && !valuesChanged) return;
+
+    const em = withRequestQuery(this.dataSource);
+    try {
+      if (panelChanged && after.source === DYNATRACE_HOSTS_PROFILE_SOURCE) {
+        const title = dynatraceHostPanelTitle(after.panel_id) ?? after.panel_title ?? '';
+        await em.query(
+          `UPDATE benchmarks b
+              SET panel_title = $2::text,
+                  configuration = b.configuration
+                    || jsonb_build_object('id', dq.panel_id::text, 'title', b.dashboard_label || ' - ' || $2::text),
+                  updated_at = now()
+             FROM dynatrace_queries dq
+            WHERE b.generic_check_id = $1 AND b.organization_id = $3 AND b.updated_by IS NULL
+              AND dq.application_dashboard_id = b.application_dashboard_id
+              AND dq.system_under_test_id = b.system_under_test_id
+              AND dq.test_environment = b.test_environment
+              AND dq.workload = b.workload
+              AND dq.panel_title = $2::text AND dq.enabled`,
+          [after.id, title, after.organizationId],
+        );
+        // Hosts without the new panel kept the old title: nothing left for them to judge.
+        await em.query(
+          `UPDATE benchmarks
+              SET enabled = false,
+                  metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($3::text, 'profile-slo-panel-missing'),
+                  updated_at = now()
+            WHERE generic_check_id = $1 AND organization_id = $4 AND updated_by IS NULL AND enabled
+              AND panel_title IS DISTINCT FROM $2::text`,
+          [after.id, title, PROVISIONED_SLO_AUTO_DISABLED_KEY, after.organizationId],
+        );
+      } else if (panelChanged) {
+        await em.query(
+          `UPDATE benchmarks
+              SET panel_title = $2::text,
+                  configuration = configuration
+                    || jsonb_build_object('id', $3::text, 'title', $2::text, 'type', $4::text),
+                  updated_at = now()
+            WHERE generic_check_id = $1 AND organization_id = $5 AND updated_by IS NULL`,
+          [after.id, after.panel_title ?? null, after.panel_id?.toString() ?? null, after.panel_type ?? null, after.organizationId],
+        );
+      }
+      if (valuesChanged) {
+        const matchPattern = after.match_pattern || null;
+        await em.query(
+          `UPDATE benchmarks
+              SET requirement_operator = $2::text, requirement_value = $3::numeric, evaluate_type = $4::text, metric_unit = $5::text,
+                  match_pattern = $6::text, average_all = $7, exclude_ramp_up_time = $8,
+                  validate_with_default_if_no_data = $9, validate_with_default_if_no_data_value = $10,
+                  configuration = (configuration - 'matchPattern')
+                    || jsonb_build_object('evaluateType', $4::text,
+                         'requirement', jsonb_build_object('operator', $2::text, 'value', $3::numeric))
+                    || CASE WHEN $6::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('matchPattern', $6::text) END
+                    || CASE WHEN configuration ? 'yAxesFormat' THEN jsonb_build_object('yAxesFormat', $5::text) ELSE '{}'::jsonb END,
+                  updated_at = now()
+            WHERE generic_check_id = $1 AND organization_id = $11 AND updated_by IS NULL`,
+          [
+            after.id, after.requirement_operator ?? null, after.requirement_value ?? null,
+            after.evaluate_type ?? null, after.metric_unit ?? null, matchPattern,
+            after.average_all ?? false, after.exclude_ramp_up_time ?? true,
+            after.validate_with_default_if_no_data ?? false, after.validate_with_default_if_no_data_value ?? null,
+            after.organizationId,
+          ],
+        );
+      }
+    } catch (error) {
+      if (isDuplicateSloTargetError(error)) {
+        throw new ConflictException(
+          `This change would move an SLO provisioned from this profile onto a panel that already has one. ${DUPLICATE_TARGET_MESSAGE}`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Delete a benchmark from a profile
    *
    * @param profileId - The profile ID
@@ -1279,6 +1419,11 @@ export class ProfilesService {
       this.auditService.logDelete(benchmark as unknown as OwnedResource, {
         organizationIdOverride: benchmark.organizationId,
       });
+
+      const disabled = await this.disableProvisioned(benchmark.id, benchmark.organizationId, 'profile-slo-deleted');
+      if (disabled > 0) {
+        this.logger.log(`Disabled ${disabled} SLO(s) provisioned from profile benchmark ${forLog(benchmarkId)}`);
+      }
 
       // Delete the benchmark
       await withRequestEm(this.profileBenchmarkRepo).remove(benchmark);
@@ -1420,4 +1565,9 @@ export class ProfilesService {
     await withRequestEm(this.profileRepo).remove(profile);
     this.logger.log(`Profile '${profile.name}' deleted by ${userId}`);
   }
+}
+
+/** Row count of a raw UPDATE: TypeORM's postgres driver returns `[rows, rowCount]` for one. */
+function affectedCount(res: unknown): number {
+  return Array.isArray(res) && typeof res[1] === 'number' ? res[1] : 0;
 }

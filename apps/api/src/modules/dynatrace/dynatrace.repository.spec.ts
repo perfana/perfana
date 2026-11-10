@@ -412,3 +412,75 @@ describe('DynatraceRepository — clientUrl column mapping', () => {
     expect(updateData).toHaveProperty('label', 'Renamed');
   });
 });
+
+/**
+ * A query's panel id is a hash of its dashboard label and title, and the SLOs and ADAPT
+ * configs on that panel key on the id. A rename must take them along; a delete must switch
+ * off the SLOs that can no longer see data instead of leaving them "passing" on no targets.
+ */
+describe('DynatraceRepository — SLOs follow their query', () => {
+  const stubRepo = () => ({}) as never;
+  let manager: { query: jest.Mock };
+  let queryRepo: { update: jest.Mock; findOne: jest.Mock; delete: jest.Mock };
+  let repository: DynatraceRepository;
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: 'q1', applicationDashboardId: 'ad-1', panelId: 111, panelTitle: 'CPU Usage',
+    dashboardLabel: 'Dynatrace host metrics host-a', ...over,
+  });
+  const sql = (i: number) => String(manager.query.mock.calls[i][0]).replace(/\s+/g, ' ');
+
+  beforeEach(() => {
+    manager = { query: jest.fn().mockResolvedValue([]) };
+    queryRepo = {
+      update: jest.fn().mockResolvedValue({}),
+      findOne: jest.fn(),
+      delete: jest.fn().mockResolvedValue({ affected: 2 }),
+    };
+    repository = new DynatraceRepository(
+      stubRepo(), queryRepo as never, stubRepo(), stubRepo(), stubRepo(), stubRepo(),
+      { manager } as never,
+    );
+  });
+
+  it('a renamed query carries its SLOs and compare configs to the new panel id', async () => {
+    jest.spyOn(repository, 'findQueryById').mockResolvedValue(row() as never);
+    queryRepo.findOne.mockImplementation(async () => row({ panelTitle: 'CPU', panelId: queryRepo.update.mock.calls[0][1].panelId }));
+
+    await repository.updateQuery('q1', { panelTitle: 'CPU' } as never);
+
+    const newId = queryRepo.update.mock.calls[0][1].panelId as number;
+    expect(newId).not.toBe(111);
+    expect(sql(0)).toMatch(/UPDATE benchmarks SET panel_title = \$4::text/);
+    expect(sql(0)).toMatch(/WHERE application_dashboard_id = \$1 AND configuration->>'id' = \$2::text/);
+    expect(manager.query.mock.calls[0][1]).toEqual(['ad-1', '111', String(newId), 'CPU', 'Dynatrace host metrics host-a']);
+    expect(sql(1)).toMatch(/UPDATE ds_compare_config c SET panel_id = \$3/);
+    expect(manager.query.mock.calls[1][1]).toEqual(['ad-1', 111, newId]);
+  });
+
+  it('an update that keeps the panel id moves nothing', async () => {
+    jest.spyOn(repository, 'findQueryById').mockResolvedValue(row() as never);
+    queryRepo.findOne.mockResolvedValue(row());
+
+    await repository.updateQuery('q1', { panelId: 111, query: 'x' } as never);
+
+    expect(manager.query).not.toHaveBeenCalled();
+  });
+
+  it('unmapping a host disables every SLO on its dashboard', async () => {
+    await repository.deleteHostMetricQueries('ad-1');
+
+    const i = manager.query.mock.calls.findIndex(([q]) => /UPDATE benchmarks/.test(q));
+    expect(sql(i)).toMatch(/SET enabled = false/);
+    expect(sql(i)).toMatch(/NOT EXISTS \( SELECT 1 FROM dynatrace_queries dq/);
+    expect(manager.query.mock.calls[i][1]).toEqual(['ad-1', null, 'autoDisabled', 'dynatrace-host-unmapped']);
+  });
+
+  it('deleting one query disables the SLOs on its panel only', async () => {
+    queryRepo.findOne.mockResolvedValue(row());
+
+    await repository.deleteQuery('q1');
+
+    expect(queryRepo.delete).toHaveBeenCalledWith('q1');
+    expect(manager.query.mock.calls[0][1]).toEqual(['ad-1', '111', 'autoDisabled', 'dynatrace-query-deleted']);
+  });
+});

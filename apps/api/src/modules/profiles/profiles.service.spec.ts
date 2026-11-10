@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { DataSource, Repository } from 'typeorm';
+import { NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import {
   Organization,
@@ -30,6 +30,7 @@ describe('ProfilesService', () => {
   let auditService: jest.Mocked<AuditService>;
   let mockCompareTemplateRepo: { count: jest.Mock; createQueryBuilder: jest.Mock };
   let organizationRepo: { findOne: jest.Mock };
+  let dbQuery: jest.Mock;
 
   const mockDate = new Date('2024-01-15T10:00:00.000Z');
 
@@ -211,6 +212,7 @@ describe('ProfilesService', () => {
     };
 
     organizationRepo = { findOne: jest.fn().mockResolvedValue(null) };
+    dbQuery = jest.fn().mockResolvedValue([[], 0]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -251,6 +253,8 @@ describe('ProfilesService', () => {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
+        // No request transaction in a unit test, so withRequestQuery falls back to the manager.
+        { provide: DataSource, useValue: { manager: { query: dbQuery } } },
         {
           provide: AuditService,
           useValue: {
@@ -1750,6 +1754,117 @@ describe('ProfilesService', () => {
       await expect(
         service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, mockOrgScope)
       ).rejects.toThrow('Foreign key constraint violation');
+    });
+  });
+
+  describe('provisioned SLO propagation', () => {
+    const base = (over: Partial<ProfileBenchmark> = {}) =>
+      ({ ...mockProfileBenchmark, organizationId: 'org-a', ...over }) as ProfileBenchmark;
+    const perfTest = () => base({
+      source: 'performance-metrics', profile_dashboard_id: undefined, grafana_instance: undefined,
+      dashboard_uid: '^performance-test-metrics-', panel_id: 201, panel_title: 'Request RT Avg', panel_type: 'graph',
+    });
+    const sqls = () => dbQuery.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
+
+    beforeEach(() => {
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.save.mockImplementation(async (b: any) => b);
+    });
+
+    it('deleting a profile SLO disables its untouched provisioned SLOs, before the row goes', async () => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(base());
+      profileBenchmarkRepo.remove.mockImplementation(async (b: any) => {
+        expect(dbQuery).toHaveBeenCalledTimes(1); // disabled first, same request transaction
+        return b;
+      });
+      dbQuery.mockResolvedValue([[], 3]);
+
+      await service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, mockOrgScope);
+
+      const [sql, params] = dbQuery.mock.calls[0];
+      expect(sql).toMatch(/SET enabled = false/);
+      expect(sql).toMatch(/generic_check_id = \$1 AND organization_id = \$4 AND updated_by IS NULL AND enabled/);
+      expect(params).toEqual(['benchmark-uuid-1', 'autoDisabled', 'profile-slo-deleted', 'org-a']);
+      expect(profileBenchmarkRepo.remove).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['source', { source: 'dynatrace-hosts', panelId: 1 }],
+      ['uid pattern', { dashboardUid: 'other-uid' }],
+      ['workload pattern', { workloadPattern: '^other$' }],
+    ])('a %s change disables the provisioned SLOs for the sweep to re-provision', async (_label, dto) => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(perfTest());
+
+      await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { ...dto, requirementValue: 1 } as any, mockUserId, mockOrgScope);
+
+      expect(dbQuery).toHaveBeenCalledTimes(1);
+      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'autoDisabled', 'profile-slo-retargeted', 'org-a']);
+    });
+
+    it('a threshold, operator or evaluate-type change rewrites the untouched provisioned SLOs in place', async () => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(base({ match_pattern: 'old.*' }));
+
+      await service.updateBenchmark(
+        'profile-uuid-1', 'benchmark-uuid-1',
+        { requirementOperator: 'gt', requirementValue: 5, evaluateType: 'max', matchPattern: '' } as any,
+        mockUserId, mockOrgScope,
+      );
+
+      expect(dbQuery).toHaveBeenCalledTimes(1);
+      const [sql, params] = dbQuery.mock.calls[0];
+      expect(sql).toMatch(/SET requirement_operator = \$2::text/);
+      expect(sql).toMatch(/WHERE generic_check_id = \$1 AND organization_id = \$11 AND updated_by IS NULL$/m);
+      expect(params[10]).toBe('org-a');
+      expect(params.slice(0, 6)).toEqual(['benchmark-uuid-1', 'gt', 5, 'max', mockProfileBenchmark.metric_unit ?? null, null]);
+      // the profile row is saved after the provisioned rows are moved
+      expect(dbQuery.mock.invocationCallOrder[0]).toBeLessThan(profileBenchmarkRepo.save.mock.invocationCallOrder[0]);
+    });
+
+    it('a panel change on a performance-metrics SLO moves its provisioned SLOs to the new panel', async () => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(perfTest());
+
+      await service.updateBenchmark(
+        'profile-uuid-1', 'benchmark-uuid-1', { panelId: 205, panelTitle: 'Request Error Rate' } as any, mockUserId, mockOrgScope,
+      );
+
+      expect(sqls()).toHaveLength(1);
+      expect(sqls()[0]).toMatch(/SET panel_title = \$2::text, configuration = configuration \|\| jsonb_build_object\('id', \$3::text/);
+      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'Request Error Rate', '205', 'graph', 'org-a']);
+    });
+
+    it('a panel change on a dynatrace-hosts SLO reads each host\'s panel id and disables hosts without it', async () => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(base({
+        source: 'dynatrace-hosts', profile_dashboard_id: undefined, grafana_instance: undefined,
+        dashboard_uid: '^dynatrace-dynatrace-host-metrics-', panel_id: 1, panel_title: 'CPU Usage',
+      }));
+
+      await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { panelId: 2 } as any, mockUserId, mockOrgScope);
+
+      expect(sqls()).toHaveLength(2);
+      expect(sqls()[0]).toMatch(/FROM dynatrace_queries dq/);
+      expect(sqls()[0]).toMatch(/dq\.panel_title = \$2::text AND dq\.enabled/);
+      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'Memory Usage', 'org-a']);
+      expect(sqls()[1]).toMatch(/SET enabled = false/);
+      expect(sqls()[1]).toMatch(/panel_title IS DISTINCT FROM \$2::text/);
+      expect(dbQuery.mock.calls[1][1]).toEqual(['benchmark-uuid-1', 'Memory Usage', 'autoDisabled', 'org-a']);
+    });
+
+    it('a move onto a panel that already has an enabled SLO is a 409 and the profile row is not saved', async () => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(base());
+      dbQuery.mockRejectedValue(Object.assign(new Error('dup'), { code: '23505', constraint: 'uq_benchmarks_active_metric_target' }));
+
+      await expect(
+        service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { matchPattern: 'x.*' } as any, mockUserId, mockOrgScope),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(profileBenchmarkRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('an edit that does not shape the SLO (tags) touches no provisioned SLO', async () => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(base());
+
+      await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { tags: ['x'] } as any, mockUserId, mockOrgScope);
+
+      expect(dbQuery).not.toHaveBeenCalled();
     });
   });
 

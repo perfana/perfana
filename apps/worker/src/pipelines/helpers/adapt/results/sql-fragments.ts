@@ -76,7 +76,7 @@ export class AdaptSQLFragments {
    * resolved config carries an explicit number. A control row with too few samples stays
    * `incomparable`: the floor is about a thin baseline, the default about an absent one, and
    * substituting a constant for a thin baseline would hide exactly what the floor exists to
-   * report. Absent or null means off, which is how every config written before v0.2.97.65
+   * report. Absent or null means off, which is how every config written before v0.2.97.66
    * reads once migration 1824 has stripped the `0` three writers used to store by default.
    *
    * `config_data` is untrusted (a bare `@IsObject()` on the API body), so a non-number is

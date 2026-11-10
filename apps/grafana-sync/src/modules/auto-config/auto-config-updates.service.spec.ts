@@ -867,6 +867,44 @@ describe('AutoConfigUpdatesService', () => {
         });
       });
 
+      it('re-enables a row the system switched off and drops only its marker', async () => {
+        systemUnderTestRepo.findOne.mockResolvedValue({ id: 'sut-1', name: 'my-app' });
+        benchmarkRepo.findOne.mockResolvedValue({
+          id: 'existing-1',
+          enabled: false,
+          metadata: { autoDisabled: 'profile-slo-retargeted', keep: 1 },
+        });
+        benchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+        const result = await service.insertBenchmarkBasedOnProfileBenchmark(
+          {
+            id: 'pb-1',
+            source: 'jmeter',
+            panel_id: 7,
+            panel_title: 'Throughput',
+            requirement_value: 5,
+            tags: [],
+          } as any,
+          {
+            testRunId: 't',
+            systemUnderTest: { name: 'my-app' },
+            testEnvironment: 'e',
+            workload: 'w',
+          } as any,
+          { id: 'ad-1', dashboardLabel: 'L', dashboardUid: 'u' } as any,
+        );
+
+        expect(result.wasCreated).toBe(false);
+        expect(benchmarkRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: 'existing-1',
+            enabled: true,
+            requirement_value: 5,
+            metadata: { keep: 1 },
+          }),
+        );
+      });
+
       it('should rethrow a save failure that is not the duplicate-SLO-target constraint', async () => {
         // Arrange: a 23505 on a *different* constraint (or a wholly different error) must
         // still abort provisioning for this dashboard rather than being swallowed.

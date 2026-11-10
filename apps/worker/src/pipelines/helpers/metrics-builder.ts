@@ -127,7 +127,7 @@ export function createDsCompareConfigRecordPanelLevel(
         absoluteThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.absoluteThreshold,
         ...(minSampleCount !== undefined ? { minSampleCount } : {}),
       },
-      // No defaultValueIfControlGroupMissing: since v0.2.97.65 ADAPT reads it, and a stored 0
+      // No defaultValueIfControlGroupMissing: since v0.2.97.66 ADAPT reads it, and a stored 0
       // would judge every new series against zero instead of reporting it incomparable.
     },
   };

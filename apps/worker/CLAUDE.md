@@ -393,9 +393,18 @@ Two bugs came out with it. `insertBenchmarkBasedOnProfileBenchmark` never wrote
 (12 `max` SLOs on the dev DB); migration 1810 backfills it and verdicts may change on the next
 evaluation. And `mapAggregationTypeToField` had no `q50` key while both SLO dialogs offer it.
 
-Residue: provisioned rows are write-once and the 5-minute auto-config window can miss a scenario
-dashboard written by a parked analyze (both TODOS.md); the profile form has no field for the regex
-(API only).
+Since v0.2.97.65 an edit or delete of the profile SLO reaches the rows it provisioned
+(`ProfilesService.propagateToProvisioned` / `disableProvisioned`), with one ownership rule: a row
+is still the profile's while `updated_by IS NULL` — grafana-sync never sets it and every API write
+does, so a person's tweak wins and is never overwritten or switched off — and to rows in the profile's own
+organization, since provisioning matches profiles by name across tenants. A delete disables (never
+deletes: the check results are run history); a threshold, evaluate-type, unit or panel change is
+written in place; a source, uid-pattern or workload-pattern change disables the rows with
+`metadata.autoDisabled` and the next sweep re-enables and re-syncs the ones still matched — the only
+case where `insertBenchmarkBasedOnProfileBenchmark`'s update branch runs. A Dynatrace host query's
+rename carries its SLOs and compare configs to the new panel id, and unmapping or deleting it
+disables its SLOs. Residue: the 5-minute auto-config window can miss a scenario dashboard written by
+a parked analyze (TODOS.md); the profile form has no field for the regex (API only).
 
 ### The perf-test error-rate SLO reads the transaction rollup, not the mean of the buckets
 
@@ -1044,7 +1053,7 @@ the same reason.
 
 ### `defaultValueIfControlGroupMissing` stands in for an ABSENT baseline, never a thin one
 
-Since v0.2.97.65 a compare config may carry `defaultValueIfControlGroupMissing`, and both ADAPT
+Since v0.2.97.66 a compare config may carry `defaultValueIfControlGroupMissing`, and both ADAPT
 builders (`sql-builder.ts`, `tracked-results-sql-builder.ts`) substitute it for `control_stat_value`
 when the baseline has no row for the series. The expressions live once, in `sql-fragments.ts`
 (`usesDefaultValueExpr`, `wrapControlStatValue`, `buildDefaultValueColumns`,

@@ -15,6 +15,7 @@ import {
   DYNATRACE_HOSTS_PROFILE_SOURCE,
   DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
   dynatraceHostPanelTitle,
+  PROVISIONED_SLO_AUTO_DISABLED_KEY,
 } from '@perfana/shared/constants';
 
 @Injectable()
@@ -219,7 +220,11 @@ export class BenchmarkProcessorService {
   }
 
   /**
-   * Create benchmark if it doesn't already exist
+   * Create the benchmark if it does not exist yet. An existing row is left alone — a person may
+   * have tweaked it, and their version wins — unless the system switched it off
+   * (PROVISIONED_SLO_AUTO_DISABLED_KEY: the profile SLO was retargeted, or the host query was
+   * unmapped) and nobody has edited it since: then this profile SLO still matches the
+   * dashboard, so the row is re-synced from it and switched back on.
    */
   private async createBenchmarkIfNotExists(
     testRun: TestRun,
@@ -234,7 +239,13 @@ export class BenchmarkProcessorService {
         testRun.workload,
       );
 
-    if (!existingBenchmark) {
+    const autoDisabled =
+      !!existingBenchmark &&
+      !existingBenchmark.enabled &&
+      !existingBenchmark.updated_by &&
+      !!existingBenchmark.metadata?.[PROVISIONED_SLO_AUTO_DISABLED_KEY];
+
+    if (!existingBenchmark || autoDisabled) {
       await this.updatesService.insertBenchmarkBasedOnProfileBenchmark(
         profileBenchmark,
         testRun,
@@ -242,7 +253,7 @@ export class BenchmarkProcessorService {
         panel,
       );
       this.logger.log(
-        `Created benchmark for profile benchmark ${panel?.panelTitle ?? (profileBenchmark.panel_title || profileBenchmark.id)} on dashboard ${applicationDashboard.id}`,
+        `${autoDisabled ? 'Re-enabled' : 'Created'} benchmark for profile benchmark ${panel?.panelTitle ?? (profileBenchmark.panel_title || profileBenchmark.id)} on dashboard ${applicationDashboard.id}`,
       );
     } else {
       this.logger.debug(

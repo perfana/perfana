@@ -687,7 +687,7 @@ describe('TestRunsMetricsService', () => {
         absoluteThreshold: null,
         percentageThreshold: 0.15,
       });
-      // Absent, never 0: ADAPT reads it since v0.2.97.65, and a 0 would judge new series against zero.
+      // Absent, never 0: ADAPT reads it since v0.2.97.66, and a 0 would judge new series against zero.
       expect(createdArg.config_data).not.toHaveProperty('defaultValueIfControlGroupMissing');
     });
 

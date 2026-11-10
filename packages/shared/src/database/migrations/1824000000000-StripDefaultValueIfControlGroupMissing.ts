@@ -2,9 +2,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
  * Removes the `defaultValueIfControlGroupMissing: 0` that three writers stored on every compare
- * config by default, so that ADAPT, which reads the key from v0.2.97.65, treats those rows as "off".
+ * config by default, so that ADAPT, which reads the key from v0.2.97.66, treats those rows as "off".
  *
- * Until v0.2.97.65 nothing read the key. The anomaly card saved `|| 0`, the golden-path applier's
+ * Until v0.2.97.66 nothing read the key. The anomaly card saved `|| 0`, the golden-path applier's
  * `INSERT_BASE` carried `0`, and the perf-test pipeline seeded `0` on every panel. Now that ADAPT
  * judges a series with no baseline row against the configured value, a stored 0 would turn every
  * new series on those panels from `incomparable` into a verdict against zero: a new transaction's
@@ -77,7 +77,7 @@ export class StripDefaultValueIfControlGroupMissing1824000000000 implements Migr
 
   /**
    * Nothing to restore. Putting the 0 back would switch the default ON for every row under the
-   * v0.2.97.65 worker, and an older worker never read the key, so an absent key is right for both.
+   * v0.2.97.66 worker, and an older worker never read the key, so an absent key is right for both.
    */
   public async down(): Promise<void> {}
 }

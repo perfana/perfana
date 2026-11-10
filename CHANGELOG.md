@@ -4,13 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.65] - 2026-11-10
+## [0.2.97.66] - 2026-11-10
 
 ### Added
 - **ADAPT can compare a series that has no baseline with a value you set.** A series that no baseline run has (a new transaction, a new pod) was always reported as incomparable, so it could never fail a run however far it moved. Set **When the baseline has no data → Compare against** in a panel's or series' ADAPT settings on the anomaly card, or `defaultValueIfControlGroupMissing` in an ADAPT template, and ADAPT compares the run with that value instead: for example 0 for an error count that should stay at zero. The percentage and absolute thresholds apply; the IQR threshold needs a baseline and is skipped. A baseline that has the series with too few samples is still reported as incomparable. The anomaly table and the report's Regressions section mark such a control value as configured.
 
 ### Changed
 - **Configs no longer carry a default of 0 for that setting.** The anomaly card, the ADAPT template applier and the performance-test pipeline wrote `defaultValueIfControlGroupMissing: 0` on every config, though nothing read it. Leaving it out now means off. Migration 1824 removes the stored 0s, so existing panels keep reporting a series without a baseline as incomparable; it does not mark any ADAPT result stale, since no verdict changes. A value other than 0, set through the API, and a template that names the setting, are kept and take effect from this version. Run the migration before the new worker: a worker that runs first compares new series on those panels with 0 until it does.
+
+## [0.2.97.65] - 2026-11-10
+
+### Fixed
+- **Editing a profile SLO now changes the SLOs it created.** Profile SLOs ("every scenario", "Dynatrace — all hosts" and Grafana templates) used to be written once: after a change to the profile SLO, every system kept judging the old panel or threshold. A change to the threshold, operator, aggregation, unit, match pattern or panel is now written to those SLOs straight away. For "Dynatrace — all hosts", each host gets its own panel for the new metric, and a host without that panel has its SLO switched off.
+- **Deleting a profile SLO switches off the SLOs it created.** They used to keep evaluating forever. They are disabled, not deleted, so past results stay readable.
+- **Changing what a profile SLO covers** (its source, dashboard pattern or workload pattern) switches its SLOs off. Each one is switched back on, with the new settings, the next time a test run of that workload finishes and the profile still covers that dashboard.
+- **An SLO you edited by hand stays yours.** None of the above touches an SLO someone has saved in the system's SLO list since it was created: it keeps its values and stays on, even when the profile SLO is deleted.
+- **Renaming a Dynatrace query no longer leaves its SLOs with nothing to evaluate.** A rename gives the query a new panel id. Its SLOs and ADAPT settings now move to that id with it. Previously they read "No targets found", which counts as a pass.
+- **Unmapping a Dynatrace host, or deleting one of its queries, switches off the SLOs on it.** If the host is mapped again, its profile SLOs come back on the next run.
+- **A profile SLO change that would put a second enabled SLO on a panel is refused with a 409**, and nothing is saved. Change the match pattern or disable the other SLO first.
+
+### Known limitations
+- The system's SLO list does not show which SLOs come from a profile, and does not warn that editing one stops it following the profile.
+- A changed source or pattern takes effect from the next test run. Until then that profile SLO is not evaluated on the dashboards it covered.
 
 ## [0.2.97.64] - 2026-11-10
 
