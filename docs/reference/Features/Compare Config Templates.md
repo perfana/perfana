@@ -95,6 +95,15 @@ attaching the template to the other organization's profile. The organization is 
 on every run and every request, so a profile moved to another organization takes its templates with it;
 it is not part of the template's identity.
 
+**`profiles.yaml` never takes over another organization's profile** (v0.2.97.62). When the file names an
+organization and a profile of the same name already exists in a different one, that profile is left
+alone: provisioning logs an error, and for the rest of that boot it attaches none of the files'
+dashboards, SLOs or templates for that name (a template item naming it is skipped like an unknown
+profile). Before, the profile was moved into the file's organization with its dashboards, SLOs and
+templates, so another tenant's templates could reach your runs. Rename one of the two profiles. A
+`profiles.yaml` with no `organizationId` still takes a profile over by name and leaves it in its own
+organization.
+
 A profile that does not exist skips the item with a warning. While such an item is in the file, the
 prune spares the provisioned templates of every profile that no other item resolves, since the item may
 mean a renamed profile; an item whose organization is not its profile's spares them the same way. A

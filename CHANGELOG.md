@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.62] - 2026-11-10
+
+### Security
+- **`profiles.yaml` no longer takes over a profile that belongs to another organization.** Provisioning matched profiles by name alone and, when the file named an organization, moved an existing profile of that name into it with the file's tags. Its dashboards, SLOs and, since v0.2.97.57, its ADAPT templates moved with it, so an admin of one organization could create a profile under a name about to be added to the file for another organization, attach templates that hide regressions, and have them applied to the other organization's runs after the next restart. Such a profile is now left alone and the API logs an error naming both organizations. For the rest of that boot, the files' dashboards, SLOs and templates for that name are skipped too, rather than being attached to the other organization's profile. Rename one of the two profiles to resolve it. A `profiles.yaml` without `organizationId` still takes a profile over by name and leaves it in its own organization.
+
 ## [0.2.97.61] - 2026-11-09
 
 ### Added
