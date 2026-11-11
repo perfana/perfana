@@ -100,7 +100,10 @@ Health validation modules:
 ### REST API (Default)
 - Uses `GrafanaApiService` (axios-based)
 - Standard Grafana API endpoints
-- API key authentication
+- Authenticates with the instance's API key, or HTTP basic auth from its username/password when
+  no key is set — one header builder, `requireGrafanaAuthHeader`
+  (`@perfana/shared/services/grafana/auth`), shared with apps/api and the worker. See
+  [[Integrations]]
 
 ### Direct Database (Optional)
 - `GrafanaDbService` connects directly to Grafana's backend DB

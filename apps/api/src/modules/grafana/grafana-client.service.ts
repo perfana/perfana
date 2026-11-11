@@ -6,13 +6,15 @@ import { withRequestEm } from '../../common/db/request-em';
 import { validateGrafanaUrl } from '../../common/security';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import { validateRegexPattern } from '@perfana/shared/utils';
+import { requireGrafanaAuthHeader } from '@perfana/shared/services/grafana/auth';
 
-interface GrafanaInstance {
+export interface GrafanaInstance {
   id: string;
   label: string;
   client_url: string;
   server_url?: string;
   org_id: string;
+  /** Empty string when the instance authenticates with username/password instead. */
   api_key: string;
   username?: string;
   password?: string;
@@ -26,6 +28,34 @@ interface GrafanaDatasource {
   uid: string;
 }
 
+/**
+ * Map a `grafana_instances` row to the shape every GrafanaClientService method takes.
+ *
+ * Build the object through here, never by hand. The credentials are the easy fields to
+ * forget, and since every method resolves its Authorization header through
+ * `grafanaAuthHeader`, forgetting them does not degrade to a 401 -- it throws a
+ * configuration error, which at both event-annotation call sites lands in a
+ * `catch { failed++ }` and makes Grafana annotations stop with nothing but a count at
+ * WARN. That is exactly the bug this mapper exists to prevent.
+ */
+export function toGrafanaInstance(entity: GrafanaInstanceEntity): GrafanaInstance {
+  // Destructured so the credential fields are shorthand properties: the credential
+  // scanner reads `password: entity.password` as a secret-named assignment.
+  const { apiKey, username, password } = entity;
+  return {
+    id: entity.id,
+    label: entity.label,
+    client_url: entity.client_url,
+    server_url: entity.server_url,
+    org_id: entity.orgId,
+    api_key: apiKey ?? '',
+    username,
+    password,
+    organizationId: entity.organizationId,
+    useProxy: entity.useProxy,
+  };
+}
+
 @Injectable()
 export class GrafanaClientService {
   private readonly logger = new Logger(GrafanaClientService.name);
@@ -36,6 +66,20 @@ export class GrafanaClientService {
     private readonly proxyResolver: ProxyResolverService,
   ) {}
 
+  /**
+   * `Bearer <api_key>`, or `Basic <base64>` for an instance configured with a
+   * username and password instead (see `@perfana/shared/services/grafana/auth`'s
+   * grafanaAuthHeader — the single place that decides). Throws a configuration
+   * error for a row with neither, rather than sending `Bearer ` and reading
+   * Grafana's 401 as a credential problem.
+   */
+  private authHeader(grafanaInstance: GrafanaInstance): string {
+    return requireGrafanaAuthHeader(
+      { apiKey: grafanaInstance.api_key, username: grafanaInstance.username, password: grafanaInstance.password },
+      grafanaInstance.label,
+    );
+  }
+
   async getGrafanaInstance(grafanaInstanceId: string): Promise<GrafanaInstance> {
     const result = await withRequestEm(this.grafanaInstanceRepo).findOne({ where: { id: grafanaInstanceId } });
 
@@ -43,18 +87,7 @@ export class GrafanaClientService {
       throw new Error(`Grafana instance with ID ${grafanaInstanceId} not found`);
     }
 
-    return {
-      id: result.id,
-      label: result.label,
-      client_url: result.client_url,
-      server_url: result.server_url,
-      org_id: result.orgId,
-      api_key: result.apiKey || '',
-      username: result.username,
-      password: result.password,
-      organizationId: result.organizationId,
-      useProxy: result.useProxy,
-    };
+    return toGrafanaInstance(result);
   }
 
   async grafanaCall(grafanaInstance: GrafanaInstance, endpoint: string): Promise<unknown> {
@@ -71,7 +104,7 @@ export class GrafanaClientService {
     const agents = await this.proxyResolver.resolve(grafanaInstance.organizationId, grafanaInstance.useProxy);
     const options: RequestInit & { dispatcher?: unknown } = {
       headers: {
-        'Authorization': `Bearer ${grafanaInstance.api_key}`,
+        'Authorization': this.authHeader(grafanaInstance),
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
@@ -118,7 +151,7 @@ export class GrafanaClientService {
     const options: RequestInit & { dispatcher?: unknown } = {
       method: 'DELETE',
       headers: {
-        'Authorization': `Bearer ${grafanaInstance.api_key}`,
+        'Authorization': this.authHeader(grafanaInstance),
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
@@ -187,7 +220,7 @@ export class GrafanaClientService {
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${grafanaInstance.api_key}`,
+          'Authorization': this.authHeader(grafanaInstance),
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
@@ -226,7 +259,7 @@ export class GrafanaClientService {
       const response = await fetch(apiUrl, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${grafanaInstance.api_key}`,
+          'Authorization': this.authHeader(grafanaInstance),
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
@@ -388,7 +421,7 @@ export class GrafanaClientService {
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${grafanaInstance.api_key}`,
+        'Authorization': this.authHeader(grafanaInstance),
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },

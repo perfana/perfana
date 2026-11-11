@@ -66,6 +66,11 @@
       "development": "./src/services/grafana/index.ts",
       "default": "./dist/services/grafana/index.js"
     },
+    "./services/grafana/auth": {
+      "types": "./dist/services/grafana/auth.d.ts",
+      "development": "./src/services/grafana/auth.ts",
+      "default": "./dist/services/grafana/auth.js"
+    },
     "./services/metrics-source-upsert": {
       "types": "./dist/services/metrics-source-upsert.d.ts",
       "development": "./src/services/metrics-source-upsert.ts",

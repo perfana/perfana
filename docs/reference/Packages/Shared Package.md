@@ -32,6 +32,7 @@ truth:
 @perfana/shared/realtime                    // Real-time/Pub-Sub exports
 @perfana/shared/constants                   // Constants
 @perfana/shared/services/grafana            // Grafana service
+@perfana/shared/services/grafana/auth       // Grafana Authorization header (leaf, not in the barrel)
 @perfana/shared/services/metrics-source-upsert // Metrics-source upsert service
 @perfana/shared/services/proxy              // Proxy/NO_PROXY helpers
 @perfana/shared/utils                       // Utility functions
@@ -115,6 +116,12 @@ truth:
 - Dashboard queries, panel retrieval
 - Metric/annotation operations
 - Variable expansion
+- `auth.ts` — `grafanaAuthHeader()` / `requireGrafanaAuthHeader()`, the one place that decides
+  how Perfana authenticates to a Grafana instance: `Bearer <api_key>` when a key is set,
+  otherwise `Basic <base64>` from `username`/`password`, otherwise no header. Every caller in
+  every app goes through it (v0.2.97.68). It is deliberately **not** re-exported from the
+  `services/grafana` barrel, which pulls in `client.ts` and so `axios` — a dependency
+  `apps/grafana-sync` does not declare. Import the leaf `@perfana/shared/services/grafana/auth`
 
 ### Realtime Publisher (`realtime/realtime-publisher.service.ts`)
 - Redis Pub/Sub wrapper

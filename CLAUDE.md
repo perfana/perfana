@@ -34,6 +34,7 @@ npm run dev
 | 🔌 MCP Server | `apps/mcp/` | MCP tool server for AI agents | [README](apps/mcp/README.md) |
 | 📊 Report | `apps/perfana-report/` | Report generation service | [README](apps/perfana-report/README.md) |
 | 📚 Deep Reference | `docs/reference/` | ADAPT, RBAC, schemas, features (narrative), how-to tutorials. For derivable "how does X work / what calls this" use GitNexus. | [Index](docs/reference/index.md) · [Tutorials](docs/reference/tutorials.md) |
+| 📖 User Guide | `docs-user/` | MkDocs Material site **published to docs.perfana.io** by `.github/workflows/docs.yml`. End-user docs: a change to what an operator configures or sees belongs here too, not only in `docs/reference/`. Build it with `mkdocs build --strict` from that directory — note strict mode does NOT catch a mis-indented continuation line, which renders as a code block, so check the generated HTML. | [mkdocs.yml](docs-user/mkdocs.yml) |
 | 🏗️ Infra | `docker-compose.infra.yml` | Full local stack | — |
 
 → System diagrams: [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -212,6 +213,20 @@ Anything that reads this table has to decide whether it means "real dashboards" 
 v0.2.89.0 fixed three symptoms of this: the grafana-sync restore sweep re-pushing artificial rows every 30s forever, one rejected dashboard aborting the whole sweep, and the API delete returning an opaque 500. See `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md` and `apps/api/src/modules/grafana/README.md`.
 
 ### The Grafana service account needs Viewer, and Editor only for the write features
+
+**Basic auth is a supported alternative to the token** (v0.2.97.68). `grafana_instances`
+carries `username` and `password` beside `api_key`, and
+`grafanaAuthHeader()` (`@perfana/shared/services/grafana/auth`) is the single place that
+picks between them: a non-blank `api_key` always wins, otherwise a username **and**
+password become `Basic <base64>`, and a row with neither produces no header and a
+configuration error naming the instance. All ten Grafana call sites go through it —
+apps/api's `GrafanaClientService`, apps/grafana-sync's `GrafanaApiService` and the shared
+`GrafanaClient` the worker queries panels with. A new call site that writes
+`Bearer ${apiKey}` by hand loses basic auth for that one endpoint silently, which is how
+the columns came to be stored, encrypted and masked for years without ever being sent.
+The same rule governs *usability*: the worker's `grafana-config-cache.ts` gates an
+instance on `server_url` plus `grafanaAuthHeader()`, not on `api_key`, or a basic-auth
+instance is classified `invalid` and every Grafana stage is skipped for it.
 
 Perfana's Grafana token runs on **Viewer** for collection and dashboard discovery, **Editor**
 for dashboard push, folder creation and annotations. Nothing needs org **Admin** any more
@@ -446,7 +461,7 @@ Symptom index. Each entry names the cause and points at the file that explains i
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **perfana** (23961 symbols, 66747 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **perfana** (24092 symbols, 67004 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

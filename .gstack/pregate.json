@@ -13,6 +13,9 @@
     "LICENSE": [],
     "VERSION": [],
     "apps/mcp/**": [],
+    "apps/worker/src/config/grafana-config-cache.ts": [
+      "apps/worker/src/test/unit/config/grafana-config-cache.test.ts"
+    ],
     "apps/worker/src/pipelines/helpers/series-grouping-plan.ts": [
       "apps/worker/src/test/unit/pipelines/statistics-series-grouping.test.ts"
     ],
@@ -21,6 +24,7 @@
     "packages/shared/src/entities/__tests__/__snapshots__/auditable-fields.snapshot.spec.ts.snap": [
       "packages/shared/src/entities/__tests__/auditable-fields.snapshot.spec.ts"
     ],
+    "packages/shared/src/services/grafana/index.ts": [],
     "scripts/pregate-runner.sh": [],
     "tsconfig*.json": []
   },

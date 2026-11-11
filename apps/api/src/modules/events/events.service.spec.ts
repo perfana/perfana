@@ -235,6 +235,53 @@ describe('EventsService', () => {
       expect(result).toEqual(mockEvent);
     });
 
+    it('carries a basic-auth instance credentials through to the annotation call', async () => {
+      // Regression: both annotation call sites built the GrafanaInstance literal by hand
+      // and omitted username/password. Every GrafanaClientService method resolves its
+      // header through grafanaAuthHeader, so for an instance with no api_key that is not
+      // a 401 — it THROWS, inside this method's `catch { failed++ }`. Grafana annotations
+      // stopped with nothing but a count at WARN.
+      asOrgMember(authzService, ['org-1']);
+      stubScopedLookup(sutRepo, [{ id: 'sut-1', organization_id: 'org-1' }]);
+      eventRepo.create.mockReturnValue({ ...mockEvent, id: undefined });
+      eventRepo.save.mockResolvedValue(mockEvent);
+      eventRepo.findOne.mockResolvedValue(mockEvent);
+      appDashboardRepo.find.mockResolvedValue([
+        {
+          dashboardUid: 'dash-1',
+          grafanaInstance: {
+            id: 'gi-1',
+            label: 'Basic-auth Grafana',
+            client_url: 'https://grafana.example.com',
+            server_url: 'https://grafana-server.example.com',
+            orgId: '1',
+            apiKey: null,
+            username: 'admin',
+            password: 'pw',
+            organizationId: 'org-1',
+            useProxy: false,
+          },
+        },
+      ]);
+      grafanaClient.createAnnotation.mockResolvedValue({ id: 99 });
+
+      await service.create(
+        {
+          title: 'Deploy',
+          systemUnderTest: 'sut-1',
+          testEnvironment: 'prod',
+          timestamp: '2024-01-15T10:00:00Z',
+        },
+        'user-1',
+        ['user'],
+      );
+
+      expect(grafanaClient.createAnnotation).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'admin', password: 'pw', api_key: '' }),
+        expect.objectContaining({ dashboardUID: 'dash-1' }),
+      );
+    });
+
     it('should throw NotFoundException for unknown system under test', async () => {
       asOrgMember(authzService, ['org-1']);
       stubScopedLookup(sutRepo, []);

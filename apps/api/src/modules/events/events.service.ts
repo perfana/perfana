@@ -6,7 +6,7 @@ import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource } from '@perfana/shared';
-import { GrafanaClientService } from '../grafana/grafana-client.service';
+import { GrafanaClientService, toGrafanaInstance } from '../grafana/grafana-client.service';
 import { CreateEventDto, UpdateEventDto, EventQueryDto } from './dto/event.dto';
 
 @Injectable()
@@ -236,18 +236,7 @@ export class EventsService {
         const key = `${instance.id}:${appDash.dashboardUid}`;
 
         try {
-          const grafanaInst = {
-            id: instance.id,
-            label: instance.label,
-            client_url: instance.client_url,
-            server_url: instance.server_url,
-            org_id: instance.orgId,
-            api_key: instance.apiKey || '',
-            organizationId: instance.organizationId,
-            useProxy: instance.useProxy,
-          };
-
-          const result = await this.grafanaClient.createAnnotation(grafanaInst, {
+          const result = await this.grafanaClient.createAnnotation(toGrafanaInstance(instance), {
             dashboardUID: appDash.dashboardUid,
             time: timestamp,
             tags: event.tags || [],
@@ -255,8 +244,16 @@ export class EventsService {
           });
 
           annotationIds[key] = result.id;
-        } catch {
+        } catch (err) {
           failed++;
+          // Keep the reason: a configuration error (an instance with no usable
+          // credentials) is indistinguishable from a Grafana outage without it, and the
+          // summary below reports only a count.
+          this.logger.debug(
+            `Grafana annotation failed for event ${event.id} on instance ${instance.label}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
         }
       }
 
@@ -288,21 +285,15 @@ export class EventsService {
         const instance = await withRequestEm(this.grafanaInstanceRepo).findOne({ where: { id: instanceId } });
         if (!instance) continue;
 
-        const grafanaInst = {
-          id: instance.id,
-          label: instance.label,
-          client_url: instance.client_url,
-          server_url: instance.server_url,
-          org_id: instance.orgId,
-          api_key: instance.apiKey || '',
-          organizationId: instance.organizationId,
-          useProxy: instance.useProxy,
-        };
-
-        await this.grafanaClient.deleteAnnotation(grafanaInst, annotationId);
+        await this.grafanaClient.deleteAnnotation(toGrafanaInstance(instance), annotationId);
         deleted++;
-      } catch {
+      } catch (err) {
         failed++;
+        this.logger.debug(
+          `Grafana annotation cleanup failed for event ${event.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
     }
 

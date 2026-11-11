@@ -137,6 +137,13 @@ HTTP client for the live Grafana API. Uses native `fetch` (Node 18+).
 - `getInfluxVariableValues(...)` — resolve template variable values via POST /api/ds/query (InfluxQL and Flux)
 - `getPrometheusVariableValues(...)` — resolve template variable values via Prometheus proxy
 
+Every method builds its `Authorization` header through `requireGrafanaAuthHeader`
+(`@perfana/shared/services/grafana/auth`), so an instance configured with a username and
+password instead of an API key works here too (v0.2.97.68), and a row with neither throws a
+configuration error naming the instance rather than sending `Bearer ` and reading Grafana's 401
+back. A new method that hand-rolls `Bearer ${api_key}` loses basic auth for that one endpoint
+silently.
+
 ### `GrafanaInstancesService`
 
 CRUD + org-scoped authorization for `GrafanaInstance` records. Credentials
@@ -144,7 +151,13 @@ are encrypted at rest by the `encryptedColumnTransformer` on the entity —
 decryption is transparent at the TypeORM layer. API responses always mask
 `api_key` and `password` with `[MASKED]`.
 
-Connection tests call `/api/health` on the configured URL.
+**The two connection-test endpoints do not contact Grafana.** Both carry a `TODO: Implement
+actual Grafana connection test`: `testConnection(id)` answers success if the instance row
+exists, and `testConnectionWithParams` only checks that a client URL, an org id and one usable
+credential were supplied. The credential half asks `grafanaAuthHeader` rather than testing
+`apiKey || (username && password)` by hand, so it agrees with what the real calls will do —
+the hand-rolled version passed `apiKey: '   '`, which `grafanaAuthHeader` trims and treats as
+absent. A green Test Connection therefore says nothing about whether the credential works.
 
 ### `GrafanaDashboardsService`
 

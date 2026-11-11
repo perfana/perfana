@@ -11,7 +11,17 @@ import { describe, test, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('../../../common/database-accessor.js');
 
+// The factory block below builds a REAL GrafanaClient, so axios has to be stopped
+// before it leaves the process. Nothing else in this file talks to axios.
+vi.mock('axios', () => ({
+  __esModule: true,
+  default: { get: vi.fn(), post: vi.fn() },
+  isAxiosError: () => false,
+}));
+
+import axios from 'axios';
 import * as databaseAccessor from '../../../common/database-accessor.js';
+import { createGrafanaClient } from '../../../config/grafana-client-factory.js';
 import {
   getGrafanaConfig,
   tryGetGrafanaConfig,
@@ -76,6 +86,29 @@ describe('grafana-config-cache', () => {
       ]);
 
       await expect(tryGetGrafanaConfig()).rejects.toThrow(/invalid/i);
+    });
+
+    test('accepts a row with a username/password and no apiKey (basic auth)', async () => {
+      // grafana_instances may authenticate with basic auth instead of a service-account
+      // token. Before v0.2.97.68 this row was classified 'invalid' and every
+      // Grafana-dependent job in the deployment was skipped for it.
+      findMock.mockResolvedValue([
+        {
+          id: 'inst-1',
+          server_url: 'https://grafana.example',
+          apiKey: '',
+          username: 'admin',
+          password: 'pw',
+          orgId: '1',
+        },
+      ]);
+
+      const config = await tryGetGrafanaConfig();
+      expect(config).toMatchObject({
+        url: 'https://grafana.example',
+        username: 'admin',
+        password: 'pw',
+      });
     });
 
     test('throws when the database query fails', async () => {
@@ -190,6 +223,32 @@ describe('grafana-config-cache', () => {
       expect(await getGrafanaConfigById('inst-2')).toBeNull();
     });
 
+    test('resolves a basic-auth instance and carries its credentials into the config', async () => {
+      findOneMock.mockResolvedValue({
+        id: 'inst-2',
+        server_url: 'https://g2',
+        apiKey: null,
+        username: 'admin',
+        password: 'pw',
+        orgId: '1',
+      });
+
+      const resolved = await getGrafanaConfigById('inst-2');
+      expect(resolved?.config).toMatchObject({
+        url: 'https://g2',
+        username: 'admin',
+        password: 'pw',
+      });
+    });
+
+    test('returns null for a row with a username but no password', async () => {
+      findOneMock.mockResolvedValue({
+        id: 'inst-2', server_url: 'https://g2', apiKey: '', username: 'admin', password: '', orgId: '1',
+      });
+
+      expect(await getGrafanaConfigById('inst-2')).toBeNull();
+    });
+
     test('returns null without poisoning the cache on a DB error', async () => {
       findOneMock.mockRejectedValueOnce(new Error('connection refused'));
       expect(await getGrafanaConfigById('inst-2')).toBeNull();
@@ -197,6 +256,47 @@ describe('grafana-config-cache', () => {
       // A later call retries (transient error was not cached).
       findOneMock.mockResolvedValue({ id: 'inst-2', server_url: 'https://g2', apiKey: 'k', orgId: '1' });
       expect(await getGrafanaConfigById('inst-2')).not.toBeNull();
+    });
+  });
+
+  /**
+   * The seam between this cache and the client: `createGrafanaClient` spreads
+   * `resolved.config` wholesale. Replacing that spread with an explicit field list
+   * type-checks (every credential field is optional on GrafanaConfig) and would
+   * silently drop username/password — the worker would then query a basic-auth
+   * Grafana with no Authorization header at all and collect nothing, with the cache
+   * tests above and the client's own header tests both still green.
+   */
+  describe('createGrafanaClient (credentials survive the hand-off)', () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    test('a basic-auth instance reaches Grafana with a Basic header', async () => {
+      findOneMock.mockResolvedValue({
+        id: 'inst-2',
+        server_url: 'https://grafana.example.com',
+        apiKey: null,
+        username: 'admin',
+        password: 'pw',
+        orgId: '1',
+        useProxy: false,
+        organizationId: null,
+      });
+      vi.mocked(axios.get).mockResolvedValue({
+        status: 200,
+        data: { id: 1, uid: 'u', name: 'n', type: 'prometheus' },
+      } as never);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const client = await createGrafanaClient('inst-2', logger as any);
+      await client!.getDatasourceByUid('u');
+
+      const [, options] = vi.mocked(axios.get).mock.calls[0] as unknown as [
+        string,
+        { headers: Record<string, string> },
+      ];
+      expect(options.headers['Authorization']).toBe(
+        `Basic ${Buffer.from('admin:pw').toString('base64')}`,
+      );
     });
   });
 

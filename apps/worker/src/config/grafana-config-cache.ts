@@ -1,4 +1,5 @@
 import { GrafanaConfig } from '@perfana/shared/services/grafana';
+import { grafanaAuthHeader } from '@perfana/shared/services/grafana/auth';
 import { getLogger } from '../lib/utils/logger.js';
 import { getDatabaseService } from '../common/database-accessor.js';
 
@@ -57,14 +58,20 @@ async function loadFromDatabase(): Promise<LoadResult> {
       return 'not-configured';
     }
 
-    if (!grafanaInstance.server_url || !grafanaInstance.apiKey) {
-      logger.warn('Grafana instance row found but missing server_url or apiKey — Grafana-dependent jobs will fail');
+    // Credentials are either an api_key or a username/password pair — grafanaAuthHeader
+    // is the authority, so a basic-auth-only instance is usable here and is not
+    // reported as a misconfigured row.
+    if (!grafanaInstance.server_url || !grafanaAuthHeader(grafanaInstance)) {
+      logger.warn('Grafana instance row found but missing server_url or credentials — Grafana-dependent jobs will fail');
       return 'invalid';
     }
 
+    const { apiKey, username, password } = grafanaInstance;
     cachedConfig = {
       url: grafanaInstance.server_url,
-      apiKey: grafanaInstance.apiKey,
+      apiKey,
+      username,
+      password,
       orgId: grafanaInstance.orgId,
     };
     cachedInstanceId = grafanaInstance.id;
@@ -142,13 +149,13 @@ export async function tryGetGrafanaConfig(): Promise<GrafanaConfig | null> {
   if (result === 'not-configured') {
     return null;
   }
-  throw new Error('Grafana config not available. A grafana_instances row exists but is invalid (check server_url and apiKey).');
+  throw new Error('Grafana config not available. A grafana_instances row exists but is invalid (check server_url, and either api_key or username/password).');
 }
 
 /**
  * Resolve config + meta for a SPECIFIC Grafana instance by id, caching per id.
  *
- * Returns null if the row is missing or invalid (bad server_url/apiKey) — callers
+ * Returns null if the row is missing or invalid (bad server_url/credentials) — callers
  * should skip that instance's panels rather than silently hitting the wrong Grafana.
  * Use this (not the singleton {@link getGrafanaConfig}) whenever a dashboard/panel
  * carries its own grafana_instance_id, so multi-instance setups query the right host.
@@ -165,13 +172,20 @@ export async function getGrafanaConfigById(instanceId: string): Promise<Resolved
       byInstanceId.set(instanceId, null);
       return null;
     }
-    if (!instance.server_url || !instance.apiKey) {
-      logger.warn(`Grafana instance ${instanceId} missing server_url or apiKey — panels on it will be skipped`);
+    if (!instance.server_url || !grafanaAuthHeader(instance)) {
+      logger.warn(`Grafana instance ${instanceId} missing server_url or credentials — panels on it will be skipped`);
       byInstanceId.set(instanceId, null);
       return null;
     }
+    const { apiKey, username, password } = instance;
     const resolved: ResolvedGrafanaInstance = {
-      config: { url: instance.server_url, apiKey: instance.apiKey, orgId: instance.orgId },
+      config: {
+        url: instance.server_url,
+        apiKey,
+        username,
+        password,
+        orgId: instance.orgId,
+      },
       meta: { organizationId: instance.organizationId ?? null, useProxy: instance.useProxy ?? false },
     };
     byInstanceId.set(instanceId, resolved);
@@ -221,7 +235,7 @@ export function clearGrafanaConfigCache(): void {
  * more than one Grafana instance:
  *
  * `tryGetGrafanaConfig()` resolves the **oldest row in the whole table** and throws
- * `'invalid'` when that row is missing `server_url` or `apiKey`. Since those two stages
+ * `'invalid'` when that row is missing `server_url` or any credentials. Since those two stages
  * were gated on it, **one misconfigured legacy row failed panels-processing and
  * metrics-collection for every run in the deployment** — including runs whose
  * dashboards live on a perfectly healthy second instance. The singleton's identity was
@@ -281,7 +295,7 @@ export async function hasUsableGrafanaForRun(
 
   if (usable === 0) {
     logger.warn(
-      `This run names ${instanceIds.length} Grafana instance(s) and none is usable (missing server_url or apiKey) — skipping the Grafana stages for it`,
+      `This run names ${instanceIds.length} Grafana instance(s) and none is usable (missing server_url or credentials) — skipping the Grafana stages for it`,
     );
     return false;
   }

@@ -13,6 +13,180 @@ with the version it landed in.
 
 ## Grafana integration
 
+### Test Connection never contacts Grafana, and the dialog paints its failure green (P1)
+
+Origin: /ship review of basic auth (v0.2.97.68).
+
+`testConnectionWithParams` and the by-id `testConnection` in
+`apps/api/src/modules/grafana/grafana-instances.service.ts` both carry
+`// TODO: Implement actual Grafana connection test` and return
+`{ success: true, message: 'Connection test successful' }` after only checking that a
+URL, an org id and one credential are present. Both are live routes
+(`grafana-instances.controller.ts`, `@Post('test-connection')` and
+`@Post(':id/test-connection')`). A wrong password, a proxy that strips `Authorization`,
+or a Grafana that refuses basic auth all answer 200 success; the real failure then
+surfaces as a 500 elsewhere or as silently skipped worker stages.
+
+Basic auth makes this load-bearing: it is the one affordance an operator reaches for to
+check a username/password instance, and it cannot check it.
+
+Two aggravating halves, both pre-existing:
+- Testing an *existing* basic-auth instance from the edit dialog always fails the
+  presence check, because `useGrafanaIntegration.ts` sends `password: ''` on the test
+  path (it does not strip blanks there the way the update path does).
+- `useGrafanaIntegration.ts` renders any resolved body with `severity: 'success'` — it
+  reads `result.message` and never `result.success`. So that failure arrives as a green
+  snackbar reading "Either API Key or Username/Password must be provided".
+
+Fix: issue one `GET /api/org` (or `/api/health`) through `grafanaAuthHeader` plus the
+existing SSRF validator, and branch the hook on `result.success`.
+
+### A wrong Grafana password reports as "no result found", not as an auth failure (P2)
+
+Origin: /ship adversarial review of basic auth (v0.2.97.68).
+
+`packages/shared/src/services/grafana/batching.ts` reads the batch HTTP status and
+deliberately discards it (`const _statusCode = responseAny.status;` behind an
+eslint-disable). A 401 body carries no `results`, so every mapping falls through to
+`No result found for query <refId>` with `status_code: undefined`. A wrong
+username/password is newly reachable here — such a row used to be gated out upstream for
+having no `api_key` — and it is the single most likely misconfiguration of this feature.
+Surfacing the status when it is 401/403 would make it self-diagnosing.
+
+### The incremental collector reports success when every Grafana instance is unusable (P2)
+
+Origin: /ship adversarial review of basic auth (v0.2.97.68).
+
+`apps/worker/src/pipelines/helpers/incremental/grafana-collector.ts` builds its groups via
+`groupPanelsByGrafanaInstance`, which drops a group whose client is null with a WARN and
+`continue`. If every instance is unusable the group list is empty, the loop never runs,
+and the tick returns `{ success: true, dataPoints: 0, errors: [] }` — which records the
+range as collected (see Common Issues #25/#30: recovery then needs a force-refetch) and
+can pin the run invalid at 0% coverage (#21). Pre-existing — the old `!instance.apiKey`
+gate reached the same arm — but basic auth adds an operator action that lands here
+(configure it, get the password wrong).
+
+### `GrafanaInstance` still compiles without credentials, so the mapper is a convention (P3)
+
+Origin: /ship adversarial review of basic auth (v0.2.97.68).
+
+`toGrafanaInstance` exists because the credential fields are the easy ones to forget, and
+forgetting them is not a 401 but a throw inside a caller's catch. But the interface it
+returns declares `api_key: string` required and `username?`/`password?` optional, so a new
+hand-built `{ ..., api_key: inst.apiKey || '' }` still type-checks. Making the credential
+fields required-but-nullable, or branding the type so only the mapper can produce one,
+turns the next occurrence into a tsc failure instead of a silent outage.
+
+### A colon in a Grafana username silently truncates the password (P4)
+
+Origin: /ship adversarial review of basic auth (v0.2.97.68).
+
+RFC 7617 splits `base64(user:pass)` on the FIRST colon, so a username containing one
+makes the server read a different password than the operator typed. Nothing validates it:
+the DTO is `@IsString()` and the zod schema is `z.string().max(255).optional()`. Reject a
+colon in `username` at the DTO, or document it. Unverified against Grafana's own split
+behaviour.
+
+### Warn when basic auth is selected over plain http (P2)
+
+Origin: /ship security review of basic auth (v0.2.97.68).
+
+`http://` is deliberately allowed for Grafana URLs (`validateGrafanaUrl` passes
+`allowedSchemes: ['http:', 'https:']`, and `require_tld` is off for internal hostnames),
+which is a real deployment shape. It was already true for the service-account token, but
+basic auth changes the kind of credential on the wire: a reusable account password,
+often the Grafana login, rather than a scoped revocable token. base64 is not encryption.
+
+A hard scheme check would break existing http deploys, so emit a one-time WARN when
+`grafanaAuthHeader` selects `Basic` for an `http://` origin. The header builder is pure
+and sees no URL, so the warning belongs at the three call sites that hold both the URL
+and a logger. Also worth pinning the protocol in the DTO description.
+
+### A failed credential decryption is sent to Grafana as the password (P3)
+
+Origin: /ship security review of basic auth (v0.2.97.68).
+
+`encrypted-column.transformer.ts` returns the *ciphertext* when decryption fails, and
+its `logWarnings` defaults to `NODE_ENV !== 'production'`, so in production it is silent.
+On a rotated `ENCRYPTION_KEY`, or a SUT bundle imported into another environment (the
+ciphertext travels verbatim in the bundle), `grafanaAuthHeader` now base64s
+`admin:<AES-GCM ciphertext>` and posts it, where it lands in Grafana's auth logs. Not a
+plaintext leak, and the same was already true of `Bearer <ciphertext>`; the symptom is an
+opaque 401. Decide whether to fail loudly instead, and document it either way.
+
+### No way to clear a Grafana credential from the UI (P3)
+
+Origin: /ship security review of basic auth (v0.2.97.68).
+
+A blank field means "keep the stored value" (`useGrafanaIntegration.ts` strips blank
+`apiKey`/`password` before PATCH), so there is no UI path to retire a credential.
+Combined with the new fallback, an operator who blanks the API key to retire a token
+does not retire anything, and one who clears it through the API gets a silent downgrade
+to a username/password they may believe is dead. Needs an explicit "clear" affordance,
+and `update` should treat `null`/`''` as clear the way the Dynatrace `client_url`
+convention already does (see "One unset representation" in CLAUDE.md).
+
+### `grafana_instances` create/update disagree on what '' means (P3)
+
+Origin: /ship api-contract review of basic auth (v0.2.97.68).
+
+Create collapses blank to absent (`apiKey: createDto.apiKey || undefined`); update stores
+`''` verbatim (`if (updateDto.username !== undefined) entity.username = updateDto.username`).
+So the column has two "unset" representations, and the web edit dialog sends
+`username: ''` on every update of an API-key-only instance, turning NULL into `''`.
+Functionally benign today (`grafanaAuthHeader` trims, and the transformer round-trips
+`''`), but it diverges from the documented convention. `username` also has no
+`'[MASKED]'` guard, unlike the two secrets.
+
+### "At least one credential" is enforced on test-connection but not on create (P3)
+
+Origin: /ship api-contract review of basic auth (v0.2.97.68).
+
+`POST /grafana-instances/test-connection` rejects a credential-less payload while
+`POST /grafana-instances` accepts it and returns 201, and the DTO documents all three
+fields as plain `@ApiPropertyOptional`. A CI/provisioning client reading Swagger will
+create unusable instances and find out from a worker log. Enforce
+"apiKey OR (username AND password)" on **create** only — the edit path must keep
+accepting blanks, since blank means "keep the stored value" there — and say so in the
+`@ApiPropertyOptional` descriptions.
+
+### `grafana-client.test.ts` is 20 skipped tests against a class that no longer exists (P3)
+
+Origin: /ship testing review of basic auth (v0.2.97.68).
+
+`apps/worker/src/test/unit/lib/grafana-client.test.ts` is `describe.skip`'d in full and
+imports `GrafanaAPIClient`, which `packages/shared` does not export and which no longer
+exists anywhere (`grep -rn GrafanaAPIClient packages/shared/src` → 0 hits). It has been
+skipped since the repo's first commit, so it has never run here. Either delete it, or
+rewrite it against `GrafanaClient` (a subject rename, `baseURL`→`url`, and real
+axios-instance mocks). Its auth assertions would add only Bearer coverage; the basic-auth
+contract is now pinned one layer down in
+`packages/shared/src/services/grafana/__tests__/client-auth.spec.ts`.
+
+### Basic auth is unverified for a Viewer-role Grafana account (P3)
+
+Origin: /ship live QA of basic auth (v0.2.97.68).
+
+Verified live against Grafana 12.4: `GET /api/org`, `GET /api/search`,
+`GET /api/dashboards/uid/:uid` and `POST /api/ds/query` all answer 200 for the exact
+`Basic` header the code builds, and the real built `GrafanaClient` authenticates with
+username/password, prefers an api key when both are set, and rejects a wrong password.
+That probe account is an **Admin**, so the documented minimum (Viewer for collection,
+Editor for the write features) is untested *for basic auth specifically*. Grafana applies
+the same RBAC to a basic-auth session as to a token, so this is expected to hold — it has
+simply not been demonstrated. Create a Viewer user on a dev Grafana and re-run the probe.
+
+### Per-call-site Basic assertions cover 3 of the 10 Grafana call sites (P4)
+
+Origin: /ship testing review of basic auth (v0.2.97.68).
+
+`Basic` is asserted on apps/api's `grafanaCall`, grafana-sync's `get` and both shared
+client sites. The other seven keep a Bearer-only assertion, so reverting one of them to a
+hand-rolled `Bearer ${...}` stays green — the regression the feature's own module comment
+warns about. Deliberately NOT fixed with seven near-duplicate header tests; the cheap
+version is to table-drive the credential shape into the three existing api assertions that
+already check `Authorization`.
+
 ### The two apps disagree on the variable-query time window (P2)
 
 `getInfluxVariableValues` sends `from = now - 24h` (apps/api,

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
+import { grafanaAuthHeader } from '@perfana/shared/services/grafana/auth';
 import { CreateGrafanaInstanceDto, UpdateGrafanaInstanceDto } from './dto/grafana-instance.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
@@ -428,7 +429,11 @@ export class GrafanaInstancesService {
         throw new Error('Client URL and Organization ID are required');
       }
 
-      if (!params.apiKey && (!params.username || !params.password)) {
+      // grafanaAuthHeader is the authority on "does this row have usable credentials",
+      // so this gate agrees with what the Grafana calls will actually do. Hand-rolling it
+      // here diverged: `apiKey: '   '` passed this check while grafanaAuthHeader trims
+      // and treats whitespace as absent.
+      if (!grafanaAuthHeader(params)) {
         throw new Error('Either API Key or Username/Password must be provided');
       }
 
