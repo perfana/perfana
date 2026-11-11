@@ -3,6 +3,13 @@ import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult, PanelDocument, PanelMetricsDocument } from '../types/pipeline.js';
 import { getGrafanaInstanceId, hasUsableGrafanaForRun } from '../config/grafana-config-cache.js';
 import { groupPanelsByGrafanaInstance } from '../config/grafana-client-factory.js';
+import {
+  clampToDsMetricsWidths,
+  collapsedKeyNote,
+  dedupeByDsMetricsKey,
+  newTruncationReport,
+  truncationWarning,
+} from './helpers/ds-metrics-columns.js';
 
 /**
  * Number of records per INSERT batch.
@@ -275,6 +282,9 @@ export class MetricsPipeline extends BasePipelineTypeORM {
     );
 
     const allRecords: unknown[] = [];
+    // One report for the whole pass, so the warning names every offending panel once. Bounded
+    // by panels x clamped columns, never by data points.
+    const report = newTruncationReport();
 
     // Process panels without errors - query Grafana and transform to records.
     // Panels can span multiple Grafana instances (each application dashboard carries
@@ -308,7 +318,27 @@ export class MetricsPipeline extends BasePipelineTypeORM {
               continue;
             }
 
-            const flattenedRecords = this.flattenSingleDocument(metricsDocument, testRun);
+            // Clamp to the column widths and collapse the rows that then share a conflict key,
+            // PER DOCUMENT. A document is one panel of one dashboard, and the conflict key
+            // carries both, so every collision the clamp can create is inside one document —
+            // which bounds this to a panel's points instead of the run's. Deduping the whole
+            // run needed a Map measured at ~310 MB per million rows, held across the write
+            // transaction; gating that Map on "did anything truncate" was worse than useless,
+            // because the answer is yes exactly on the runs this exists for. Doing it here
+            // also keeps it out of the transaction, so a `withRetry` attempt does not redo it,
+            // and the row count the caller reports is the count actually written.
+            const clamped = this.flattenSingleDocument(metricsDocument, testRun).map(record =>
+              clampToDsMetricsWidths(record as Record<string, unknown>, report)
+            );
+            const flattenedRecords = dedupeByDsMetricsKey(clamped);
+            const collapsed = collapsedKeyNote(
+              clamped.length,
+              flattenedRecords.length,
+              `panel ${metricsDocument.panel_id} "${metricsDocument.panel_title}"`
+            );
+            if (collapsed) {
+              this.logger.warn(collapsed);
+            }
             allRecords.push(...flattenedRecords);
           }
         } catch (error) {
@@ -330,6 +360,11 @@ export class MetricsPipeline extends BasePipelineTypeORM {
           .join('; ');
         this.logger.warn(`⚠️ Skipping panel ${panel.panel_id} (${panel.panel_title}): ${errorMessages}`);
       }
+    }
+
+    const warning = truncationWarning(report);
+    if (warning) {
+      this.logger.warn(warning);
     }
 
     return allRecords;
@@ -499,24 +534,11 @@ export class MetricsPipeline extends BasePipelineTypeORM {
         updated_by = EXCLUDED.updated_by
     `;
 
-    // Column length limits from the database schema
-    const varcharLimits: Record<string, number> = {
-      metric_name: 255,
-      dashboard_uid: 255,
-      dashboard_label: 255,
-      panel_title: 500,
-      unit: 50,
-    };
-
-    // Flatten parameters for prepared statement, truncating strings to column limits
-    const params = batch.flatMap(record => {
-      const r = record as Record<string, unknown>;
-      return columns.map(col => {
-        const val = r[col];
-        const limit = varcharLimits[col];
-        return (limit && typeof val === 'string') ? val.substring(0, limit) : val;
-      });
-    });
+    // Already clamped and deduplicated by `getPanelMetricsAsRecords`, per panel document, before
+    // these rows were ever accumulated. This method binds and nothing else.
+    const params = batch.flatMap(record =>
+      columns.map(col => (record as Record<string, unknown>)[col])
+    );
 
     await manager.query(sql, params);
   }

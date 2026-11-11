@@ -720,6 +720,150 @@ describe('MetricsPipeline', () => {
       );
     });
 
+    test('clamps an over-long metric name to 255 and names the panel to fix', async () => {
+      // A Prometheus panel with no legendFormat is named after its whole label set. The
+      // incremental writer had no clamp and died on 22001; this path clamps, and because
+      // metric_name is part of the primary key a clamp can merge two series, so it warns.
+      const longName = '{__name__="memory_maxHeap_bytes", pod="wsi-7bd7574566-j2qlw"'.padEnd(300, 'x');
+      const mockTestRun = createMockTestRun();
+      const mockPanels = [createMockPanel()];
+      const mockMetricsDoc = createMockMetricsDocument({
+        panel_id: 26,
+        panel_title: 'Configured Maximum Heap Size',
+        data: [
+          {
+            metric_name: longName,
+            time: new Date('2024-01-01T00:30:00Z'),
+            timestep: 1800,
+            ramp_up: false,
+            value: 512,
+            unit: 'bytes',
+          },
+        ],
+      });
+
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
+      mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
+      mockGrafanaClient.queryPanelData.mockResolvedValue([mockMetricsDoc]);
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      const bound = (mockEntityManager.query.mock.calls as any[][]).flatMap(call => call[1] as unknown[]);
+      expect(bound).toContain(longName.substring(0, 255));
+      expect(bound).not.toContain(longName);
+
+      const warning = (mockLogger.warn.mock.calls as any[][])
+        .map(call => String(call[0]))
+        .find(msg => msg.includes('Truncated over-long ds_metrics values'));
+      expect(warning).toBeDefined();
+      expect(warning).toContain('legendFormat');
+      expect(warning).toContain('metric_name on panel 26 "Configured Maximum Heap Size"');
+    });
+
+    test('collapses two series that clamp to one name, instead of binding both', async () => {
+      // The five topk() series of a panel with no legendFormat differ only in a label that
+      // sits past character 255, so after the clamp they are one name at one timestamp. Two
+      // such rows in one ON CONFLICT DO UPDATE are rejected with 21000 ("cannot affect row a
+      // second time"), which fails the whole statement — so they are collapsed, last wins.
+      const prefix = '{__name__="ft_invocations_total"'.padEnd(255, 'y');
+      const mockTestRun = createMockTestRun();
+      const mockPanels = [createMockPanel()];
+      const mockMetricsDoc = createMockMetricsDocument({
+        panel_id: 128,
+        panel_title: 'Top 5 Most Frequently Failing Methods',
+        data: [
+          {
+            metric_name: `${prefix}, method="a"`,
+            time: new Date('2024-01-01T00:30:00Z'),
+            timestep: 1800, ramp_up: false, value: 11, unit: '%',
+          },
+          {
+            metric_name: `${prefix}, method="b"`,
+            time: new Date('2024-01-01T00:30:00Z'),
+            timestep: 1800, ramp_up: false, value: 22, unit: '%',
+          },
+        ],
+      });
+
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
+      mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
+      mockGrafanaClient.queryPanelData.mockResolvedValue([mockMetricsDoc]);
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      const insertCalls = (mockEntityManager.query.mock.calls as any[][]).filter(call =>
+        String(call[0]).includes('INSERT INTO ds_metrics')
+      );
+      const bound = insertCalls.flatMap(call => call[1] as unknown[]);
+      const columns = 21;
+      const names = bound.filter((_, i) => i % columns === 9);
+      expect(names).toEqual([prefix]);
+      // Last write wins, so the surviving row carries the second series' value.
+      expect(bound.filter((_, i) => i % columns === 13)).toEqual([22]);
+    });
+
+    test('dedupes across statement boundaries, not within each batch', async () => {
+      // THE invariant of this writer's dedup, and the one a 2-row fixture cannot see:
+      // DB_INSERT_BATCH_SIZE is 200, so deduping inside the batch loop passes every other
+      // test here and still sends 21000 to Postgres whenever the colliding pair straddles a
+      // boundary. Proven: moving the dedup into the loop leaves this red and the rest green.
+      const prefix = '{__name__="ft_invocations_total"'.padEnd(255, 'y');
+      const at = (i: number) => new Date(Date.UTC(2024, 0, 1, 0, i % 60, Math.floor(i / 60)));
+      const mockTestRun = createMockTestRun();
+      const mockPanels = [createMockPanel()];
+      const mockMetricsDoc = createMockMetricsDocument({
+        panel_id: 128,
+        panel_title: 'Top 5 Most Frequently Failing Methods',
+        data: [
+          // 199 rows, then the colliding pair at indices 199 and 200 — either side of the
+          // 200-row batch boundary — then enough rows that the DEDUPED set still needs two
+          // statements, so a correct writer also emits more than one.
+          ...Array.from({ length: 199 }, (_, i) => ({
+            metric_name: `filler_${i}`,
+            time: at(i),
+            timestep: 60, ramp_up: false, value: i, unit: '%',
+          })),
+          { metric_name: `${prefix}, method="a"`, time: at(500), timestep: 60, ramp_up: false, value: 11, unit: '%' },
+          { metric_name: `${prefix}, method="b"`, time: at(500), timestep: 60, ramp_up: false, value: 22, unit: '%' },
+          ...Array.from({ length: 60 }, (_, i) => ({
+            metric_name: `tail_${i}`,
+            time: at(600 + i),
+            timestep: 60, ramp_up: false, value: i, unit: '%',
+          })),
+        ],
+      });
+
+      mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
+      mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
+      mockGrafanaClient.queryPanelData.mockResolvedValue([mockMetricsDoc]);
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      const COLS = 21;
+      // The five conflict-key columns, by position in the bound row.
+      const KEY_COLS = [0, 1, 4, 9, 10];
+      const keysOf = (params: unknown[]) =>
+        Array.from({ length: params.length / COLS }, (_, r) =>
+          KEY_COLS.map(c => String(params[r * COLS + c])).join('|')
+        );
+
+      const inserts = (mockEntityManager.query.mock.calls as any[][]).filter(call =>
+        String(call[0]).includes('INSERT INTO ds_metrics')
+      );
+      // The pair really did land either side of a boundary, or this test proves nothing.
+      expect(inserts.length).toBeGreaterThan(1);
+
+      for (const call of inserts) {
+        const keys = keysOf(call[1] as unknown[]);
+        // No single statement may carry one key twice — that is the 21000.
+        expect(new Set(keys).size).toBe(keys.length);
+      }
+      const allKeys = inserts.flatMap(call => keysOf(call[1] as unknown[]));
+      expect(new Set(allKeys).size).toBe(allKeys.length);
+      // And ONE row survives across the whole run, not one per batch.
+      expect(allKeys.filter(k => k.includes(prefix))).toHaveLength(1);
+    });
+
     test('should use UPSERT pattern for duplicate metrics', async () => {
       const mockTestRun = createMockTestRun();
       const mockPanels = [createMockPanel()];

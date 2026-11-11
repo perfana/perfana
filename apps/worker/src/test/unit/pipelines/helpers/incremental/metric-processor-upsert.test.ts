@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Logger } from 'pino';
 import { MetricProcessor, type FlattenedMetricRecord } from '../../../../../pipelines/helpers/incremental/metric-processor.js';
 import type { WorkerDatabaseService } from '../../../../../common/database.service.js';
@@ -31,6 +31,15 @@ const record = (over: Partial<FlattenedMetricRecord>): FlattenedMetricRecord => 
   ...over,
 });
 
+// The logger mock is module-level, and apps/worker/src/test/setup.ts only restores in
+// afterAll, so without this every warn call accumulates across the file and an assertion
+// reading `.at(-1)` passes on ordering rather than on content.
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+const warnings = () => (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls.map(call => String(call[0]));
+
 const setup = () => {
   const query = vi.fn().mockResolvedValue([]);
   const db = { transaction: vi.fn((fn: (em: unknown) => Promise<unknown>) => fn({ query })) } as unknown as WorkerDatabaseService;
@@ -54,6 +63,43 @@ describe('MetricProcessor.upsertMetricsToDatabase', () => {
     // Row order follows first appearance; the surviving value is the LAST write.
     expect(params[13]).toBe(3);
     expect(params[columns + 9]).toBe('other');
+  });
+
+  it('clamps over-long values to the column width, and collapses the names that collide', async () => {
+    // A Prometheus series with no legendFormat is named by its whole label set. metric_name
+    // is varchar(255) AND part of the primary key, so an unclamped name failed the statement
+    // with 22001 and the source retried forever collecting nothing.
+    const { processor, query } = setup();
+    const long = 'base_cpu_processCpuTime{pod="wsi"'.padEnd(300, 'x');
+    await processor.upsertMetricsToDatabase([
+      record({ metric_name: long, value: 1 }),
+      record({ metric_name: `${long}-different-suffix`, value: 2 }),
+      record({ unit: 'u'.repeat(60), metric_name: 'short' }),
+    ]);
+    const params = query.mock.calls[0]![1] as unknown[];
+    const columns = 19;
+    // The two long names share their first 255 characters, so they are ONE row here —
+    // emitting both would be rejected with "cannot affect row a second time".
+    expect(params).toHaveLength(2 * columns);
+    expect(params[9]).toBe(long.substring(0, 255));
+    expect(params[13]).toBe(2);
+    expect(params[columns + 14]).toBe('u'.repeat(50));
+
+    // The merge above is silent data loss, so it has to name the panel to fix in Grafana.
+    // Selected by content, not by position: see the beforeEach above.
+    const warning = warnings().find(msg => msg.includes('Truncated over-long ds_metrics values'));
+    expect(warning).toBeDefined();
+    expect(warning).toContain('legendFormat');
+    expect(warning).toContain('metric_name on panel 1 "p" of "d"');
+    expect(warning).toContain('unit on panel 1');
+  });
+
+  it('says nothing when every value fits its column', async () => {
+    // The callers' `if (warning)` guard: without it both writers emit `warn(null)` on every
+    // batch and every 60s tick, which is what truncationWarning's null return exists to stop.
+    const { processor } = setup();
+    await processor.upsertMetricsToDatabase([record({}), record({ metric_name: 'b' })]);
+    expect(warnings()).toEqual([]);
   });
 
   it('keeps rows that differ only by time or panel', async () => {
