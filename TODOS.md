@@ -1020,6 +1020,67 @@ nothing currently asserts it.
 
 ## Worker pipeline
 
+### `ds_metrics` clamp residues from the v0.2.97.70 pre-landing review
+
+**Priority:** P3
+**Origin:** /ship pre-landing review of v0.2.97.70 (2026-11-11), five specialists plus a
+verification pass. The two CRITICALs were fixed on the branch (the whole-run dedup Map, and the
+missing test for set-wide versus per-statement dedup). These are the residues, none a blocker:
+
+1. **`SERIES_NAME_MAX_LENGTH` measures in UTF-16 code units, which v0.2.97.70 just stopped doing
+   for the same 255 (P3).** `packages/shared/src/utils/series-grouping.ts` bounds a group series
+   name with `name.length` and its own `truncateName`, i.e. code units, where `varchar(255)`
+   counts code points — so a grouped series name holding astral characters is dropped or
+   shortened though Postgres would store it. Same trap, same column width, as the one
+   `ds-metrics-columns.ts` now documents; its docstring cross-references
+   `MAX_RESPONSE_CODE_LENGTH` and should reference this too once fixed.
+2. **The truncation report key is composed per row, not per panel.** Once a panel/column pair is
+   recorded, `clampToDsMetricsWidths` still builds its ~100-character entry string (two
+   `identityForLog` calls) for every truncated row before the `seen.has(entry)` guard discards
+   it. Bounded work that scales with the run rather than with the number of panels named — on
+   the one path this module exists for (a panel with no `legendFormat`, so every row truncates)
+   a 100k-point panel composes 100k strings. A cheap `Set` of `panel_id|column` checked before
+   composing would fix it; not done because it adds a second lookup structure for log
+   formatting.
+3. **The dedup key is millisecond-resolution while the column is microsecond.** `keyTime`
+   reduces a `Date`, an ISO string and an epoch number to milliseconds, so two points less than
+   1 ms apart would be distinct rows under `uniq_ds_metrics_upsert` and collapse here,
+   last-write-wins. Not reachable with today's sources (Grafana/Prometheus and Dynatrace both
+   emit epoch milliseconds); if a microsecond source ever appears, key on the raw ISO string.
+4. **The widths drift guard reads the consolidated schema only.** `ds-metrics-columns.test.ts`
+   parses `CREATE TABLE public.ds_metrics` out of `schema-sql.ts`, so a width changed *only* by
+   an incremental migration would pass it. Acceptable while this repo lands schema changes in
+   the consolidated migration by convention (see `project_consolidated_migration_greenfield`),
+   and worth revisiting if that stops being true.
+5. **`perf-metrics-writer.ts` clamps in its SELECT list while grouping on the raw name (P2).**
+   `left(e.metric_name, 255)` is projected, but the `emitted` CTE's `GROUP BY` uses the untrimmed
+   name, so two 255+ sampler names are two groups that the `left()` collapses into one conflict
+   key *inside one statement* — 21000 on the incremental arm, 23505 on the full arm. The same
+   clamp-then-collide shape the JS writers now dedup away, in the one `ds_metrics` writer that
+   cannot use them because it never materialises rows in JS. Pre-existing and out of scope for
+   v0.2.97.70; the fix is to push the `left(..., 255)` into the CTE's grouping key, as
+   `scenario-processors.ts` already does, and to add truncation to the causes listed in that
+   file's exposure comment. Likeliest to bite on a Kubernetes/MicroProfile workload, which is
+   exactly where this release's evidence came from.
+6. **`DynatracePipeline.storeMetricsDocuments` still builds a whole-run dedup Map (P3).** It
+   accumulates every data point of the run and hands the lot to the incremental writer's
+   unconditional `dedupeByDsMetricsKey`, which is ~310 MB per million rows. The Grafana full
+   path shed that in v0.2.97.70 by deduping per panel document; this one can take the same
+   shape, since its records are built per document too. Pre-existing.
+7. **`docs-user` renders every `**Troubleshooting**` / `**Related**` list as a run-on paragraph
+   (P3).** Those pages put the bullets on the line directly after the bold label with no blank
+   line, so CommonMark treats them as a lazy paragraph continuation and the published HTML has
+   literal `- ` text instead of a `<ul>`. Confirmed in the generated HTML for 15 pages;
+   `connect-grafana.md` was fixed in v0.2.97.70 because this release added a bullet there, so
+   that page is now inconsistent with the rest until they are fixed too. `mkdocs build --strict`
+   does not catch it.
+8. **A live verification against a real Grafana is still owed.** Every claim in this change is
+   proven by unit tests and mutation testing against bound parameters; nothing exercised a real
+   `>255`-character series name end to end through Postgres. The original bug shipped precisely
+   because the incremental path had no test, so the shape of that gap is worth closing with one
+   run against the reporting dashboard (Open Liberty mpMetrics on OpenShift, panels 26/43/61/
+   71/73/81/103/108/128-130).
+
 ### Panel 304's follow-ups from the pre-landing review (errors/sec by response code)
 
 **Priority:** P3
