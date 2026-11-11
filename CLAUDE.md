@@ -34,6 +34,7 @@ npm run dev
 | 🔌 MCP Server | `apps/mcp/` | MCP tool server for AI agents | [README](apps/mcp/README.md) |
 | 📊 Report | `apps/perfana-report/` | Report generation service | [README](apps/perfana-report/README.md) |
 | 📚 Deep Reference | `docs/reference/` | ADAPT, RBAC, schemas, features (narrative), how-to tutorials. For derivable "how does X work / what calls this" use GitNexus. | [Index](docs/reference/index.md) · [Tutorials](docs/reference/tutorials.md) |
+| 📖 User Guide | `docs-user/` | MkDocs Material site **published to docs.perfana.io** by `.github/workflows/docs.yml`. End-user docs: a change to what an operator configures or sees belongs here too, not only in `docs/reference/`. Build it with `mkdocs build --strict` from that directory — note strict mode does NOT catch a mis-indented continuation line, which renders as a code block, so check the generated HTML. | [mkdocs.yml](docs-user/mkdocs.yml) |
 | 🏗️ Infra | `docker-compose.infra.yml` | Full local stack | — |
 
 → System diagrams: [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -213,7 +214,7 @@ v0.2.89.0 fixed three symptoms of this: the grafana-sync restore sweep re-pushin
 
 ### The Grafana service account needs Viewer, and Editor only for the write features
 
-**Basic auth is a supported alternative to the token** (v0.2.97.48). `grafana_instances`
+**Basic auth is a supported alternative to the token** (v0.2.97.68). `grafana_instances`
 carries `username` and `password` beside `api_key`, and
 `grafanaAuthHeader()` (`@perfana/shared/services/grafana/auth`) is the single place that
 picks between them: a non-blank `api_key` always wins, otherwise a username **and**

@@ -31,9 +31,19 @@ Primary metrics source. Full bidirectional sync via [[Grafana Sync Overview]].
 Settings → Integrations → Grafana
   ├── URL (client_url, required): address the browser loads panels from
   ├── Server URL (server_url, optional): address api/worker call, when it differs
-  ├── API Key: Grafana API token (service account token)
-  └── Test Connection: Verify connectivity
+  ├── API Key: Grafana API token (service account token) — preferred
+  ├── Username / Password: HTTP basic auth, used only when no API key is set
+  └── Test Connection: checks that a URL, an org id and one credential are present
 ```
+
+A non-blank API key always wins; a username and password (both, or neither) are used only when
+no key is set, as HTTP basic auth. Prefer the token: basic auth puts a reusable account password
+on every request where a token is scoped and separately revocable, so use it over `https` only.
+Both credentials are encrypted at rest and masked when read back.
+
+Two things about the dialog: **Test Connection does not contact Grafana** — it only checks the
+fields are filled in, so it cannot tell you a credential is wrong — and a blank credential field
+on an existing instance means "keep the stored value", so the UI cannot clear one.
 
 ### Minimum service-account role
 
