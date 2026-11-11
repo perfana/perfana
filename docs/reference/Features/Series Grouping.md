@@ -19,6 +19,18 @@ Shipped in v0.2.97.43 — engine, rules API and web UI in one release — and ga
 emitted series in v0.2.97.44. Design: `docs/design/2026-11-01-series-grouping-design.md` and
 `docs/design/2026-11-02-series-grouping-multi-aggregation.md`.
 
+## Prerequisite: the series name has to contain the pod name
+
+A rule rewrites a **series name**, so it can only strip a generated segment out of a name that
+holds one. A Grafana panel whose query carries no `legendFormat` is named by Grafana after the
+query's whole label set — `{__name__="memory_usedHeap_bytes", container="wsi", instance="10.128.4.23:9443", pod="api-7d9f8c6b5-x2k4p", ...}` — which is past
+`ds_metrics.metric_name`'s 255 characters, so the writer clamps it (`clampToDsMetricsWidths` in
+`apps/worker/src/pipelines/helpers/ds-metrics-columns.ts`, which warns naming the panel). No preset
+groups such a name: the pod is buried mid-string among labels that move on their own, and a name cut
+at 255 characters may not reach the pod at all. Give the panel a `legendFormat` that names only the
+distinguishing labels (`pod: {{pod}}`) and the Kubernetes presets then match, prefix and all —
+`pod: api-7d9f8c6b5-x2k4p` groups to `pod: api`.
+
 ## What a rule is
 
 A rule belongs to one **workload** of a system and environment (like the analysis window), one

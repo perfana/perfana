@@ -3,12 +3,14 @@
 Connect a Grafana instance so Perfana can pull dashboards, panels, and metrics for your test runs. Grafana is Perfana's main metrics source — it also reads InfluxDB and Prometheus data through Grafana data sources, so this is usually the first integration you set up.
 
 **Before you start**
+
 - Select your active organization in the sidebar (**Configuration** group).
 - Have your Grafana base URL and an API token/key with read access to dashboards and data sources.
   If your Grafana has no service accounts, or sits behind HTTP basic auth, a username and password
   work instead — see step 4.
 
 **Steps**
+
 1. In the sidebar, open **Integrations**.
    The Integrations page lists your connected tools under "Connect your performance testing tools and observability platforms".
    ![The Integrations page with connected instances and the Add Integration button](../assets/integrations.png)
@@ -31,14 +33,28 @@ Connect a Grafana instance so Perfana can pull dashboards, panels, and metrics f
 6. Save the integration.
    A Grafana card appears on the Integrations page with **Settings** and **Delete** actions.
 
+**Dashboard requirements**
+
+Before you add a dashboard to a system, check that every panel you want Perfana to collect gives its queries a **legend format**. This is a prerequisite, not a nicety: Perfana stores a series' legend as the metric name, and that name is how a series is matched to its baseline, to an SLO and to a graph preset.
+
+- A Prometheus query with no legend format is named by Grafana after its whole label set — `{__name__="memory_maxHeap_bytes", container="wsi", endpoint="https", instance="10.128.4.23:9443", ...}`. Names like that run past the 255-character limit on a metric name, so Perfana shortens them and warns.
+- Two series whose names match for the first 255 characters cannot be told apart, and one of them is lost. This is what happens to a `topk()` panel whose distinguishing label — a method signature, a long URL — sits at the end of the label set.
+- A shortened name is also unreadable in charts, SLOs and reports, and series grouping cannot group it, because the part it would strip is buried in the middle of the label set.
+
+Good legend formats name only the labels that distinguish the series: `pod: {{pod}}`, `pool: {{pool}}, pod: {{pod}}`, `method: {{method}}`. Where a query aggregates with `by (servlet)`, name that label — `servlet: {{servlet}}`.
+
 **Result**
 Grafana is connected at the organization level. The Grafana tab now appears on each system's configuration page, where you can pick dashboards and define SLOs per system.
 
 **Troubleshooting**
+
 - *Test Connection reports a missing field* — It only checks that the base URL, the org id and either a token or a username **and** password are present. It does not call Grafana, so it never fails because of an expired token or a wrong password.
 - *No metrics appear after a test run* — This is where a wrong credential shows up. Check the worker log: `has no credentials configured` means the instance has neither a token nor a username and password, while a 401 from Grafana means the token expired or the username and password are wrong.
 - *No dashboards appear later* — Confirm the credentials can read the Grafana folders that contain your dashboards.
+- *A series has a very long, unreadable name, or two series collapsed into one* — The panel's query has no legend format. The worker log names the panel it shortened a series name on: `Truncated over-long ds_metrics values to the column width (series sharing a truncated metric_name merge, so data can be lost). Give these a legendFormat in Grafana: metric_name on panel 26 "Configured Maximum Heap Size" of "Open Liberty - acc"`. It lists up to ten panels and says how many more it did not list. Add a legend format in Grafana, then **Re-fetch** the run — a plain Re-evaluate reuses the names already collected.
+- *The same log line says `Shorten these in Grafana:` instead* — Then it was not a series name but the dashboard label, the panel title or the unit that was too long, and a legend format will not help. The line names the one to shorten, for example `dashboard_label on panel 2 "Heap usage" of "Open Liberty - acc"`. Nothing merges in this case; the value is only cut short.
 
 **Related**
+
 - [Add a system under test](../configuration/create-system-under-test.md)
 - [Connect Dynatrace](connect-dynatrace.md)

@@ -70,6 +70,24 @@ grafana-sync log; re-save the dashboard in Grafana 9+ to get the embedded type.
 `POST /api/ds/query` with `datasource: { uid, type }` and no `datasourceId`, which is
 uid-only resolution. Verified against Grafana 12.4.13; not verified below 9.
 
+### Every collected query needs a `legendFormat`
+
+A series' legend is stored as `ds_metrics.metric_name`, which is `varchar(255)` **and part of the
+table's conflict key** — it is also the identity a baseline, an SLO, a graph preset and a series
+grouping rule match on. A Prometheus query with no `legendFormat` is named by Grafana after the
+query's whole label set, which passes 255 characters on an ordinary Kubernetes scrape (measured:
+301 characters for a stock openshift-user-workload-monitoring label set, 409 with a MicroProfile
+`method` label), so the worker clamps the name and warns naming the panel to fix. Two series
+agreeing on their first 255 characters then merge into one row, last value winning — a `topk()`
+panel whose distinguishing label sits at the end of the label set is the case that loses data
+rather than readability. Widening the column is not the alternative it looks like: `metric_name`
+is `varchar(255)` in `ds_metric_statistics`, `ds_compare_config` and `ds_metric_series_groups`
+too. Before v0.2.97.70 the live (incremental) collector did not clamp at all and such a panel
+failed every tick with 22001 while an analysis of the same dashboard worked. See "Every
+`ds_metrics` writer clamps to the column widths, from one definition" in `apps/worker/CLAUDE.md`,
+the operator-facing version in `docs-user/docs/integrations/connect-grafana.md`, and
+[[Series Grouping]] for why a rule cannot group a name with no `legendFormat`.
+
 ## Dynatrace
 
 APM integration for service and host monitoring.

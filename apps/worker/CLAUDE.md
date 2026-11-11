@@ -1572,6 +1572,95 @@ entity manager, an escaping rejection is an unhandled rejection that terminates 
 everything in that hook logs and swallows.
 
 
+### Every `ds_metrics` writer clamps to the column widths, from one definition
+
+`ds_metrics.metric_name` is `varchar(255)` **and part of the table's conflict key** — the table has
+no `PRIMARY KEY`; the unique index `uniq_ds_metrics_upsert` is what every writer's `ON CONFLICT`
+names. A Grafana panel whose
+query carries no `legendFormat` is named by Grafana after the query's whole label set, which passes
+255 characters on an ordinary Kubernetes scrape (measured: 301 characters for
+`memory_maxHeap_bytes` with a stock openshift-user-workload-monitoring label set, 409 when a
+MicroProfile `method` label carries a Java signature). So both writers that **bind JS strings** —
+`MetricsPipeline` (full collection) and `MetricProcessor` (incremental, both the Grafana and the
+Dynatrace flatten paths) — clamp through the single definition in
+`apps/worker/src/pipelines/helpers/ds-metrics-columns.ts`. The other two writers compose their own
+names and bound them themselves: `PerformanceTestMetricsPipeline.saveDsMetrics` with
+`.substring(0, 255)`, and `perf-metrics-writer.ts` in SQL (`INSERT … SELECT`). **That last one is
+not safe the way `scenario-processors.ts` is**: its `left(e.metric_name, 255)` sits in the SELECT
+list while the `emitted` CTE groups on the RAW name, so two 255+ sampler names collapse to one
+conflict key inside one statement — 21000 on the incremental arm, 23505 on the full arm. The
+GROUP-BY-key property that makes a SQL clamp safe (`MAX_RESPONSE_CODE_LENGTH` above) holds for
+`scenario-processors.ts` and for that file's `ds_metric_statistics` statement, not for its
+`ds_metrics` insert. Pre-existing, and in TODOS.md — the fix is to push the `left()` into the
+CTE's grouping key.
+
+Five things to keep in mind before touching it:
+
+1. **Clamp, then dedup, then split into statements — in that order, and over a set that holds
+   every row that can collide.** Both writers key the dedup on
+   `(run, dashboard, panel, metric_name, time)` through the shared `dedupeByDsMetricsKey`. Clamp
+   *after* it and two 300-character names agreeing on their
+   first 255 arrive in one statement as two rows with the same key, which Postgres rejects with
+   `cannot affect row a second time` (21000) — a different error, the same dead batch. Dedup
+   *per statement* instead of over the set is the same bug with a batch boundary in front of it:
+   it depends on whether one batch happened to hold both rows. The case is not theoretical — a
+   `topk()` panel with no `legendFormat` whose series differ only in a label past character 255
+   (a MicroProfile `method` signature, a long URL) is exactly five identical names at one
+   timestamp. On the full path that happens in `MetricsPipeline.getPanelMetricsAsRecords`, as each
+   panel document is flattened; `batchInsertRecords` and `insertBatch` below it only bind.
+2. **One definition, because two diverging copies is what shipped the bug.** Until v0.2.97.70
+   `MetricsPipeline` (full collection) clamped and `MetricProcessor` (incremental collection) did
+   not, so such a dashboard collected fine on an analysis and failed every live collection with
+   `22001 value too long for type character varying(255)`. Nothing recovers from it by retrying:
+   the source soft-fails and re-queues each scheduler cycle with 0 data points, for the whole run.
+   `PerformanceTestMetricsPipeline.saveDsMetrics` clamps with its own `.substring(0, 255)` calls on
+   values it composes itself and is deliberately left alone.
+3. **The clamp is a lossy repair and says so out loud.** Two series agreeing on their first 255
+   characters merge into one row, silently, so `truncationWarning()` names the panel and column to
+   fix in Grafana — a `topk()` panel whose distinguishing label sits at the end of the label set is
+   the case where this loses data rather than just readability. Keyed per panel and column, since
+   one over-long name repeats on every timestamp of the window, and capped at
+   `MAX_TRUNCATION_REPORTS` — with the unlisted count taken as `seen.size - named.size`, so it
+   is a number of **panels** and distinct by construction. Both alternatives were wrong: inferring
+   the overflow from `named.size` makes a pass with exactly that many offending panels claim a list
+   it had not shortened, and a per-occurrence counter reported "and 500 more" for ONE unlisted
+   panel on a 500-point run, because an over-long name repeats on every timestamp. The identifiers it interpolates are bounded at 80 characters
+   and stripped of control characters: both are unbounded external strings, and pino-pretty (dev
+   only) prints `msg` raw, so a newline in a dashboard label would forge a console line. The whole
+   message is interpolated because both shared pino loggers drop a second-argument object.
+4. **The dedup key is built from `DS_METRICS_CONFLICT_KEY`, and a spec compares that array to both
+   writers' `ON CONFLICT` lists.** It is read off disk, like the widths-vs-DDL guard beside it,
+   because the key was a third hand-kept copy of the same tuple — the exact shape that shipped this
+   bug. A key narrower than the statement keeps a row Postgres rejects; wider, and it drops a row
+   Postgres would have kept. Joined with NUL, since `metric_name` routinely contains a `|`.
+5. **Both writers dedup unconditionally; what differs is the scope they dedup over.** There is
+   deliberately no "did anything clamp" flag to gate it on — one existed, to spare the
+   full-collection writer a whole-run Map, and it was worse than useless: the answer is yes
+   exactly on the dashboard-with-no-`legendFormat` run the clamp exists for, so the Map was
+   allocated on the pathological run and skipped on the healthy one. The full-collection writer
+   clamps and dedups **per panel document**, at flatten time: a document is one panel of one
+   dashboard and the conflict key carries both, so every collision the clamp can create is inside
+   one document, and the pass is bounded by a panel's points instead of the run's — the whole-run
+   Map plus its keys measured ~310 MB per million rows, ~6 GB on a 20 M-point run, held open
+   across the write transaction. It also sits outside `writeTransaction`, so a `withRetry` attempt
+   does not redo it and BEGIN waits until the rows are ready. **The incremental writer dedups over
+   its whole input**, which is NOT always a tick: it is reached by the 60 s scheduler (small sets,
+   and two Dynatrace queries on one panel with the same metric name collide on every one of them
+   by design) *and* by `DynatracePipeline.storeMetricsDocuments`, which accumulates every data
+   point of the run and hands the lot over. That second path carries the whole-run Map the Grafana
+   full path just shed; it predates all of this and is in TODOS.md. One collision this does not
+   have to catch: two targets of one Grafana panel rendering the same series name are already
+   collapsed upstream by `sortAndDeduplicate` in `packages/shared/src/services/grafana/formatter.ts`,
+   per panel document, on `(time, metric_name)` — before the clamp, which is why it cannot stand in
+   for the dedup here.
+
+Widening the column is not the alternative it looks like: `metric_name` is `varchar(255)` in
+`ds_metric_statistics`, `ds_compare_config` and `ds_metric_series_groups` too, and
+`SERIES_NAME_MAX_LENGTH` in `packages/shared/src/utils/series-grouping.ts` is pinned to it — so
+widening `ds_metrics` alone just moves the 22001 into `StatisticsPipeline`. The real fix is a
+`legendFormat` on the panel; see "Prerequisite: the series name has to contain the pod name" in
+`docs/reference/Features/Series Grouping.md`.
+
 ### A templated datasource uid is resolved from the dashboard, not from the app dashboard
 
 A Grafana dashboard can leave the datasource to a `type: 'datasource'` template variable, so its
