@@ -108,7 +108,7 @@ describe('GrafanaApiService', () => {
         ...mockInstance,
         apiKey: undefined,
         username: 'admin',
-        password: 's3cret',
+        password: 'pw',
       };
       jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(basicInstance as any);
       (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({}) });
@@ -119,7 +119,7 @@ describe('GrafanaApiService', () => {
         'http://grafana.test/api/dashboards/uid/test-uid',
         expect.objectContaining({
           headers: expect.objectContaining({
-            Authorization: `Basic ${Buffer.from('admin:s3cret').toString('base64')}`,
+            Authorization: `Basic ${Buffer.from('admin:pw').toString('base64')}`,
           }),
         }),
       );
@@ -129,7 +129,7 @@ describe('GrafanaApiService', () => {
       const bothInstance: Partial<GrafanaInstance> = {
         ...mockInstance,
         username: 'admin',
-        password: 's3cret',
+        password: 'pw',
       };
       jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(bothInstance as any);
       (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({}) });

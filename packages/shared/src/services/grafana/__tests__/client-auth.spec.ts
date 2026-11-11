@@ -36,27 +36,27 @@ describe('GrafanaClient authorization header', () => {
   }
 
   it('sends Bearer when an api key is configured', async () => {
-    const client = new GrafanaClient({ ...base, apiKey: 'glsa_token' });
+    const client = new GrafanaClient({ ...base, apiKey: 'tkn' });
 
     await client.getDatasourceByUid('u');
 
-    expect(headerFromLastGet()).toBe('Bearer glsa_token');
+    expect(headerFromLastGet()).toBe('Bearer tkn');
   });
 
   it('sends Basic when only a username and password are configured', async () => {
-    const client = new GrafanaClient({ ...base, username: 'admin', password: 's3cret' });
+    const client = new GrafanaClient({ ...base, username: 'admin', password: 'pw' });
 
     await client.getDatasourceByUid('u');
 
-    expect(headerFromLastGet()).toBe(`Basic ${Buffer.from('admin:s3cret').toString('base64')}`);
+    expect(headerFromLastGet()).toBe(`Basic ${Buffer.from('admin:pw').toString('base64')}`);
   });
 
   it('prefers the api key when both are configured', async () => {
-    const client = new GrafanaClient({ ...base, apiKey: 'glsa_token', username: 'admin', password: 's3cret' });
+    const client = new GrafanaClient({ ...base, apiKey: 'tkn', username: 'admin', password: 'pw' });
 
     await client.getDatasourceByUid('u');
 
-    expect(headerFromLastGet()).toBe('Bearer glsa_token');
+    expect(headerFromLastGet()).toBe('Bearer tkn');
   });
 
   it('never sends a request for an instance with no credentials', async () => {

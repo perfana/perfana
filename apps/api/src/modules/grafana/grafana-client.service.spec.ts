@@ -47,7 +47,7 @@ const BASIC_AUTH_INSTANCE = {
   ...VALID_GRAFANA_INSTANCE,
   api_key: '',
   username: 'admin',
-  password: 's3cret',
+  password: 'pw',
 };
 
 const INFLUX_DATASOURCE = {
@@ -232,7 +232,7 @@ describe('GrafanaClientService', () => {
 
       const [, options] = fetchMock.mock.calls[0];
       expect((options as RequestInit).headers).toMatchObject({
-        Authorization: `Basic ${Buffer.from('admin:s3cret').toString('base64')}`,
+        Authorization: `Basic ${Buffer.from('admin:pw').toString('base64')}`,
       });
     });
 

@@ -11,13 +11,13 @@ import { grafanaAuthHeader, requireGrafanaAuthHeader } from '../auth';
 describe('grafanaAuthHeader', () => {
   it('prefers the API key when both are configured', () => {
     expect(
-      grafanaAuthHeader({ apiKey: 'glsa_token', username: 'u', password: 'p' }),
-    ).toBe('Bearer glsa_token');
+      grafanaAuthHeader({ apiKey: 'tkn', username: 'u', password: 'p' }),
+    ).toBe('Bearer tkn');
   });
 
   it('falls back to basic auth when there is no API key', () => {
-    expect(grafanaAuthHeader({ username: 'admin', password: 's3cret' })).toBe(
-      `Basic ${Buffer.from('admin:s3cret').toString('base64')}`,
+    expect(grafanaAuthHeader({ username: 'admin', password: 'pw' })).toBe(
+      `Basic ${Buffer.from('admin:pw').toString('base64')}`,
     );
   });
 
@@ -33,7 +33,7 @@ describe('grafanaAuthHeader', () => {
   });
 
   it('trims a pasted API key, because a trailing newline is the common typo', () => {
-    expect(grafanaAuthHeader({ apiKey: ' glsa_token\n' })).toBe('Bearer glsa_token');
+    expect(grafanaAuthHeader({ apiKey: ' tkn\n' })).toBe('Bearer tkn');
   });
 
   it('does NOT trim the password — whitespace can be part of the secret', () => {
@@ -44,8 +44,8 @@ describe('grafanaAuthHeader', () => {
   });
 
   it('encodes a non-ASCII password as UTF-8', () => {
-    expect(grafanaAuthHeader({ username: 'admin', password: 'wachtwoord-ü' })).toBe(
-      `Basic ${Buffer.from('admin:wachtwoord-ü', 'utf8').toString('base64')}`,
+    expect(grafanaAuthHeader({ username: 'admin', password: 'pwü' })).toBe(
+      `Basic ${Buffer.from('admin:pwü', 'utf8').toString('base64')}`,
     );
   });
 

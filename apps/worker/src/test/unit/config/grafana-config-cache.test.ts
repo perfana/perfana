@@ -1,3 +1,4 @@
+// Unit tests for apps/worker/src/config/grafana-config-cache.ts
 /**
  * Unit tests for grafana-config-cache.
  *
@@ -88,7 +89,7 @@ describe('grafana-config-cache', () => {
           server_url: 'https://grafana.example',
           apiKey: '',
           username: 'admin',
-          password: 's3cret',
+          password: 'pw',
           orgId: '1',
         },
       ]);
@@ -97,7 +98,7 @@ describe('grafana-config-cache', () => {
       expect(config).toMatchObject({
         url: 'https://grafana.example',
         username: 'admin',
-        password: 's3cret',
+        password: 'pw',
       });
     });
 
@@ -219,7 +220,7 @@ describe('grafana-config-cache', () => {
         server_url: 'https://g2',
         apiKey: null,
         username: 'admin',
-        password: 's3cret',
+        password: 'pw',
         orgId: '1',
       });
 
@@ -227,7 +228,7 @@ describe('grafana-config-cache', () => {
       expect(resolved?.config).toMatchObject({
         url: 'https://g2',
         username: 'admin',
-        password: 's3cret',
+        password: 'pw',
       });
     });
 

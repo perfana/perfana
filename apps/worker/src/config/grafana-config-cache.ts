@@ -66,11 +66,12 @@ async function loadFromDatabase(): Promise<LoadResult> {
       return 'invalid';
     }
 
+    const { apiKey, username, password } = grafanaInstance;
     cachedConfig = {
       url: grafanaInstance.server_url,
-      apiKey: grafanaInstance.apiKey,
-      username: grafanaInstance.username,
-      password: grafanaInstance.password,
+      apiKey,
+      username,
+      password,
       orgId: grafanaInstance.orgId,
     };
     cachedInstanceId = grafanaInstance.id;
@@ -176,12 +177,13 @@ export async function getGrafanaConfigById(instanceId: string): Promise<Resolved
       byInstanceId.set(instanceId, null);
       return null;
     }
+    const { apiKey, username, password } = instance;
     const resolved: ResolvedGrafanaInstance = {
       config: {
         url: instance.server_url,
-        apiKey: instance.apiKey,
-        username: instance.username,
-        password: instance.password,
+        apiKey,
+        username,
+        password,
         orgId: instance.orgId,
       },
       meta: { organizationId: instance.organizationId ?? null, useProxy: instance.useProxy ?? false },
