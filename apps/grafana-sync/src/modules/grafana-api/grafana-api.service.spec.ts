@@ -101,7 +101,7 @@ describe('GrafanaApiService', () => {
     });
 
     it('sends basic auth for an instance with a username/password and no API key', async () => {
-      // grafana_instances has carried these two columns all along; until v0.2.97.48
+      // grafana_instances has carried these two columns all along; until v0.2.97.68
       // every call site hard-coded `Bearer ${apiKey}` and such a row got
       // `Bearer undefined`, which Grafana answers as an opaque 401.
       const basicInstance: Partial<GrafanaInstance> = {

@@ -8,7 +8,7 @@ import {
 import { batchPanelQueries, processBatchedResponses, type RequestBatch, type TimeRangeOverride } from './batching';
 import { transformGrafanaResponseToMetrics } from './formatter';
 import { requireGrafanaAuthHeader } from './auth';
-import { validateUrl, type UrlValidationOptions } from '../../security/url-validator';
+import { validateUrl, sanitizeUrl, type UrlValidationOptions } from '../../security/url-validator';
 
 /**
  * Grafana API Client
@@ -30,7 +30,7 @@ import { validateUrl, type UrlValidationOptions } from '../../security/url-valid
 export interface GrafanaConfig {
   url: string;
   /**
-   * Service-account token. Optional since v0.2.97.48: an instance may authenticate
+   * Service-account token. Optional since v0.2.97.68: an instance may authenticate
    * with `username`/`password` instead. One of the two must be present — the
    * request builders go through requireGrafanaAuthHeader, which throws otherwise.
    */
@@ -112,9 +112,15 @@ export class GrafanaClient {
    * configured, else `Basic <base64>` from username/password. Built per request
    * rather than in the constructor so a credential-less config fails at the call
    * that needs it, with the instance url in the message, instead of at wiring time.
+   *
+   * The url goes through sanitizeUrl because it is the message's label and the message
+   * is logged: an operator with no basic-auth support may well have put credentials in
+   * the url's own userinfo component, which validateUrl neither rejects nor strips.
+   * This throw fires only for a row with no credentials configured,
+   * which is exactly that population.
    */
   private authHeader(): string {
-    return requireGrafanaAuthHeader(this.grafanaConfig, this.grafanaConfig.url);
+    return requireGrafanaAuthHeader(this.grafanaConfig, sanitizeUrl(this.grafanaConfig.url) ?? '(invalid url)');
   }
 
   /** Per-request timeout (ms); axios connect+response bound. */
@@ -251,7 +257,8 @@ export class GrafanaClient {
         if (result.status === 'fulfilled') {
           responses.push(result.value);
         } else {
-          this.logger.error(`❌ Batch ${batchIndex} request failed:`, result.reason);
+          const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+          this.logger.error(`❌ Batch ${batchIndex} request failed: ${reason}`);
           responses.push({
             error: result.reason,
             status: 0
@@ -379,7 +386,20 @@ export class GrafanaClient {
       this.logger.warn(`Failed to fetch datasource ${uid}: status ${response.status}`);
       return null;
     } catch (error) {
-      this.logger.error(`Error fetching datasource ${uid}:`, error);
+      // Narrow fields only, never the error object: util.inspect of an AxiosError prints
+      // its own `config` (and `request._header`), which carries the Authorization header
+      // verbatim -- a Basic credential is the password in base64. executeRequestWithRetry
+      // already logs this shape; the worker's pino has no `redact` config to catch it.
+      const httpError = error as HttpClientError;
+      const status = isAxiosError(error) ? error.response?.status : undefined;
+      // Interpolated, not passed as a second argument: the worker injects a pino logger,
+      // whose (string, object) form drops the object entirely, so a second-argument
+      // diagnostic is invisible exactly where it is needed. Narrow fields only, never the
+      // error object -- util.inspect of an AxiosError prints its `config` and
+      // `request._header`, which carry the Authorization header verbatim.
+      this.logger.error(
+        `Error fetching datasource ${uid}: ${httpError.message} (code=${httpError.code ?? 'none'} status=${status ?? 'none'})`,
+      );
       return null;
     }
   }

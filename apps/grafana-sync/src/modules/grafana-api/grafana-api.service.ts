@@ -7,7 +7,7 @@ import { Repository } from 'typeorm';
 import { GrafanaInstance, ProxyServer } from '@perfana/shared/entities';
 import { validateUrl, sanitizeUrl } from '@perfana/shared/security';
 import { buildProxyAgent } from '@perfana/shared/services/proxy';
-import { grafanaAuthHeader, requireGrafanaAuthHeader } from '@perfana/shared/services/grafana/auth';
+import { requireGrafanaAuthHeader } from '@perfana/shared/services/grafana/auth';
 
 /**
  * Provides Grafana HTTP API access for dashboard management operations.
@@ -337,11 +337,6 @@ export class GrafanaApiService {
   }
 
   /**
-   * The one check the deleted label path did that `get`/`post` do not: a row with no
-   * credentials at all would otherwise be sent without an Authorization header and
-   * fail as a 401 from Grafana rather than as a configuration error.
-   */
-  /**
    * Datasource lookups against an instance the caller already holds. These replace
    * `getDatasourceBy{Uid,Name}WithLabel` for the same reason as the pair above:
    * `variable-detector.service.ts` holds the entity and was passing `.label`, which
@@ -363,13 +358,14 @@ export class GrafanaApiService {
     return this.get(instance, `/api/datasources/name/${encodeURIComponent(datasourceName)}`);
   }
 
+  /**
+   * Fail before URL construction for a row with no credentials, so the error names a
+   * configuration problem rather than arriving as Grafana's 401. It delegates rather
+   * than re-testing: this message used to be a byte-for-byte copy of the shared one,
+   * and the specs match only its prefix, so the two could drift unnoticed.
+   */
   private assertUsable(instance: GrafanaInstance): void {
-    if (!grafanaAuthHeader(instance)) {
-      throw new Error(
-        `Grafana instance ${instance?.label ?? '(unknown)'} has no credentials configured — ` +
-          'set an API key, or a username and password for basic auth',
-      );
-    }
+    this.authHeader(instance);
   }
 
   /**

@@ -33,9 +33,13 @@ export const createGrafanaInstanceSchema = z.object({
   useProxy: z.boolean().optional(),
   // Deliberately no "one credential is required" refine. The edit dialog sends a blank
   // apiKey/password to mean "keep the stored one", so a schema that cannot tell create
-  // from edit would block every edit of a basic-auth instance. The API answers a row
-  // with no credentials at call time, naming the instance. (There used to be a refine
-  // here whose body was `return true`.)
+  // from edit would block every edit of a basic-auth instance. (There used to be a refine
+  // here whose body was `return true`, enforcing nothing.)
+  //
+  // Note what does NOT backstop it: apps/api and grafana-sync throw a configuration error
+  // naming the instance, but the worker's incremental collector skips an unusable instance
+  // and reports the tick as successful with zero points. So a credential-less row is not
+  // loud everywhere. Requiring one credential on CREATE only is filed in TODOS.md.
 })
 
 // A URL the browser will open must be http(s); new URL() alone accepts

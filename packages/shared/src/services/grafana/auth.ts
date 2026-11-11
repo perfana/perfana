@@ -30,15 +30,18 @@ export interface GrafanaCredentials {
 export function grafanaAuthHeader(creds: GrafanaCredentials): string | null {
   // An api_key is trimmed because it is pasted by hand and a trailing newline is
   // the single most common way to configure one wrong.
-  const apiKey = creds.apiKey?.trim();
+  // `creds?.` and not `creds.`: callers pass an entity they believe they hold, and
+  // requireGrafanaAuthHeader's own '(unknown)' label only means something if a nullish
+  // object reaches it as a configuration error rather than a TypeError.
+  const apiKey = creds?.apiKey?.trim();
   if (apiKey) {
     return `Bearer ${apiKey}`;
   }
 
-  const username = creds.username?.trim();
+  const username = creds?.username?.trim();
   // The password is NOT trimmed: surrounding whitespace can be part of it, and
   // silently changing a credential is worse than a 401 the operator can read.
-  const password = creds.password;
+  const password = creds?.password;
   if (username && password) {
     return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
   }

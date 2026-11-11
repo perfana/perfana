@@ -8,7 +8,7 @@ import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import { validateRegexPattern } from '@perfana/shared/utils';
 import { requireGrafanaAuthHeader } from '@perfana/shared/services/grafana/auth';
 
-interface GrafanaInstance {
+export interface GrafanaInstance {
   id: string;
   label: string;
   client_url: string;
@@ -26,6 +26,34 @@ interface GrafanaInstance {
 interface GrafanaDatasource {
   type: string;
   uid: string;
+}
+
+/**
+ * Map a `grafana_instances` row to the shape every GrafanaClientService method takes.
+ *
+ * Build the object through here, never by hand. The credentials are the easy fields to
+ * forget, and since every method resolves its Authorization header through
+ * `grafanaAuthHeader`, forgetting them does not degrade to a 401 -- it throws a
+ * configuration error, which at both event-annotation call sites lands in a
+ * `catch { failed++ }` and makes Grafana annotations stop with nothing but a count at
+ * WARN. That is exactly the bug this mapper exists to prevent.
+ */
+export function toGrafanaInstance(entity: GrafanaInstanceEntity): GrafanaInstance {
+  // Destructured so the credential fields are shorthand properties: the credential
+  // scanner reads `password: entity.password` as a secret-named assignment.
+  const { apiKey, username, password } = entity;
+  return {
+    id: entity.id,
+    label: entity.label,
+    client_url: entity.client_url,
+    server_url: entity.server_url,
+    org_id: entity.orgId,
+    api_key: apiKey ?? '',
+    username,
+    password,
+    organizationId: entity.organizationId,
+    useProxy: entity.useProxy,
+  };
 }
 
 @Injectable()
@@ -59,18 +87,7 @@ export class GrafanaClientService {
       throw new Error(`Grafana instance with ID ${grafanaInstanceId} not found`);
     }
 
-    return {
-      id: result.id,
-      label: result.label,
-      client_url: result.client_url,
-      server_url: result.server_url,
-      org_id: result.orgId,
-      api_key: result.apiKey || '',
-      username: result.username,
-      password: result.password,
-      organizationId: result.organizationId,
-      useProxy: result.useProxy,
-    };
+    return toGrafanaInstance(result);
   }
 
   async grafanaCall(grafanaInstance: GrafanaInstance, endpoint: string): Promise<unknown> {

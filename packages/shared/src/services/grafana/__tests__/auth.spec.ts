@@ -55,17 +55,13 @@ describe('grafanaAuthHeader', () => {
     ['a password with no username', { password: 'pw' }],
     ['a blank username', { username: '  ', password: 'pw' }],
     ['every field blank', { apiKey: '', username: '', password: '' }],
+    // Returning null rather than a header is the whole point: the pre-fix shape,
+    // `Bearer ${instance.apiKey}`, rendered the literal string "Bearer undefined"
+    // for a row with no key, which Grafana answers as an indistinguishable 401.
   ])('returns null for %s', (_label, creds) => {
     expect(grafanaAuthHeader(creds)).toBeNull();
   });
 
-  it('never produces a header containing "undefined"', () => {
-    // The pre-fix shape, `Bearer ${instance.apiKey}`, rendered the literal string
-    // "Bearer undefined" for a row with no key. Null is the whole point here.
-    for (const creds of [{ apiKey: undefined }, { username: undefined, password: 'p' }]) {
-      expect(String(grafanaAuthHeader(creds))).not.toContain('undefined');
-    }
-  });
 });
 
 describe('requireGrafanaAuthHeader', () => {
@@ -84,8 +80,26 @@ describe('requireGrafanaAuthHeader', () => {
   });
 
   it('does not leak the password into the error message', () => {
-    expect(() => requireGrafanaAuthHeader({ username: 'admin' }, 'g')).toThrow(
-      /set an API key, or a username and password for basic auth/,
-    );
+    // The fixture MUST carry a password, and the assertion MUST be negative: the
+    // previous version passed `{ username: 'admin' }` and only matched the advice
+    // text, so interpolating the credential into the message kept it green.
+    const password = 'sentinel-should-never-be-logged';
+    let message = '';
+    try {
+      requireGrafanaAuthHeader({ username: 'admin', password: undefined, apiKey: '' }, 'g');
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/set an API key, or a username and password for basic auth/);
+
+    // And the same with a password present but no username, which also yields no header.
+    let withSecret = '';
+    try {
+      requireGrafanaAuthHeader({ username: '', password }, 'g');
+    } catch (err) {
+      withSecret = (err as Error).message;
+    }
+    expect(withSecret).not.toContain(password);
+    expect(withSecret).toMatch(/has no credentials configured/);
   });
 });
