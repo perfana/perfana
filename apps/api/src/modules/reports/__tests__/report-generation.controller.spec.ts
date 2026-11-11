@@ -18,7 +18,7 @@ jest.mock('@nestjs/typeorm', () => ({
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, ForbiddenException } from '@nestjs/common';
 import { ReportGenerationController } from '../controllers/report-generation.controller';
 import { ReportGenerationService } from '../services/report-generation.service';
 import { ReportShareService } from '../services/report-share.service';
@@ -162,6 +162,7 @@ describe('ReportGenerationController', () => {
             incrementDownloadCount: jest.fn(),
             delete: jest.fn(),
             updateJobId: jest.fn(),
+            assertCanChangeSharing: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -868,6 +869,25 @@ describe('ReportGenerationController', () => {
   });
 
   describe('updateShareSettings', () => {
+    // REGRESSION GUARD. This route took the caller's context and ignored it, and the share service
+    // uses the pooled repository, so RLS could not stop it either: any signed-in user could publish
+    // any tenant's report by id and then read it through the public link.
+    it('should authorize the caller before touching anything', async () => {
+      const denied = new ForbiddenException('no');
+      reportGenerationService.assertCanChangeSharing.mockRejectedValueOnce(denied);
+
+      await expect(
+        controller.updateShareSettings('report-id', { share_enabled: true }, mockUserCtx),
+      ).rejects.toBe(denied);
+
+      expect(reportGenerationService.assertCanChangeSharing).toHaveBeenCalledWith(
+        'report-id',
+        mockUserCtx.userId,
+        mockUserCtx.roles,
+      );
+      expect(reportShareService.updateShareSettings).not.toHaveBeenCalled();
+    });
+
     it('should enable sharing for report', async () => {
       // Arrange
       const dto: UpdateShareSettingsDto = { share_enabled: true };

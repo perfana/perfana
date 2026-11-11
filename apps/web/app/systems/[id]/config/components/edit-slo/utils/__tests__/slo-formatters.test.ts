@@ -243,14 +243,26 @@ describe('getRequirementValuePlaceholder', () => {
   });
 
   it('should return generic placeholder when panel has no unit format', () => {
-    const placeholder = getRequirementValuePlaceholder({ title: 'Response Time' });
+    const placeholder = getRequirementValuePlaceholder(undefined);
     expect(placeholder).toContain('500');
   });
 
   it('should return a panel-specific placeholder when panel has a yAxesFormat', () => {
     // When format is recognised, the placeholder starts with "e.g. 500"
-    const placeholder = getRequirementValuePlaceholder({ yAxesFormat: 'ms' });
+    const placeholder = getRequirementValuePlaceholder('ms');
     expect(placeholder).toMatch(/^e\.g\. 500/);
+  });
+
+  // #721: 'e.g. 500s' and 'e.g. 500%' (on a 0-1 panel) suggested values nobody means.
+  it.each([
+    ['ms', 'e.g. 500 ms'],
+    ['s', 'e.g. 0.5 s'],
+    ['percentunit', 'e.g. 90 %'],
+    ['percent', 'e.g. 90 %'],
+    ['short', 'e.g. 100'],
+    ['currencyUSD', 'e.g. 100'],
+  ])('suggests a realistic value for a %s panel', (yAxesFormat, expected) => {
+    expect(getRequirementValuePlaceholder(yAxesFormat)).toBe(expected);
   });
 });
 
@@ -270,8 +282,20 @@ describe('getRequirementValueHelperText', () => {
     expect(text).toMatch(/Unit:/i);
   });
 
+  it('shows the converted value when the typed unit differs from the panel unit (#718)', () => {
+    expect(getRequirementValueHelperText('500ms', 's')).toBe('500 ms = 0.5 s');
+  });
+
+  it('explains why a unit cannot be used (#718)', () => {
+    expect(getRequirementValueHelperText('90%', 's')).toMatch(/can't be compared/);
+  });
+
+  it('does not convert for a trend', () => {
+    expect(getRequirementValueHelperText('5%', 's', 'trend')).not.toMatch(/can't be compared/);
+  });
+
   it('should return expected unit text when panel has a format but value has no unit', () => {
-    const text = getRequirementValueHelperText('500', { yAxesFormat: 'ms' });
+    const text = getRequirementValueHelperText('500', 'ms');
     // Should mention the expected unit
     expect(text.length).toBeGreaterThan(0);
   });
@@ -297,7 +321,7 @@ describe('getUnitChipLabel', () => {
   });
 
   it('should return %/h for a trend SLO regardless of the panel unit or the typed value, and stay unit-driven otherwise', () => {
-    const msPanel = { yAxesFormat: 'ms' } as unknown as Parameters<typeof getUnitChipLabel>[1];
+    const msPanel = 'ms';
     expect(getUnitChipLabel('', msPanel, 'trend')).toBe('%/h');
     expect(getUnitChipLabel('500ms', msPanel, 'trend')).toBe('%/h');
     expect(getUnitChipLabel('12', null, 'trend')).toBe('%/h');

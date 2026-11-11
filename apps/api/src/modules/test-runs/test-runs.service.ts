@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TestRunsQueryService } from './services/test-runs-query.service';
 import { RollupPendingResult } from './services/test-runs-performance-query.types';
 import { SummaryTimeseriesResponse } from './services/test-runs-performance-query.service';
-import type { RunSamplerStats } from './types/test-run.types';
+import type { RunSamplerStats, TransactionPercentiles } from './types/test-run.types';
 import { TestRunsMutationService } from './services/test-runs-mutation.service';
 import { TestRunsConfigService } from './services/test-runs-config.service';
 import { TestRunsAnomalyService } from './services/test-runs-anomaly.service';
@@ -182,6 +182,17 @@ export class TestRunsService {
 
   async getAllAnnotations(userId: string, roles: string[]): Promise<string[]> {
     return this.queryService.getAllAnnotations(userId, roles);
+  }
+
+  async getTransactionPercentiles(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+    excludeRampUp: boolean = false,
+    sinceMinutes?: number,
+    scenarios?: string[],
+  ): Promise<TransactionPercentiles | RollupPendingResult> {
+    return this.queryService.getTransactionPercentiles(testRunId, userId, roles, excludeRampUp, sinceMinutes, scenarios);
   }
 
   async getTransactionStats(testRunId: string, userId: string, roles: string[], excludeRampUp: boolean = false, sinceMinutes?: number): Promise<Array<{

@@ -100,6 +100,12 @@ export interface TestRun {
   id: string;
   test_run_id: string;
   system_under_test_id: string;
+  /**
+   * The run's organization (NOT NULL in the database). `GET /test-runs/:id` sends it camelCase
+   * (`test-runs-mapper.service`), other routes snake_case (`handlers/entity-mapper`): read both.
+   */
+  organizationId?: string;
+  organization_id?: string;
   test_environment: string;
   workload: string;
   start_time?: string;

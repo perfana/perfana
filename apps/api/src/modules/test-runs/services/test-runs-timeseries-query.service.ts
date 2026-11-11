@@ -3,6 +3,7 @@ import {
   AnalysisBounds,
   TEST_RUN_TIMES_SQL,
   analysisBoundsFromRow,
+  analysisOffsetsFit,
   timeBoundsSql,
 } from '@perfana/shared/database/run-window';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -77,7 +78,7 @@ export class TestRunsTimeSeriesQueryService {
     const window = analysisBoundsFromRow(row, false);
 
     let cutoffTime: Date | null = null;
-    if (excludeRampUp && row?.start_time && row?.ramp_up) {
+    if (excludeRampUp && row?.start_time && row?.ramp_up && analysisOffsetsFit(row)) {
       const startTime = new Date(row.start_time);
       const analysisStartOffsetSeconds = this.mapper.parseInt(row.ramp_up);
       cutoffTime = new Date(startTime.getTime() + analysisStartOffsetSeconds * 1000);

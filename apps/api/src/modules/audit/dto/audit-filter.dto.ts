@@ -30,7 +30,7 @@ export class AuditFilterDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsUUID()
+  @IsUUID('loose')
   organizationId?: string;
 
   @ApiPropertyOptional({

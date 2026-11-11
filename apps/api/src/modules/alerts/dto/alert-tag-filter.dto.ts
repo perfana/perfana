@@ -42,7 +42,7 @@ export class CreateAlertTagFilterDto {
 
   @ApiPropertyOptional({ description: 'Organization ID' })
   @IsOptional()
-  @IsUUID()
+  @IsUUID('loose')
   organizationId?: string;
 }
 

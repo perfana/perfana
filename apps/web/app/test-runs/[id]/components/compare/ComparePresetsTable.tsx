@@ -1,6 +1,7 @@
 'use client';
 
 import type { CompareSeriesConfig } from '@/lib/compare-presets';
+import { presetBaselineLabel } from '@/lib/compare-presets';
 import React, { useState } from 'react';
 import {
   Box,
@@ -198,7 +199,7 @@ export default function ComparePresetsTable({
               {preset.preset_type === 'specific' && preset.baseline_test_run_id ? (
                 <Box>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 0.3, fontSize: '0.8rem' }}>
-                    <strong>Locked to:</strong> {preset.baseline_test_run_id}
+                    <strong>Locked to:</strong> {presetBaselineLabel(preset.baseline_test_run_id)}
                   </Typography>
                   {preset.baseline_application_release && (
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 0.3, fontSize: '0.8rem' }}>

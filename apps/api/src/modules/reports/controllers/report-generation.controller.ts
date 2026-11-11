@@ -73,7 +73,7 @@ export class ReportGenerationController {
   private async enqueueHtmlGenerationAfterCommit(
     reportId: string,
     testRunId: string,
-    templateId: string,
+    templateId: string | null,
     initiatedBy: string,
   ): Promise<string> {
     if (this.htmlGenerationProcessor.isAvailable()) {
@@ -897,7 +897,7 @@ export class ReportGenerationController {
         share_id: report.share_id,
         share_enabled: report.share_enabled,
         share_url: report.share_enabled
-          ? `${process.env.APP_URL || 'http://localhost:4001'}/reports/share/${report.share_id}`
+          ? `${process.env.APP_URL || 'http://localhost:4000'}/reports/share/${report.share_id}`
           : '',
         share_view_count: report.share_view_count || 0,
         last_shared_at: report.last_shared_at,
@@ -925,14 +925,17 @@ export class ReportGenerationController {
   @ApiOperation({ summary: 'Update share settings for a report' })
   @ApiResponse({ status: 200, description: 'Share settings updated', type: ShareSettingsResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized - valid authentication required' })
+  @ApiResponse({ status: 403, description: 'Caller can see the report but may not change its sharing' })
   @ApiResponse({ status: 404, description: 'Report not found' })
   async updateShareSettings(
     @Param('reportId') reportId: string,
     @Body() dto: UpdateShareSettingsDto,
-    @UserCtx() _ctx: UserContext,
+    @UserCtx() ctx: UserContext,
   ): Promise<ShareSettingsResponseDto> {
     try {
-      const baseUrl = process.env.APP_URL || 'http://localhost:4001';
+      await this.reportGenerationService.assertCanChangeSharing(reportId, ctx.userId, ctx.roles);
+
+      const baseUrl = process.env.APP_URL || 'http://localhost:4000';
       const updatedSettings = await this.reportShareService.updateShareSettings(
         reportId,
         {
@@ -973,7 +976,7 @@ export class ReportGenerationController {
   @Post(':reportId/retry')
   @ApiOperation({ summary: 'Retry a failed report generation' })
   @ApiResponse({ status: 200, description: 'Report generation retry started', type: GenerateReportResponseDto })
-  @ApiResponse({ status: 400, description: 'Report is not in failed state or max retries exceeded' })
+  @ApiResponse({ status: 400, description: 'Report is not in failed state, max retries exceeded, or its template has been deleted' })
   @ApiResponse({ status: 401, description: 'Unauthorized - valid authentication required' })
   @ApiResponse({ status: 404, description: 'Report not found' })
   async retryGeneration(
@@ -993,6 +996,15 @@ export class ReportGenerationController {
       if ((report.retry_count || 0) >= (report.max_retries || 3)) {
         throw new HttpException(
           'Maximum retry attempts exceeded',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Checked here, before the status moves: the generation job would only find this out
+      // asynchronously, and the report would flip back to failed with no answer to this request.
+      if (!report.template_id) {
+        throw new HttpException(
+          'The template this report was generated from has been deleted, so it cannot be regenerated',
           HttpStatus.BAD_REQUEST,
         );
       }

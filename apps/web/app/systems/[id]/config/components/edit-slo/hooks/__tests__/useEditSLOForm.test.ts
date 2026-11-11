@@ -17,7 +17,7 @@
 
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useEditSLOForm } from '../useEditSLOForm';
-import { isFormValid } from '../../utils/slo-validators';
+import { isFormValid, storedThresholdUnit, toStoredThresholdValue } from '../../utils/slo-validators';
 import { Benchmark } from '../../../types';
 import { UseEditSLOFormProps } from '../../types';
 
@@ -173,9 +173,32 @@ const BASE_CONTEXT = { systemId: 'sys-1', systemName: 'My System', environment: 
 const GRAFANA_PROPS: UseEditSLOFormProps = { open: true, benchmark: GRAFANA_BENCHMARK, ...BASE_CONTEXT };
 const DYNATRACE_PROPS: UseEditSLOFormProps = { open: true, benchmark: DYNATRACE_BENCHMARK, ...BASE_CONTEXT };
 const PERCENTUNIT_PROPS: UseEditSLOFormProps = { open: true, benchmark: PERCENTUNIT_BENCHMARK, ...BASE_CONTEXT };
+// #719: the seeded "HTTP connection pool in use" shape — percentunit only in the metric_unit column.
+const COLUMN_PERCENTUNIT_BENCHMARK: Benchmark = {
+  ...GRAFANA_BENCHMARK,
+  id: 'bench-column-percentunit',
+  requirement_value: 0.9,
+  metric_unit: 'percentunit',
+  configuration: { panelId: 1 },
+};
+const COLUMN_PERCENTUNIT_PROPS: UseEditSLOFormProps = { open: true, benchmark: COLUMN_PERCENTUNIT_BENCHMARK, ...BASE_CONTEXT };
+const HUNDRED_PERCENT_PROPS: UseEditSLOFormProps = {
+  open: true,
+  benchmark: { ...PERCENTUNIT_BENCHMARK, id: 'bench-100pct', requirement_value: 1 },
+  ...BASE_CONTEXT,
+};
 const CUSTOM_SOURCE_PROPS: UseEditSLOFormProps = { open: true, benchmark: CUSTOM_SOURCE_BENCHMARK, ...BASE_CONTEXT };
 const CLOSED_PROPS: UseEditSLOFormProps = { open: false, benchmark: GRAFANA_BENCHMARK, ...BASE_CONTEXT };
 const NULL_BENCHMARK_PROPS: UseEditSLOFormProps = { open: true, benchmark: null, ...BASE_CONTEXT };
+// A UI-created SLO: the Add dialog stores the panel id as `configuration.id`, never `panelId`.
+const ID_ONLY_BENCHMARK: Benchmark = {
+  ...GRAFANA_BENCHMARK,
+  id: 'bench-id-only',
+  source: 'performance-metrics',
+  configuration: { id: 201 },
+  panel_title: 'Request RT Avg',
+};
+const ID_ONLY_PROPS: UseEditSLOFormProps = { open: true, benchmark: ID_ONLY_BENCHMARK, ...BASE_CONTEXT };
 
 // The Enabled checkbox (v0.2.96.15). `duplicate()` clones an SLO disabled, so the dialog has
 // to load `false` faithfully; older rows may carry no value at all and must read as enabled.
@@ -368,6 +391,25 @@ describe('Percentunit conversion on init', () => {
     const { result, unmount } = renderHook(() => useEditSLOForm(PERCENTUNIT_PROPS));
 
     await waitFor(() => expect(result.current.sloFormData.requirementValue).toBe('95'));
+
+    unmount();
+  });
+
+  // #719: opening and saving without a change used to store 0.009 for 0.9.
+  it('round-trips a percentunit held only in the metric_unit column', async () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(COLUMN_PERCENTUNIT_PROPS));
+
+    await waitFor(() => expect(result.current.sloFormData.requirementValue).toBe('90'));
+    const saveUnit = storedThresholdUnit({ ...COLUMN_PERCENTUNIT_BENCHMARK, evaluate_type: result.current.sloFormData.evaluateType });
+    expect(toStoredThresholdValue(result.current.sloFormData.requirementValue, saveUnit)).toBe('0.9');
+
+    unmount();
+  });
+
+  it('shows a 100% threshold (stored as 1) as 100, not 1', async () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(HUNDRED_PERCENT_PROPS));
+
+    await waitFor(() => expect(result.current.sloFormData.requirementValue).toBe('100'));
 
     unmount();
   });
@@ -806,6 +848,62 @@ describe('enabled loads from the benchmark', () => {
     const { result, unmount } = renderHook(() => useEditSLOForm(NO_ENABLED_PROPS));
     await waitFor(() => expect(result.current.sloFormData.selectedDashboard).not.toBeNull());
     expect(result.current.sloFormData.enabled).toBe(true);
+    unmount();
+  });
+});
+
+// ===========================================================================
+// Perf-test panels carry their unit
+// ===========================================================================
+
+// Value: protects=the perf-test panel's unit reaching the Edit SLO form as yAxesFormat (so a
+// re-picked panel converts the threshold and saves metric_unit); fails_when=the edit hook's
+// fetchPerfMetricsPanels drops row.unit or stops mapping it through perfPanelUnitCode;
+// why_new=only the helper was tested, the hook's mapping was not; seam=none; no_claim=does not
+// cover the save payload or the SLO list rendering of the unit.
+describe('fetchPerfMetricsPanels carries the panel unit', () => {
+  it('maps the display unit to a unit code on each panel', async () => {
+    mockAuthFetch.mockImplementation(async (url: RequestInfo | URL) => makeResponse(
+      String(url).includes('/metrics/ds-metrics/panels-by-dashboard')
+        ? [
+          { panel_id: 1, panel_title: 'Error rate', unit: '%' },
+          { panel_id: 2, panel_title: 'Throughput', unit: 'req/s' },
+          { panel_id: 3, panel_title: 'Active threads', unit: 'threads' },
+          { panel_id: 4, panel_title: 'No unit', unit: '' },
+        ]
+        : [],
+    ));
+    const { result, unmount } = renderHook(() => useEditSLOForm(NULL_BENCHMARK_PROPS));
+
+    await act(async () => { await result.current.fetchPerfMetricsPanels('perf-app-dash'); });
+
+    expect(result.current.availableOptions.availablePanels.map((p) => [p.id, p.yAxesFormat]))
+      .toEqual([[1, 'percent'], [2, 'reqps'], [3, 'threads'], [4, undefined]]);
+    unmount();
+  });
+});
+
+// Value: protects=Edit upgrades a UI-created SLO's synthetic panel to the panel with the id the
+// Add dialog stored (configuration.id), so the unit the save converts against and stores is that
+// panel's; fails_when=the id match reads only configuration.panelId and a same-titled panel wins
+// the title match; why_new=every upgrade test used panelId; seam=none; no_claim=the title and
+// fuzzy fallbacks for SLOs that carry no id.
+describe('the panel upgrade matches the id the Add dialog stores', () => {
+  it('picks the panel by configuration.id over a panel with the same title', async () => {
+    mockAuthFetch.mockImplementation(async (url: RequestInfo | URL) => makeResponse(
+      String(url).includes('/metrics/ds-metrics/panels-by-dashboard')
+        ? [
+          { panel_id: 999, panel_title: 'Request RT Avg', unit: '%' },
+          { panel_id: 201, panel_title: 'Request RT Avg (renamed)', unit: 'ms' },
+        ]
+        : [],
+    ));
+    const { result, unmount } = renderHook(() => useEditSLOForm(ID_ONLY_PROPS));
+
+    await act(async () => { await result.current.fetchPerfMetricsPanels('app-dash-id'); });
+
+    await waitFor(() => expect((result.current.sloFormData.selectedPanel as { id?: number } | null)?.id).toBe(201));
+    expect((result.current.sloFormData.selectedPanel as { yAxesFormat?: string }).yAxesFormat).toBe('ms');
     unmount();
   });
 });

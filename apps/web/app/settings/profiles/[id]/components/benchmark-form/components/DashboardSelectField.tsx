@@ -10,7 +10,15 @@ import {
   Typography,
 } from '@mui/material';
 import { ProfileDashboard } from '@/lib/profiles';
-import { PERF_TEST_PROFILE_DASHBOARD, isPerfTestProfileDashboard } from '@/lib/profile-benchmarks';
+import {
+  PERF_TEST_PROFILE_DASHBOARD,
+  DYNATRACE_HOSTS_PROFILE_DASHBOARD,
+  isPerfTestProfileDashboard,
+  isDynatraceHostsProfileDashboard,
+  isPatternProfileDashboard,
+} from '@/lib/profile-benchmarks';
+
+const PSEUDO_DASHBOARDS = [PERF_TEST_PROFILE_DASHBOARD, DYNATRACE_HOSTS_PROFILE_DASHBOARD];
 
 interface DashboardSelectFieldProps {
   profileDashboards: ProfileDashboard[];
@@ -30,9 +38,9 @@ export function DashboardSelectField({
   return (
     <Grid size={{ xs: 12 }}>
       <Autocomplete
-        options={[...profileDashboards, PERF_TEST_PROFILE_DASHBOARD]}
+        options={[...profileDashboards, ...PSEUDO_DASHBOARDS]}
         getOptionLabel={(option) =>
-          isPerfTestProfileDashboard(option) ? option.dashboardName : `${option.dashboardName} (${option.grafanaLabel})`
+          isPatternProfileDashboard(option) ? option.dashboardName : `${option.dashboardName} (${option.grafanaLabel})`
         }
         isOptionEqualToValue={(option, value) => option.id === value.id}
         value={selectedDashboard}
@@ -46,7 +54,7 @@ export function DashboardSelectField({
             fullWidth
             required
             error={!!error}
-            helperText={error || `Select dashboard from profile (${profileDashboards.length + 1} available)`}
+            helperText={error || `Select dashboard from profile (${profileDashboards.length + PSEUDO_DASHBOARDS.length} available)`}
             InputProps={{
               ...params.InputProps,
               endAdornment: (
@@ -67,7 +75,9 @@ export function DashboardSelectField({
                 <Typography variant="body2" color="text.secondary">
                   {isPerfTestProfileDashboard(option)
                     ? 'Applies to every performance-test scenario dashboard, including scenarios added in later runs'
-                    : `${option.grafanaLabel} • UID: ${option.dashboardUid}`}
+                    : isDynatraceHostsProfileDashboard(option)
+                      ? 'Applies to every mapped Dynatrace host, including hosts mapped later'
+                      : `${option.grafanaLabel} • UID: ${option.dashboardUid}`}
                 </Typography>
               </Box>
             </Box>

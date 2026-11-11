@@ -12,7 +12,7 @@ import {
   Autocomplete,
 } from '@mui/material';
 import { SLOFormData, ValidationErrors, SloDashboard, SloPanel, isDynatraceDashboard, isDynatraceMetric } from '../types';
-import { SOURCE_OPTIONS, getSourceOption } from '../utils/slo-formatters';
+import { SOURCE_OPTIONS, getSourceOption, getEffectiveUnitFormat } from '../utils/slo-formatters';
 import { isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface SLOFormFieldsProps {
@@ -257,9 +257,11 @@ export function SLOFormFields({
             isOptionEqualToValue={(option, value) => option.panelTitle === value?.panelTitle}
             value={selectedDynatraceMetric}
             onChange={(_, newValue) => {
+              // A different metric (Duplicate) brings its own unit; the threshold is read in it.
               setSloFormData((prev) => ({
                 ...prev,
                 selectedPanel: newValue,
+                thresholdUnit: getEffectiveUnitFormat(newValue),
               }));
               clearValidationError('selectedPanel');
             }}
@@ -312,9 +314,11 @@ export function SLOFormFields({
             isOptionEqualToValue={(option, value) => (option.id != null && value?.id != null) ? String(option.id) === String(value.id) : option.title === value?.title}
             value={selectedGrafanaPanel}
             onChange={(_, newValue) => {
+              // A different metric (Duplicate) brings its own unit; the threshold is read in it.
               setSloFormData((prev) => ({
                 ...prev,
                 selectedPanel: newValue,
+                thresholdUnit: getEffectiveUnitFormat(newValue),
               }));
               clearValidationError('selectedPanel');
             }}

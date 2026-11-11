@@ -877,4 +877,35 @@ describe('SavePresetModal', () => {
       });
     });
   });
+  describe('Control group baseline', () => {
+    const controlGroupFilters: CurrentFilterState = {
+      ...defaultFilters,
+      selectedTestRun: { test_run_id: 'control-group' },
+    };
+
+    it('defaults to a generic preset, since every run has its own control group', () => {
+      render(
+        <SavePresetModal open onClose={mockOnClose} onSave={mockOnSave} currentFilters={controlGroupFilters} />,
+      );
+
+      expect((screen.getByLabelText(/Generic Preset/i) as HTMLInputElement).checked).toBe(true);
+      const descInput = screen.getByLabelText(/Description/i) as HTMLTextAreaElement;
+      expect(descInput.value).toContain('Baseline: control group');
+      expect(descInput.value).not.toContain('Baseline: control-group');
+    });
+
+    it('stores the sentinel as the baseline so the preset restores the control group', async () => {
+      render(
+        <SavePresetModal open onClose={mockOnClose} onSave={mockOnSave} currentFilters={controlGroupFilters} currentTestRunId="run-7" />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /save preset/i }));
+
+      await waitFor(() => expect(mockOnSave).toHaveBeenCalled());
+      const saved = mockOnSave.mock.calls[0]![0] as PresetFormData;
+      expect(saved.baseline_test_run_id).toBe('control-group');
+      expect(saved.preset_type).toBe('generic');
+      expect(saved.created_for_test_run_id).toBe('run-7');
+    });
+  });
 });

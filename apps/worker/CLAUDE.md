@@ -77,11 +77,18 @@ Four things to know before touching this path:
    - **A multi-column `GROUP BY` carrying `COUNT(DISTINCT)` / `ARRAY_AGG(DISTINCT)` gets no such help.** SkipScan covers one distinct column, not a grouped aggregate over a distinct one, which is why the same table answers in 3.9 ms one way and 2035 ms the other. Make the inner set distinct first and let the outer query aggregate the few hundred rows that survive.
    - **A recursive-CTE loose index scan is NULL-unsafe and fails silently.** Postgres row comparison `(a,b,c) > (x,y,z)` returns NULL rather than true at the deciding column, so the recursion terminates early and the result is quietly truncated — and `ds_metrics.unit` is NULL on 20,292 rows here. The trap is the verification, not the SQL: an `EXCEPT`-both-ways check of the rewrite against the baseline returned **0 differences and was a false pass**, because every NULL-unit panel in that data happens to carry exactly one metric, so the hazard was never exercised. A diff against production data proves the rewrite agrees *on that data*, nothing more; when a rewrite has a NULL-dependent failure mode, construct the row that exercises it.
 
-8. **The analysis offsets must FIT inside the run, and the check lives in three mirrored places (v0.2.93.3, extended v0.2.95.0).** The analysis window is `[start + analysisStartOffset, end - analysisEndOffset]`. When a short run meets offsets configured for a long one, the leading and trailing exclusions overlap, every sample matches one of them, and the entire run is flagged outside the window. Nothing downstream reports that as a misconfiguration: `ds_metric_statistics` comes out empty, the Apdex rollup misses on every transaction and falls back to the slow path, and ADAPT writes INSUFFICIENT_DATA against a run that plainly has data. It is also the worst case for `refreshRampUpFlags`, which then rewrites every row of a compressed run instead of the boundary band the per-run bounds exist to narrow it to. The fallback is to analyse the **whole** run — the offsets are a request to trim, not to discard — guarded by `EXTRACT(EPOCH FROM (end_time - start_time)) > ramp_up + ramp_down`.
+8. **The analysis offsets must FIT inside the run, and every reader applies the same check (v0.2.93.3, extended v0.2.95.0 and v0.2.97.50).** The analysis window is `[start + analysisStartOffset, end - analysisEndOffset]`. When a short run meets offsets configured for a long one, the leading and trailing exclusions overlap, every sample matches one of them, and the entire run is flagged outside the window. Nothing downstream reports that as a misconfiguration: `ds_metric_statistics` comes out empty, the Apdex rollup misses on every transaction and falls back to the slow path, and ADAPT writes INSUFFICIENT_DATA against a run that plainly has data. It is also the worst case for `refreshRampUpFlags`, which then rewrites every row of a compressed run instead of the boundary band the per-run bounds exist to narrow it to. The fallback is to analyse the **whole** run — the offsets are a request to trim, not to discard — guarded by `EXTRACT(EPOCH FROM (end_time - start_time)) > ramp_up + ramp_down`.
 
    **Measure the run from its timestamps, never from `test_runs.duration`.** `duration` is client-supplied (an updating test posts it, see `update-test-run.handler.ts`), so it can be seeded from a planned duration or left behind by an aborted run and disagree with the timestamps arbitrarily. `RAMP_UP_EXPR` uses the timestamps, so anything that measures a run differently lets the API and the pipeline disagree about the same run — accepting offsets the pipeline then silently ignores, while the user is told the trim was applied.
 
    The guard now exists in **three** places, and changing one means changing all three or a run's flags flip depending on which path last touched it: `MetricsPipeline` bakes the flag at ingestion; `RAMP_UP_EXPR` in `StatisticsPipeline` recomputes it on recalculation; and `offsetsFitRun` in `apps/api/src/modules/test-runs/handlers/update-analysis-time-range.handler.ts` (v0.2.95.0) refuses the write up front, so a bad combination is a 400 rather than a silent fallback. The API check is the SUM of both offsets on purpose: `AdaptValidator.checkTooShortTestRuns` only ever tested `ramp_up >= duration` and never looked at `ramp_down`, so a pair that overruns only in total passed it and landed on the whole-run fallback instead.
+
+   **Everything that reads the analysis window applies the same test (v0.2.97.50).** Outside the statistics path, the check comes from `analysisOffsetsFit` in `packages/shared/src/database/run-window.ts`, and SQL that turns rollup counts into a per-second rate uses `ANALYSED_SECONDS_SQL`. Before that version a short run was analysed whole only by the statistics. `TransactionStatsRollupPipeline` wrote no `ramp_up_excluded = true` rows for it, because they are inserted `WHERE total_excl > 0`, so the Performance Analysis card came out empty with its toggle on. `ApdexCalculator` then missed the rollup and fell back to a raw scan trimmed at the head only, which reads nothing when the ramp-up alone outruns the run, and a transaction Apdex SLO reports that as `NO_DATA` with `meets_requirement: false`. Measured on a 360 s demo run given a 400 s ramp-up: `NO_DATA` before, 0.968 after, matching exact SQL. Five rules hold it together:
+   - **The rollup writes those rows over the padded read window, not the run's own timestamps**, so they equal the full-run rows, late ingest included.
+   - **The SLO readers only use `ramp_down` to decide the fit.** Their window still trims the head alone, which is the residue filed in TODOS.md, so `loadTestRunForChecks` and `previewApdex` load the column for that purpose only.
+   - **The 5 s aggregate scopes (`loadCaggApdexScope`, `loadThroughputRunInfo`) and the timeseries cutoff skip both cutoffs.** The aggregates are keyed on system and environment, not on the run, so only the run's own bounds may limit them.
+   - **A run rolled up before this version keeps its missing rows** until it is rolled up again. Re-saving its analysis start offset with the same value re-enqueues the rollup.
+   - **Stored SLO verdicts change only on re-evaluation**, and only for such runs: a `NO_DATA` or "Too few" result becomes a real pass or fail.
 
 Related: `control-group-statistics` is registered with `softFail`, so a failed aggregation still completes its BullMQ job. The reevaluate orchestrator reads the job's return value through the exported `assertStageSucceeded()` (`apps/worker/src/workers/simple-orchestrate-reevaluate-batch.ts`) instead of logging a green tick and running ADAPT on an empty baseline. Any new stage waiting on a `softFail` pipeline has to do the same.
 
@@ -386,9 +393,18 @@ Two bugs came out with it. `insertBenchmarkBasedOnProfileBenchmark` never wrote
 (12 `max` SLOs on the dev DB); migration 1810 backfills it and verdicts may change on the next
 evaluation. And `mapAggregationTypeToField` had no `q50` key while both SLO dialogs offer it.
 
-Residue: provisioned rows are write-once and the 5-minute auto-config window can miss a scenario
-dashboard written by a parked analyze (both TODOS.md); the profile form has no field for the regex
-(API only).
+Since v0.2.97.65 an edit or delete of the profile SLO reaches the rows it provisioned
+(`ProfilesService.propagateToProvisioned` / `disableProvisioned`), with one ownership rule: a row
+is still the profile's while `updated_by IS NULL` — grafana-sync never sets it and every API write
+does, so a person's tweak wins and is never overwritten or switched off — and to rows in the profile's own
+organization, since provisioning matches profiles by name across tenants. A delete disables (never
+deletes: the check results are run history); a threshold, evaluate-type, unit or panel change is
+written in place; a source, uid-pattern or workload-pattern change disables the rows with
+`metadata.autoDisabled` and the next sweep re-enables and re-syncs the ones still matched — the only
+case where `insertBenchmarkBasedOnProfileBenchmark`'s update branch runs. A Dynatrace host query's
+rename carries its SLOs and compare configs to the new panel id, and unmapping or deleting it
+disables its SLOs. Residue: the 5-minute auto-config window can miss a scenario dashboard written by
+a parked analyze (TODOS.md); the profile form has no field for the regex (API only).
 
 ### The perf-test error-rate SLO reads the transaction rollup, not the mean of the buckets
 
@@ -1034,6 +1050,34 @@ verdicts until the group fills. And the request id is 219, not 210, because 210-
 **virtual URL panels** (`isUrlPanel` in both `url-perf-panels.ts` files) and a stored 210 would be
 routed through the sampler-URL rollup — `isRequestPanel` lists the stored ids (201-209, 219-220) for
 the same reason.
+
+### `defaultValueIfControlGroupMissing` stands in for an ABSENT baseline, never a thin one
+
+Since v0.2.97.66 a compare config may carry `defaultValueIfControlGroupMissing`, and both ADAPT
+builders (`sql-builder.ts`, `tracked-results-sql-builder.ts`) substitute it for `control_stat_value`
+when the baseline has no row for the series. The expressions live once, in `sql-fragments.ts`
+(`usesDefaultValueExpr`, `wrapControlStatValue`, `buildDefaultValueColumns`,
+`buildStoredDefaultValueColumns`). Five things that are easy to undo:
+
+1. **Only `NOT control_row_exists`.** A row with too few samples stays `incomparable`: the sample
+   floor reports a thin baseline, and a constant in its place would hide exactly that. The test
+   side's floor still applies in the default arm of `control_exists`.
+2. **The expression is wrapped in `COALESCE(…, false)`.** `jsonb_typeof(NULL)` is NULL, so with the key
+   absent `control_exists` became `false OR NULL` = NULL, which skips the `incomparable` branch and
+   lands on `no difference`, and the NOT NULL `uses_default_value` insert fails. The probe that
+   found it is in the PR; the unit spec pins the wrapper.
+3. **Only an explicit number counts.** A string, a JSON null or a value outside float8's range
+   (`abs > 1e300`) is off, rather than a cast error that aborts the batch. Three writers used to
+   store `0` as "unset" (the anomaly card's `|| 0`, the applier's `INSERT_BASE`, the perf-test
+   seed); they no longer write the key, and migration 1824 stripped the stored 0s. A new writer
+   must not default it, or every new series on its panels is judged against that value.
+4. **The IQR check is invalid against a default** (`control_iqr` is NULL with no row), the
+   percentage and absolute checks are not. With a default of 0 the percentage check reads any
+   nonzero test value as a difference; `pctDiff` stays NULL (division guard).
+5. **`uses_default_value` is stored only when the default reached a verdict** (`AND control_exists`),
+   so a row that took the default but missed the test-side floor is not badged. The API returns it as
+   `uses_default_value` on the anomaly rows and the report fetcher as `controlIsConfigured`; both
+   UIs mark the control value "configured".
 
 ### ADAPT runs with JIT off, on purpose
 

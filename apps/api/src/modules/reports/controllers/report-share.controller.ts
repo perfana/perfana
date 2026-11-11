@@ -81,16 +81,15 @@ export class ReportShareController {
 
       return new StreamableFile(result.pdfData);
     } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
       // Handle specific error types from the service
       const errorMessage =
         error && typeof error === 'object' && 'message' in error
           ? (error as Error).message
           : 'Unknown error';
 
+      // Before the HttpException rethrow below: the service reports these as HttpExceptions, and
+      // rethrowing first answered a stopped or expired link with a 400 where the HTML route and
+      // this route's own docs say 404.
       if (
         errorMessage.includes('not found') ||
         errorMessage.includes('Shared Report') ||
@@ -100,6 +99,10 @@ export class ReportShareController {
       ) {
         this.logger.warn(`Public PDF download denied for ${params.shareId}: ${errorMessage}`);
         throw new HttpException(errorMessage, HttpStatus.NOT_FOUND);
+      }
+
+      if (error instanceof HttpException) {
+        throw error;
       }
 
       this.logger.error(`Failed to serve PDF for public share ${params.shareId}:`, error);

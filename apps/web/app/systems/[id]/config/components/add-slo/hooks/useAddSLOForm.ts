@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { SUPPORTED_PANEL_TYPES } from '../utils/slo-validators';
 import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
+import { perfPanelUnitCode } from '@/lib/units';
 
 export function useAddSLOForm({
   open,
@@ -210,6 +211,8 @@ export function useAddSLOForm({
           id: row.panel_id,
           title: row.panel_title,
           type: 'timeseries',
+          // Without it the threshold is not converted and the SLO is stored with no metric_unit.
+          yAxesFormat: perfPanelUnitCode(row.unit),
         }));
         setAvailablePerfMetricsPanels(panels);
       } else {

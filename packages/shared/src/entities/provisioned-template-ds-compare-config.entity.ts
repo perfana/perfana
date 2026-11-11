@@ -25,6 +25,8 @@ export class ProvisionedTemplateDsCompareConfig {
     'higher_is_better',
     'metric_classification',
     'config_overrides',
+    'read_only',
+    'profile_id',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -69,8 +71,33 @@ export class ProvisionedTemplateDsCompareConfig {
   @Column({ type: 'varchar', length: 255, nullable: true })
   metric_classification?: string;
 
+  /**
+   * The fields this template forces onto a `ds_compare_config` row, keyed as in the provisioning
+   * YAML (`absThreshold`, `percentageThreshold`, `higherIsBetter`, ...). A key that is present is
+   * named, explicit `null` included; an absent key leaves the row's own value alone.
+   * `higherIsBetter` presence is read from here first. Provisioning writes `higher_is_better` from it;
+   * the resolver also counts a set column when the key is missing, which is what migration 1822's
+   * backfill copies into the overrides and what keeps a direction when an API older than 1822
+   * rewrites this column without the key. A writer must set both, never only the column.
+   */
   @Column({ type: 'jsonb', nullable: true })
   config_overrides?: Record<string, unknown>;
+
+  /**
+   * Owned by the provisioning file: written and pruned from YAML, not editable in the UI. Nullable
+   * on purpose (an older SUT bundle imports NULL); NULL means false.
+   */
+  @Column({ type: 'boolean', nullable: true, default: false })
+  read_only?: boolean | null;
+
+  /**
+   * A profile template applies only to runs whose tags match this profile (migration 1823). Its
+   * scope is the profile alone: `organization_id` holds a copy of the profile's organization for the
+   * audit log, and is neither part of the key nor read for selection or access, which go through the
+   * profile. ON DELETE CASCADE: deleting a profile deletes its templates.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  profile_id?: string | null;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;

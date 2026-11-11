@@ -112,12 +112,14 @@ and at most **20 sections** per report, the same ceiling the builder enforces. O
 id that matches no run, and the call is refused (400 and 404 respectively). Unlike
 `/reports/generate`, `name` is required here.
 
-A comparison section can set `"baselineTestRunId"` to one of two reserved values instead of
+A comparison section can set `"baselineTestRunId"` to one of three reserved values instead of
 pinning a run that ages. `"previous"` compares against the most recent completed run that started
 before this one in the same system / environment / workload. `"previous-successful"` narrows that
 to the most recent such run whose SLOs passed (`consolidated_result.meetsRequirement`), so a
-still-broken run is not compared against one that had already breached its objectives. Both are
-resolved when each report is generated. See [[Templates]].
+still-broken run is not compared against one that had already breached its objectives.
+`"control-group"` compares against the run's control group — the earlier runs anomaly detection
+judges it against — using their pooled statistics, the same control values the Anomaly Detection
+card shows. All three are resolved when each report is generated. See [[Templates]].
 
 ## Naming generated reports
 

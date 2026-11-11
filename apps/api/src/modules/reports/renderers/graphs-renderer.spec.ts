@@ -864,6 +864,15 @@ describe('GraphsRenderer', () => {
       expect(boundaries(html)).toBe(1);
     });
 
+    it('marks nothing when the offsets do not fit the run, because all of it was analysed', async () => {
+      const html = await renderer.renderGraphsSection(
+        makeSection(), runWithClock({ analysisStartOffset: 400, analysisEndOffset: 400 }),
+      );
+
+      expect(boundaries(html)).toBe(0);
+      expect(pointCount(html)).toBe(10);
+    });
+
     it('marks nothing when the run has no offsets', async () => {
       const html = await renderer.renderGraphsSection(makeSection(), runWithClock());
 

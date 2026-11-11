@@ -264,12 +264,13 @@ export class SutImportService {
     // batch.length would report skipped rows as imported.
     const conflict = 'ON CONFLICT DO NOTHING';
 
-    // generated_reports.template_id is a NOT NULL FK to report_templates, which
-    // now travels in the bundle. Bundles exported before that fix carry the
-    // reports but not their templates, so those rows would FK-violate the whole
-    // import. Drop the orphans (logged) so the rest of the SUT still lands; a
-    // re-export with the current code brings the templates — and the reports —
-    // back. For self-contained bundles this prunes nothing.
+    // generated_reports.template_id is an FK to report_templates, which now travels
+    // in the bundle. Bundles exported before that fix carry the reports but not their
+    // templates, so those rows would FK-violate the whole import. Drop the orphans
+    // (logged) so the rest of the SUT still lands; a re-export with the current code
+    // brings the templates — and the reports — back. For self-contained bundles this
+    // prunes nothing. A NULL here is a report whose template was deleted, which is not
+    // an orphan: it refers to nothing and imports as it is.
     //
     // ds_metric_series_groups.rule_id is the opposite case: nullable, and the row is still a
     // valid raw -> group mapping without its rule, so the reference is cleared instead of the
@@ -422,8 +423,9 @@ export class SutImportService {
     return kept;
   }
 
-  // Drop rows whose (NOT NULL) FK column points at a parent row absent from the
-  // target — used for orphaned generated_reports in pre-fix bundles. The parent
+  // Drop rows whose FK column points at a parent row absent from the target — used
+  // for orphaned generated_reports in pre-fix bundles. A NULL points at nothing, so it
+  // stays. The parent
   // table is a trusted literal from the caller; ids are cast to text so this
   // works regardless of the key type. Logs how many rows were pruned.
   private async dropRowsMissingParent(
@@ -440,7 +442,7 @@ export class SutImportService {
       [ids],
     );
     const have = new Set(present.map((p) => p.id));
-    const kept = rows.filter((r) => r[column] != null && have.has(String(r[column])));
+    const kept = rows.filter((r) => r[column] == null || have.has(String(r[column])));
     const dropped = rows.length - kept.length;
     if (dropped > 0) {
       this.logger.warn(

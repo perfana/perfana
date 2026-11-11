@@ -12,6 +12,10 @@ import { validateRegexPattern } from '@perfana/shared/utils';
 import {
   PERF_TEST_PROFILE_SOURCE,
   PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+  DYNATRACE_HOSTS_PROFILE_SOURCE,
+  DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
+  dynatraceHostPanelTitle,
+  PROVISIONED_SLO_AUTO_DISABLED_KEY,
 } from '@perfana/shared/constants';
 
 @Injectable()
@@ -70,6 +74,12 @@ export class BenchmarkProcessorService {
 
       // RBAC: Pass organizationId to filter dashboards by organization
       const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
+
+      if (profileBenchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE) {
+        await this.processDynatraceHostsBenchmark(testRun, profileBenchmark, systemUnderTestName);
+        return;
+      }
+
       const isPerfTest = profileBenchmark.source === PERF_TEST_PROFILE_SOURCE;
       // A perf-test benchmark has no Grafana template: `dashboard_uid` is a regex over
       // the worker-written `performance-test-metrics-<scenario>` uids, so one profile row
@@ -124,6 +134,64 @@ export class BenchmarkProcessorService {
   }
 
   /**
+   * A `dynatrace-hosts` benchmark: like a perf-test one, `dashboard_uid` is a regex, here over
+   * the `dynatrace-dynatrace-host-metrics-<host>` uids, so one profile row fans out to every
+   * mapped host, including hosts mapped later. Unlike perf-test the panel id differs per host,
+   * so the synthetic profile panel id is mapped to its title and each host's real id is read
+   * from its `dynatrace_queries` row.
+   */
+  private async processDynatraceHostsBenchmark(
+    testRun: TestRun,
+    profileBenchmark: ProfileBenchmark,
+    systemUnderTestName: string,
+  ): Promise<void> {
+    const lookup = profileBenchmark.dashboard_uid || DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT;
+    // The API validates on write; rows written before it did (or by SQL) reach Postgres `~` here.
+    const check = validateRegexPattern(lookup, { maxLength: 255 });
+    if (!check.safe) {
+      this.logger.warn(
+        `Profile benchmark ${profileBenchmark.id} has an unsafe uid pattern '${lookup}': ${check.error} - skipping`,
+      );
+      return;
+    }
+    const panelTitle =
+      dynatraceHostPanelTitle(profileBenchmark.panel_id) ?? profileBenchmark.panel_title;
+    if (!panelTitle) {
+      this.logger.warn(
+        `Profile benchmark ${profileBenchmark.id} names no Dynatrace host panel (panel_id ${profileBenchmark.panel_id}) - skipping`,
+      );
+      return;
+    }
+
+    const hostPanels = await this.dashboardFinderService.findDynatraceHostPanelsByUidPattern(
+      lookup,
+      panelTitle,
+      systemUnderTestName,
+      testRun.testEnvironment,
+      testRun.workload,
+      testRun.organizationId,
+    );
+    this.logger.log(
+      `Found ${hostPanels.length} Dynatrace host dashboards with panel '${panelTitle}' for uid pattern ${lookup}`,
+    );
+
+    // One failing host must not skip the rest.
+    for (const { applicationDashboard, panelId } of hostPanels) {
+      try {
+        await this.createBenchmarkIfNotExists(testRun, profileBenchmark, applicationDashboard, {
+          panelId,
+          panelTitle,
+        });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Failed to provision profile benchmark ${profileBenchmark.id} on dashboard ${applicationDashboard.id}: ${msg}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Check if test run workload matches the benchmark's workload pattern
    */
   private matchesWorkloadPattern(testRun: TestRun, profileBenchmark: ProfileBenchmark): boolean {
@@ -152,12 +220,17 @@ export class BenchmarkProcessorService {
   }
 
   /**
-   * Create benchmark if it doesn't already exist
+   * Create the benchmark if it does not exist yet. An existing row is left alone — a person may
+   * have tweaked it, and their version wins — unless the system switched it off
+   * (PROVISIONED_SLO_AUTO_DISABLED_KEY: the profile SLO was retargeted, or the host query was
+   * unmapped) and nobody has edited it since: then this profile SLO still matches the
+   * dashboard, so the row is re-synced from it and switched back on.
    */
   private async createBenchmarkIfNotExists(
     testRun: TestRun,
     profileBenchmark: ProfileBenchmark,
     applicationDashboard: any,
+    panel?: { panelId: number; panelTitle: string },
   ): Promise<void> {
     const existingBenchmark =
       await this.testRunFinderService.findBenchmarkForApplicationDashboardOrNull(
@@ -166,14 +239,21 @@ export class BenchmarkProcessorService {
         testRun.workload,
       );
 
-    if (!existingBenchmark) {
+    const autoDisabled =
+      !!existingBenchmark &&
+      !existingBenchmark.enabled &&
+      !existingBenchmark.updated_by &&
+      !!existingBenchmark.metadata?.[PROVISIONED_SLO_AUTO_DISABLED_KEY];
+
+    if (!existingBenchmark || autoDisabled) {
       await this.updatesService.insertBenchmarkBasedOnProfileBenchmark(
         profileBenchmark,
         testRun,
         applicationDashboard,
+        panel,
       );
       this.logger.log(
-        `Created benchmark for profile benchmark ${profileBenchmark.panel_title || profileBenchmark.id}`,
+        `${autoDisabled ? 'Re-enabled' : 'Created'} benchmark for profile benchmark ${panel?.panelTitle ?? (profileBenchmark.panel_title || profileBenchmark.id)} on dashboard ${applicationDashboard.id}`,
       );
     } else {
       this.logger.debug(

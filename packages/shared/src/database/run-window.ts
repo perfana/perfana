@@ -60,12 +60,46 @@ const seconds = (v: string | number | null | undefined): number => {
 };
 
 /**
+ * Whether a run's offsets leave anything to analyse.
+ *
+ * When a short run meets offsets configured for a long one, the leading and trailing
+ * exclusions cover it, and trimming would read nothing from a run that has data. The offsets
+ * are a request to trim, not to discard, so the whole run is analysed instead. Every reader
+ * asks here. The worker's `RAMP_UP_EXPR` applies the same test in SQL, because it runs per
+ * row of `ds_metrics`. A run with no end yet has no length to compare, so it fits.
+ *
+ * Strict: offsets that exactly fill the run leave an empty window, not a minimal one.
+ */
+export function analysisOffsetsFit(row: TestRunTimesRow | null | undefined): boolean {
+  if (!row?.start_time || !row?.end_time) return true;
+  const runSeconds = (new Date(row.end_time).getTime() - new Date(row.start_time).getTime()) / 1000;
+  return runSeconds > seconds(row.ramp_up) + seconds(row.ramp_down);
+}
+
+/**
+ * The seconds a per-second rate over `ramp_up_excluded = true` rollup rows divides by, for a
+ * query aliasing `test_runs` as `tr`. When the offsets do not fit, those rows hold the whole
+ * run, so the whole run is the divisor. It has only ever subtracted the ramp-up.
+ *
+ * The fit is measured from the timestamps, as `analysisOffsetsFit` and `RAMP_UP_EXPR` measure
+ * it: `duration` is client-supplied and can disagree with them, and then the divisor and the
+ * rows it divides would describe different windows. The divisor itself keeps `duration`.
+ */
+export const ANALYSED_SECONDS_SQL = `GREATEST(tr.duration - CASE
+    WHEN tr.start_time IS NULL OR tr.end_time IS NULL
+      OR EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) > COALESCE(tr.ramp_up, 0) + COALESCE(tr.ramp_down, 0)
+    THEN COALESCE(tr.ramp_up, 0)
+    ELSE 0
+  END, 0)`;
+
+/**
  * Resolve the `time` bounds for a run from its `test_runs` row.
  *
  * Always returns the padded run window when the timestamps are there — that is
  * the lock bound, and it is not optional. `excludeRampUp` narrows it further to
  * the analysis timerange (the Performance Analysis card's toggle): start after
- * ramp-up, end before ramp-down. Ramp-down only applies to completed runs.
+ * ramp-up, end before ramp-down. Ramp-down only applies to completed runs. Offsets
+ * that do not fit the run leave the whole run: see `analysisOffsetsFit`.
  *
  * A null cutoff means "no bound" — an in-flight run has no `end_time`, and
  * there are no chunks past now() to exclude anyway.
@@ -80,7 +114,7 @@ export function analysisBoundsFromRow(
   let startCutoff = startTime ? new Date(startTime.getTime() - RUN_WINDOW_PAD_MS) : null;
   let endCutoff = endTime ? new Date(endTime.getTime() + RUN_WINDOW_PAD_MS) : null;
 
-  if (excludeRampUp) {
+  if (excludeRampUp && analysisOffsetsFit(row)) {
     const rampUp = seconds(row?.ramp_up);
     const rampDown = seconds(row?.ramp_down);
     if (startTime && rampUp > 0) startCutoff = new Date(startTime.getTime() + rampUp * 1000);

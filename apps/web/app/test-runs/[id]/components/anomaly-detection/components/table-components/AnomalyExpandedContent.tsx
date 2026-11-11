@@ -406,6 +406,9 @@ export function AnomalyExpandedContent({
                     panelTitle: row.panel_title || 'Unknown Panel',
                     metricName: row.metric_name,
                     dashboardLabel: row.dashboard_label || 'Unknown Dashboard',
+                    dashboardUid: row.dashboard_uid,
+                    organizationId: testRun?.organizationId ?? testRun?.organization_id ?? testRun?.system_under_test?.organization_id ?? null,
+                    runTags: testRun?.tags,
                     currentConfig: (() => {
                       const drawerRecord = drawerData;
                       type NestedConfig = Record<string, unknown>;
@@ -430,11 +433,12 @@ export function AnomalyExpandedContent({
                         configSource: existingConfig.source ?? 'global'
                         // Assembled field by field out of `unknown` drawer data, so this
                         // is a construction, not a narrowing — TS needs the unknown hop.
-                      } as unknown as { ignore?: boolean; metricClassification?: { classification: string; higherIsBetter: boolean }; thresholds?: { aggregation: string; percentageThreshold: number; iqrThreshold: number; absoluteThreshold: number }; configSource?: string };
+                      } as unknown as { ignore?: boolean; metricClassification?: { classification: string; higherIsBetter: boolean }; thresholds?: { aggregation: string; percentageThreshold: number; iqrThreshold: number; absoluteThreshold: number }; defaultValueIfControlGroupMissing?: number | null; configSource?: string };
                     })()
                   }}
                   onSave={onConfigSave}
                   onCancel={onConfigFormToggle}
+                  onTemplateSaved={showToast ?? (() => undefined)}
                 />
               ) : (
                 <StatisticalDrawerContent

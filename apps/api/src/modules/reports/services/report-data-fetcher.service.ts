@@ -17,6 +17,7 @@ import {
 import {
   AnalysisBounds,
   analysisBoundsFromEntity,
+  ANALYSED_SECONDS_SQL,
   analysisBoundsFromRow,
   spanBounds,
   timeBoundsSql,
@@ -28,6 +29,11 @@ import { percentDiff, percentDiffScaled } from '../renderers/comparison-bands';
 import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isSyntheticAllAggregated, isUrlPanel, perfPanelTitle, presetAggregateSpec } from './url-perf-panels';
 import { CHANGE_POINT_WINDOW } from './trend-window';
 import { hostDashboardLabel } from '../../dynatrace/dynatrace.repository';
+import {
+  loadControlGroupForRun,
+  loadControlGroupStatistics,
+  type ControlGroupInfo,
+} from '../../metrics/control-group-baseline';
 
 // The shapes these queries return. Re-exported so the ten renderers that import them from
 // this module keep working unchanged.
@@ -35,6 +41,7 @@ import {
   AdaptResultRow,
   AnomalySummary,
   ApdexData,
+  ApdexPercentileRow,
   ApdexScenarioData,
   ApdexTransactionRow,
   AwrData,
@@ -73,6 +80,22 @@ export * from './report-data.types';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (id: string) => UUID_RE.test(id);
+
+/**
+ * Transaction RT Avg — the perf-test panel a control-group comparison reads when the section
+ * picked nothing (`METRIC_TYPE_PANEL_IDS.TXN_RT_AVG` in the worker). One row per transaction,
+ * which is what the run-vs-run default shows too.
+ */
+const PERF_TXN_RT_AVG_PANEL_ID = 101;
+
+/** The statistics either side of a statistics-based comparison row carries. */
+interface StatisticsComparisonSide {
+  unit: string | null;
+  mean: number | null;
+  q90: number | null;
+  q95: number | null;
+  q99: number | null;
+}
 
 /** Derive Top10Row metrics from raw stat rows (formulas match prepareTop10Data). */
 export function mapRawToTop10Rows(raw: RawTop10Row[], testDuration: number): Top10Row[] {
@@ -207,27 +230,11 @@ export class ReportDataFetcherService {
    * start cutoff runs past it, and the graphs section now draws the two on ONE chart —
    * two lines ending at different x positions.
    */
-  /**
-   * @param endBound which end the window gets.
-   *
-   * `'analysis'` trims the ramp-DOWN band, which is what a reader paired with a
-   * `ds_metrics` series needs (see the paragraph above).
-   *
-   * **`'head-trimmed'` is not a variant — it is the pre-#674 contract.** Before this
-   * change, the Apdex, throughput and virtual-user reads carried
-   * `AND ($2::boolean = false OR t.time >= $3)`: a START cutoff and no end at all. Giving
-   * them an analysis end would silently re-cut the default report — measured on
-   * `PerfanaWebshop-acc-loadTest-k6-00019`, the Apdex table lost 131 of 275 rows and its
-   * average moved 282.41 → 286.58 ms, on 58 of 60 runs on the dev database. #674 is a
-   * lock fix; it does not get to change a published number. Trimming the report's
-   * ramp-down band may well be right, but it is a product change and ships on its own.
-   */
   private async getAnalysisWindowBounds(
     testRunId: string,
     excludeRampUp: boolean,
     userId: string = '',
     roles: string[] = [],
-    endBound: 'analysis' | 'head-trimmed' = 'analysis',
   ): Promise<AnalysisBounds> {
     // Internal/system calls (no userId) or admin users bypass org filtering
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
@@ -251,11 +258,7 @@ export class ReportDataFetcherService {
       return { startCutoff: null, endCutoff: null };
     }
 
-    const bounds = analysisBoundsFromRow(row, excludeRampUp);
-    if (endBound === 'head-trimmed') {
-      return { startCutoff: bounds.startCutoff, endCutoff: analysisBoundsFromRow(row, false).endCutoff };
-    }
-    return bounds;
+    return analysisBoundsFromRow(row, excludeRampUp);
   }
 
   /**
@@ -996,7 +999,9 @@ export class ReportDataFetcherService {
    */
   private async getAggregatedSeriesRows(
     currentRunId: string,
-    baselineRunId: string,
+    // null: no baseline run (a control-group comparison). The run-wide aggregate is not a
+    // series ADAPT pools, so there is no control-group value for it and the baseline stays empty.
+    baselineRunId: string | null,
     selections: BaselineComparisonSelection[],
     opts: { metrics: ('avg' | 'p90' | 'p95' | 'p99')[]; userId: string; roles: string[] },
   ): Promise<BaselineComparisonRow[]> {
@@ -1005,11 +1010,14 @@ export class ReportDataFetcherService {
 
     const kinds = new Set(wanted.map((s) => aggregatedKindFor(s.panelId)!));
     const scalars = new Map<string, { avg: number | null; p90: number | null; p95: number | null; p99: number | null }>();
+    const none = { avg: null, p90: null, p95: null, p99: null };
     for (const kind of kinds) {
       const [cur, base] = await Promise.all(
-        [currentRunId, baselineRunId].map((run) => (kind === 'transaction'
-          ? this.getAggregatedScalars(run, opts.userId, opts.roles)
-          : this.getAggregatedRequestScalars(run, opts.userId, opts.roles))),
+        [currentRunId, baselineRunId].map((run) => (run == null
+          ? Promise.resolve(none)
+          : kind === 'transaction'
+            ? this.getAggregatedScalars(run, opts.userId, opts.roles)
+            : this.getAggregatedRequestScalars(run, opts.userId, opts.roles))),
       );
       scalars.set(`${kind}:current`, cur!);
       scalars.set(`${kind}:baseline`, base!);
@@ -1038,20 +1046,20 @@ export class ReportDataFetcherService {
   /**
    * Get Apdex data from database for all scenarios
    *
-   * IMPORTANT: This method uses WEIGHTED AVERAGES of per-transaction percentiles
-   * to match how the Performance Analysis card calculates aggregated metrics.
+   * The overall and per-scenario P95/P99 are percentiles of the executions in that scope, read
+   * by their own statement. They used to be count-weighted averages of the per-transaction
+   * percentiles, printed as "95th percentile", which understates exactly when it matters: a slow
+   * minority barely moves the average of everyone's P95, while it IS the tail. 1000 executions
+   * at 50 ms and 100 at 500 ms have a P95 of 500 ms and a weighted average of 91 ms. On
+   * PerfanaWebshop-acc-loadTest-00004 that was 383 ms against a real 850 ms.
    *
-   * Why weighted averages instead of global percentiles:
-   * - Global PERCENTILE_CONT across all transactions is misleading when transaction types
-   *   have vastly different performance characteristics and volumes
-   * - Example: 1000 fast transactions (50ms) + 100 slow transactions (500ms)
-   *   - Global P95: ~100ms (dominated by high-volume fast transactions)
-   *   - Weighted avg of per-transaction P95s: more representative of actual user experience
-   * - This matches how analysts naturally aggregate metrics in Performance Analysis
+   * The average and the Apdex score stay weighted, because for those the weighting IS exact.
+   * The Performance Analysis card has the same problem and asks
+   * `GET /test-runs/:id/transactions/percentiles`, which merges digests rather than sorting.
    *
    * @param testRun - Test run to fetch data for
    * @param apdexThreshold - Apdex threshold T in milliseconds
-   * @param excludeRampUp - Whether to exclude ramp-up period from calculations
+   * @param excludeRampUp - Whether to restrict to the analysis window, after ramp-up and before ramp-down
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns Apdex data structure with overall and per-scenario metrics
@@ -1068,9 +1076,7 @@ export class ReportDataFetcherService {
 
       // Always bounded, toggle or not — see @perfana/shared/database/run-window. The same bounds
       // go to the throughput and virtual-user reads below, so this is one lookup.
-      // 'head-trimmed': this read had a start cutoff and no end before #674. See the
-      // getAnalysisWindowBounds docblock — an analysis end here moves published numbers.
-      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       const time = timeBoundsSql(bounds, 't.time', 2);
 
       // Build organization filter for queries
@@ -1079,9 +1085,8 @@ export class ReportDataFetcherService {
       // Note: apdexThreshold parameter no longer used in query - we fetch per-transaction thresholds from DB
       const queryParams = [testRunId, ...time.params, ...orgFilter.params];
 
-      // Query all per-transaction statistics first (this matches Performance Analysis approach)
-      // We get per-transaction percentiles, then calculate weighted averages for overall/scenario summaries
-      // IMPORTANT: Use per-transaction Apdex thresholds from database (not global threshold)
+      // Per-transaction statistics. IMPORTANT: use per-transaction Apdex thresholds from the
+      // database (not a global threshold).
       const allTransactionsQuery = `
         SELECT
           t.transaction_name,
@@ -1120,14 +1125,35 @@ export class ReportDataFetcherService {
         return null;
       }
 
-      // Calculate overall metrics using weighted averages (matches Performance Analysis)
+      // A percentile of a whole scope cannot be derived from its parts, so this reads the rows
+      // again. Same window and filters as above, so the two statements describe the same
+      // executions. The scenario key matches the `|| 'Unknown'` grouping further down.
+      const percentileRows: ApdexPercentileRow[] = await withRequestEm(this.testRunRepo).query(
+        `
+        SELECT
+          COALESCE(NULLIF(t.scenario_name, ''), 'Unknown') AS scenario,
+          GROUPING(COALESCE(NULLIF(t.scenario_name, ''), 'Unknown')) AS is_overall,
+          ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p95_ms,
+          ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p99_ms
+        FROM transactions t
+        LEFT JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+        WHERE t.test_run_id = $1
+          ${time.clause}
+          ${orgFilter.clause}
+        GROUP BY GROUPING SETS ((COALESCE(NULLIF(t.scenario_name, ''), 'Unknown')), ())
+        `,
+        queryParams,
+      );
+      const overallPercentiles = percentileRows.find((r) => Number(r.is_overall) === 1);
+      const percentilesOf = (scenario: string) =>
+        percentileRows.find((r) => Number(r.is_overall) === 0 && r.scenario === scenario);
+
+      // The average and the Apdex score are exact when weighted by execution count.
       let totalCount = 0;
       let _totalSatisfied = 0;
       let _totalTolerating = 0;
       let totalFailed = 0;
       let weightedAvg = 0;
-      let weightedP95 = 0;
-      let weightedP99 = 0;
       let weightedApdex = 0;
       const thresholdSet = new Set<number>();
 
@@ -1142,16 +1168,14 @@ export class ReportDataFetcherService {
         _totalTolerating += txnTolerating;
         totalFailed += parseInt(txn.fail);
         weightedAvg += parseFloat(txn.avg_ms) * count;
-        weightedP95 += parseFloat(txn.p95_ms) * count;
-        weightedP99 += parseFloat(txn.p99_ms) * count;
         weightedApdex += txnApdex * count;
         thresholdSet.add(parseInt(txn.active_threshold) || 500);
       }
 
       const overallApdex = totalCount > 0 ? weightedApdex / totalCount : 0;
       const overallAvg = totalCount > 0 ? Math.round((weightedAvg / totalCount) * 100) / 100 : 0;
-      const overallP95 = totalCount > 0 ? Math.round((weightedP95 / totalCount) * 100) / 100 : 0;
-      const overallP99 = totalCount > 0 ? Math.round((weightedP99 / totalCount) * 100) / 100 : 0;
+      const overallP95 = parseFloat(overallPercentiles?.p95_ms ?? '0') || 0;
+      const overallP99 = parseFloat(overallPercentiles?.p99_ms ?? '0') || 0;
       const overallErrorRate = totalCount > 0 ? (totalFailed / totalCount) * 100 : 0;
 
       // Fetch peak throughput metrics (transactions/sec and requests/sec) with organization filtering
@@ -1173,14 +1197,11 @@ export class ReportDataFetcherService {
       const scenarios: Record<string, ApdexScenarioData> = {};
 
       for (const [scenarioName, scenarioTransactions] of Object.entries(scenarioMap)) {
-        // Calculate scenario summary using weighted averages (matches Performance Analysis)
         let scenarioTotal = 0;
         let _scenarioSatisfied = 0;
         let _scenarioTolerating = 0;
         let scenarioFailed = 0;
         let scenarioWeightedAvg = 0;
-        let scenarioWeightedP95 = 0;
-        let scenarioWeightedP99 = 0;
         let scenarioWeightedApdex = 0;
 
         const transactions = scenarioTransactions.map((txn: ApdexTransactionRow) => {
@@ -1196,8 +1217,6 @@ export class ReportDataFetcherService {
           _scenarioTolerating += txnTolerating;
           scenarioFailed += parseInt(txn.fail);
           scenarioWeightedAvg += parseFloat(txn.avg_ms) * txnTotal;
-          scenarioWeightedP95 += parseFloat(txn.p95_ms) * txnTotal;
-          scenarioWeightedP99 += parseFloat(txn.p99_ms) * txnTotal;
           scenarioWeightedApdex += txnApdex * txnTotal;
 
           return {
@@ -1215,8 +1234,9 @@ export class ReportDataFetcherService {
 
         const scenarioApdex = scenarioTotal > 0 ? scenarioWeightedApdex / scenarioTotal : 0;
         const scenarioAvg = scenarioTotal > 0 ? Math.round((scenarioWeightedAvg / scenarioTotal) * 100) / 100 : 0;
-        const scenarioP95 = scenarioTotal > 0 ? Math.round((scenarioWeightedP95 / scenarioTotal) * 100) / 100 : 0;
-        const scenarioP99 = scenarioTotal > 0 ? Math.round((scenarioWeightedP99 / scenarioTotal) * 100) / 100 : 0;
+        const scenarioPercentiles = percentilesOf(scenarioName);
+        const scenarioP95 = parseFloat(scenarioPercentiles?.p95_ms ?? '0') || 0;
+        const scenarioP99 = parseFloat(scenarioPercentiles?.p99_ms ?? '0') || 0;
         const errorRate = scenarioTotal > 0 ? (scenarioFailed / scenarioTotal) * 100 : 0;
 
         // Get peak metrics for this scenario
@@ -1478,8 +1498,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<ThroughputStats> {
     try {
-      // 'head-trimmed' — see getApdexDataFromDatabase.
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -1489,10 +1508,14 @@ export class ReportDataFetcherService {
       // pre-aggregated rows. See issue #288.
       const runInfo = await this.loadThroughputRunInfoForReport(testRunId, orgIds);
       if (runInfo && runInfo.hasCagg) {
-        // The CAGGs are already bucket-bounded by the run window, so they only need the
-        // ramp cutoff — and only when the toggle asked for one.
+        // The CAGGs are bucket-bounded by the run window, and keyed on system and environment
+        // rather than on the run, so that window is all that keeps another run's buckets out.
+        // The analysis window may only narrow it: its padded end would read the next run.
+        const endTime = window.endCutoff && window.endCutoff < runInfo.endTime
+          ? window.endCutoff
+          : runInfo.endTime;
         return await this.getThroughputStatsFromCaggForReport(
-          runInfo, excludeRampUp, excludeRampUp ? window.startCutoff : null);
+          { ...runInfo, endTime }, excludeRampUp, excludeRampUp ? window.startCutoff : null);
       }
 
       // Fallback: in-flight run that pre-dates the next CAGG refresh (≤30 s lag),
@@ -1651,8 +1674,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<VirtualUserStats> {
     try {
-      // 'head-trimmed' — see getApdexDataFromDatabase.
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -2276,7 +2298,8 @@ export class ReportDataFetcherService {
           metric_name,
           unit,
           conclusion,
-          statistic
+          statistic,
+          uses_default_value
         FROM ds_adapt_results
         WHERE test_run_id = $1
         ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
@@ -2300,6 +2323,7 @@ export class ReportDataFetcherService {
           conclusionLabel,
           testValue,
           controlValue,
+          ...(row.uses_default_value === true ? { controlIsConfigured: true } : {}),
           difference: diff,
           differencePercent: controlValue && controlValue !== 0 && diff != null
             ? (diff / Math.abs(controlValue)) * 100
@@ -2672,7 +2696,7 @@ export class ReportDataFetcherService {
               ROUND(a.avg_latency::numeric, 2) AS avg_latency,
               ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
               ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
-              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+              ROUND(a.total_count::numeric / NULLIF(${ANALYSED_SECONDS_SQL}, 0), 2) AS throughput
        FROM agg a
        JOIN test_runs tr ON tr.test_run_id = a.test_run_id
        LEFT JOIN url_patterns up
@@ -2875,7 +2899,9 @@ export class ReportDataFetcherService {
    */
   private async getUrlComparison(
     currentRunId: string,
-    baselineRunId: string,
+    // null: no baseline run (a control-group comparison) — the URL panels have no pooled
+    // control-group rows, so the rows carry the current values only.
+    baselineRunId: string | null,
     selections: BaselineComparisonSelection[],
     opts: { metrics: ('avg' | 'p90' | 'p95' | 'p99')[]; userId: string; roles: string[] },
   ): Promise<BaselineComparisonRow[]> {
@@ -2920,7 +2946,7 @@ export class ReportDataFetcherService {
               ROUND(a.avg_latency::numeric, 2) AS avg_latency,
               ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
               ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
-              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+              ROUND(a.total_count::numeric / NULLIF(${ANALYSED_SECONDS_SQL}, 0), 2) AS throughput
        FROM agg a
        JOIN test_runs tr ON tr.test_run_id = a.test_run_id
        LEFT JOIN url_patterns up
@@ -2928,12 +2954,12 @@ export class ReportDataFetcherService {
         AND up.system_under_test = a.system_under_test
         AND up.test_environment = a.test_environment
        ORDER BY a.total_count DESC`,
-      [[currentRunId, baselineRunId], ...orgFilter.params],
+      [baselineRunId ? [currentRunId, baselineRunId] : [currentRunId], ...orgFilter.params],
     );
     if (rows.length === 0) return [];
 
     const num = (v: unknown) => (v == null ? null : Number(v));
-    const byRun = (id: string) => new Map(rows.filter((r) => r.test_run_id === id).map((r) => [r.normalized_url, r]));
+    const byRun = (id: string | null) => new Map(rows.filter((r) => r.test_run_id === id).map((r) => [r.normalized_url, r]));
     const current = byRun(currentRunId);
     const baseline = byRun(baselineRunId);
 
@@ -3189,54 +3215,213 @@ export class ReportDataFetcherService {
       return `${mapped}||${r.panel_title}||${r.metric_name}`;
     };
 
-    const fieldByKey = { avg: 'mean', p90: 'q90', p95: 'q95', p99: 'q99' } as const;
-
     // Request rows are named `transaction_name.sampler_name`, which says nothing about what was
     // called — the compare card shows the URL underneath, so the report does too.
     const urlByMetricName = source === 'performance-metrics' && cur.some((r) => isRequestPanel(r.panel_id))
       ? await this.getSamplerUrlMap(currentRunId, opts.userId ?? '', opts.roles ?? [])
       : {};
 
-    const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
-      const b = baseByIdentity.get(remapIdentity(c));
-      const host = source === 'dynatrace' ? this.extractHost(c.metric_name) : null;
-      const panelTitle = source === 'performance-metrics'
-        ? perfPanelTitle(c.panel_id, c.panel_title)
-        : (c.panel_title ?? '');
-      return {
-        group:
-          source === 'dynatrace'
-            ? (host ?? 'Hosts')
-            : `${c.dashboard_label ?? 'Other'} / ${panelTitle}`.trim(),
-        label: c.metric_name ?? '',
-        dashboardLabel: c.dashboard_label ?? 'Other',
-        panelId: c.panel_id ?? undefined,
-        panelTitle,
-        ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
-        unit: c.unit,
-        // The pairing identity is dashboard/panel/metric name — the unit is NOT part of it,
-        // so a dashboardMap can legitimately pair an `s` panel against an `ms` one. Carry the
-        // baseline's own code rather than scaling and labelling its number with the current
-        // row's; the renderer falls back to `unit` when this is null.
-        baselineUnit: b?.unit ?? null,
-        // percentDiffScaled, not percentDiff: this is the ONE builder whose two sides can
-        // carry different unit codes (see baselineUnit above), and the raw pair 42 (`percent`)
-        // against 0.4 (`percentunit`) reads as +10400% beside a cell printing `42 vs 40`.
-        // Everywhere else the pair is fixed to one unit, where percentDiff is scale-invariant.
-        metrics: opts.metrics.map((k) => {
-          const cv = c[fieldByKey[k]];
-          const bv = b ? b[fieldByKey[k]] : null;
-          return {
-            key: k,
-            current: cv,
-            baseline: bv,
-            diffPercent: percentDiffScaled(cv, bv, c.unit, b?.unit ?? null),
-          };
-        }),
-      };
-    });
+    const rowsOut: BaselineComparisonRow[] = cur.map((c) =>
+      this.statisticsComparisonRow(c, baseByIdentity.get(remapIdentity(c)), source, opts.metrics, urlByMetricName));
 
     return { source, rows: rowsOut };
+  }
+
+  /**
+   * One comparison row from a current-run `ds_metric_statistics` row and whatever baseline row
+   * paired with it — another run's statistics row, or the control group's pooled one. Both
+   * statistics paths build their rows here, so a run-vs-run section and a control-group section
+   * group, label and scale a series identically.
+   */
+  private statisticsComparisonRow(
+    c: StatisticsComparisonSide & {
+      dashboard_label: string | null;
+      panel_title: string | null;
+      panel_id: number | null;
+      metric_name: string | null;
+    },
+    b: StatisticsComparisonSide | undefined,
+    source: 'grafana' | 'dynatrace' | 'performance-metrics',
+    metrics: ('avg' | 'p90' | 'p95' | 'p99')[],
+    urlByMetricName: Record<string, string>,
+  ): BaselineComparisonRow {
+    const fieldByKey = { avg: 'mean', p90: 'q90', p95: 'q95', p99: 'q99' } as const;
+    const host = source === 'dynatrace' ? this.extractHost(c.metric_name) : null;
+    const panelTitle = source === 'performance-metrics'
+      ? perfPanelTitle(c.panel_id, c.panel_title)
+      : (c.panel_title ?? '');
+    return {
+      group:
+        source === 'dynatrace'
+          ? (host ?? 'Hosts')
+          : `${c.dashboard_label ?? 'Other'} / ${panelTitle}`.trim(),
+      label: c.metric_name ?? '',
+      dashboardLabel: c.dashboard_label ?? 'Other',
+      panelId: c.panel_id ?? undefined,
+      panelTitle,
+      ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
+      unit: c.unit,
+      // The pairing identity is dashboard/panel/metric name — the unit is NOT part of it,
+      // so a dashboardMap can legitimately pair an `s` panel against an `ms` one. Carry the
+      // baseline's own code rather than scaling and labelling its number with the current
+      // row's; the renderer falls back to `unit` when this is null.
+      baselineUnit: b?.unit ?? null,
+      // percentDiffScaled, not percentDiff: this is the ONE builder whose two sides can
+      // carry different unit codes (see baselineUnit above), and the raw pair 42 (`percent`)
+      // against 0.4 (`percentunit`) reads as +10400% beside a cell printing `42 vs 40`.
+      // Everywhere else the pair is fixed to one unit, where percentDiff is scale-invariant.
+      metrics: metrics.map((k) => {
+        const cv = c[fieldByKey[k]];
+        const bv = b ? b[fieldByKey[k]] : null;
+        return {
+          key: k,
+          current: cv,
+          baseline: bv,
+          diffPercent: percentDiffScaled(cv, bv, c.unit, b?.unit ?? null),
+        };
+      }),
+    };
+  }
+
+  /**
+   * The control group behind this run's anomaly detection, or null when it has none.
+   *
+   * The run itself was authorized before the section rendered; the group is keyed on it, so
+   * this needs no access check of its own — the same footing as `getRegressionsData`.
+   */
+  async getControlGroupForRun(testRunId: string): Promise<ControlGroupInfo | null> {
+    try {
+      return await loadControlGroupForRun(this.dataSource, testRunId);
+    } catch (error) {
+      this.logger.warn(`Failed to resolve the control group of ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Compare this run against its control group: the pooled `ds_control_group_statistics` the
+   * anomaly-detection card shows as "control", instead of another single run's statistics.
+   *
+   * Pairs on `(application_dashboard_id, panel_id, metric_name, metrics_source_id)`. ADAPT joins
+   * the control rows on `metrics_source_id IS NOT DISTINCT FROM` + panel + series, so a series
+   * whose source changed since the group's runs is "incomparable" there and gets no baseline
+   * here either; the dashboard id keeps two dashboards that share a source apart. A control
+   * group is built from the same system and environment, so the dashboard ids agree, which is
+   * also why a `dashboardMap` has no meaning here and is ignored.
+   *
+   * Answers null when there is nothing to show at all, and an empty row list when there are
+   * rows but not one of them has a baseline: the selection holds only series ADAPT does not
+   * pool, or the group's statistics are missing or hold another source. A table of
+   * baseline-less rows would count every one "within range", the opposite conclusion.
+   *
+   * Three shapes differ from the run-vs-run comparison:
+   *  - A performance-metrics section with NO selection compares Transaction RT Avg (panel 101)
+   *    per transaction. The run-vs-run default reads raw `transactions` for two runs; pooling
+   *    raw percentiles over a whole control group is not what anomaly detection compares and
+   *    would scan every member run, so the control-group default reads the panel ADAPT reads.
+   *  - The synthetic "All aggregated" series and the URL panels have no pooled control rows.
+   *    Beside pooled series they are listed with the current value only, never with an
+   *    invented baseline; on their own they leave nothing to compare (the empty list above).
+   *  - A series the control group has no row for (new since the group was built) keeps its
+   *    row with an empty baseline, exactly as a series missing from a baseline run does.
+   */
+  async getControlGroupComparison(
+    currentRunId: string,
+    controlGroupId: string,
+    source: 'performance-metrics' | 'grafana' | 'dynatrace',
+    opts: {
+      metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
+      userId: string;
+      roles: string[];
+      selections?: BaselineComparisonSelection[];
+    },
+  ): Promise<BaselineComparisonData | null> {
+    // One rule for every exit (see the docblock): rows, but no baseline anywhere -> empty list.
+    const answer = (rows: BaselineComparisonRow[]): BaselineComparisonData | null => {
+      if (rows.length === 0) return null;
+      return { source, rows: rows.some((r) => r.metrics.some((m) => m.baseline != null)) ? rows : [] };
+    };
+    let selections = opts.selections ?? [];
+    let unpooledRows: { aggregated: BaselineComparisonRow[]; url: BaselineComparisonRow[] } = { aggregated: [], url: [] };
+    let defaultPanels: number[] | undefined;
+    if (source === 'performance-metrics') {
+      if (selections.length === 0) {
+        defaultPanels = [PERF_TXN_RT_AVG_PANEL_ID];
+      } else {
+        unpooledRows = {
+          aggregated: await this.getAggregatedSeriesRows(currentRunId, null, selections, opts),
+          url: await this.getUrlComparison(currentRunId, null, selections, opts),
+        };
+        selections = selections
+          .filter((s) => !isUrlPanel(s.panelId))
+          .map((s) => (isSyntheticAllAggregated(s)
+            ? { ...s, metricNames: s.metricNames!.filter((m) => m !== ALL_AGGREGATED_SERIES) }
+            : s))
+          .filter((s) => !(s.metricNames && s.metricNames.length === 0));
+        if (selections.length === 0) return answer([...unpooledRows.aggregated, ...unpooledRows.url]);
+      }
+    }
+
+    const sourceType =
+      source === 'grafana' ? 'grafana' : source === 'dynatrace' ? 'dynatrace' : 'performance_test';
+    const params: unknown[] = [currentRunId, sourceType];
+    let scopeFilter = '';
+    if (selections.length > 0) {
+      params.push([...new Set(selections.map((sel) => sel.dashboardLabel))]);
+      scopeFilter += ` AND s.dashboard_label = ANY($${params.length})`;
+    }
+    if (defaultPanels) {
+      params.push(defaultPanels);
+      scopeFilter += ` AND s.panel_id = ANY($${params.length}::int[])`;
+    }
+    const orgFilter = await this.resolveOrgFilter(opts.userId, opts.roles, params.length + 1, 'tr');
+    params.push(...orgFilter.params);
+    const current: Array<StatisticsComparisonSide & {
+      application_dashboard_id: string;
+      metrics_source_id: string | null;
+      dashboard_label: string | null;
+      panel_title: string | null;
+      panel_id: number | null;
+      metric_name: string | null;
+    }> = await this.dataSource.query(
+      `/* report:control-group-comparison */
+       SELECT s.application_dashboard_id, s.metrics_source_id, s.dashboard_label, s.panel_title, s.panel_id,
+              s.metric_name, s.unit, s.mean, s.q90, s.q95, s.q99
+       FROM ds_metric_statistics s
+       JOIN test_runs tr ON tr.test_run_id = s.test_run_id
+       LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
+       WHERE s.test_run_id = $1 AND (s.metrics_source_id IS NULL OR ms.source_type = $2)${scopeFilter}${orgFilter.clause}`,
+      params,
+    );
+
+    const selected = (r: typeof current[number]) =>
+      selections.length === 0 ||
+      selections.some(
+        (sel) =>
+          sel.dashboardLabel === r.dashboard_label &&
+          (sel.panelId == null || sel.panelId === r.panel_id) &&
+          (!sel.metricNames?.length || (r.metric_name != null && sel.metricNames.includes(r.metric_name))),
+      );
+    const cur = current.filter(selected);
+
+    // Read the group only once the run has answered: an org filter that hid the run's own
+    // statistics must not be followed by a read keyed on that run.
+    const control = cur.length
+      ? await loadControlGroupStatistics(this.dataSource, controlGroupId)
+      : [];
+    // NULL source ids pair with each other, as ADAPT's IS NOT DISTINCT FROM does.
+    const key = (r: {
+      application_dashboard_id: string; panel_id: number | null; metric_name: string | null; metrics_source_id: string | null;
+    }) => `${r.application_dashboard_id}||${r.panel_id}||${r.metric_name}||${r.metrics_source_id ?? ''}`;
+    const controlByKey = new Map(control.map((r) => [key(r), r]));
+
+    const urlByMetricName = source === 'performance-metrics' && cur.some((r) => isRequestPanel(r.panel_id))
+      ? await this.getSamplerUrlMap(currentRunId, opts.userId, opts.roles)
+      : {};
+    const statRows = cur.map((c) =>
+      this.statisticsComparisonRow(c, controlByKey.get(key(c)), source, opts.metrics, urlByMetricName));
+
+    return answer([...unpooledRows.aggregated, ...statRows, ...unpooledRows.url]);
   }
 
   /**

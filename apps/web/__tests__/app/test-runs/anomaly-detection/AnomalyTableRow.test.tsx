@@ -69,6 +69,20 @@ describe('AnomalyTableRow', () => {
     });
   });
 
+  describe('control value configured instead of measured', () => {
+    it('marks a control value that came from defaultValueIfControlGroupMissing', () => {
+      render(<AnomalyTableRow {...defaultProps} row={{ ...baseRow, control_group_value: '0', uses_default_value: true }} />);
+      expect(screen.getByText('configured')).toBeInTheDocument();
+      // A configured 0 is a value, not a missing one.
+      expect(screen.getByText('0 ms')).toBeInTheDocument();
+    });
+
+    it('shows no marker for a measured control value, or on an API that does not send the flag', () => {
+      render(<AnomalyTableRow {...defaultProps} />);
+      expect(screen.queryByText('configured')).not.toBeInTheDocument();
+    });
+  });
+
   describe('text cell wrapping styles', () => {
     it('dashboard label cell allows word wrapping', () => {
       render(<AnomalyTableRow {...defaultProps} />);

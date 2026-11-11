@@ -4,6 +4,212 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.67] - 2026-11-10
+
+### Added
+- **Save as template from the anomaly card.** The ADAPT settings form of an anomaly-card row (the gear, **Configure Metric**) has a **Save as template** button. It makes the values in the form an ADAPT template, so a panel you tuned on one run is judged the same way on every workload that has it, from that workload's next completed run. Choose where it goes (a profile this run matches, all runs in the run's organization, or, for a global admin, the whole install) and which dashboards it reaches: this dashboard, or every dashboard with a panel of this title, which is the default for Dynatrace host and performance-test scenario dashboards because those have a dashboard per host or scenario. On a row with a series name you also choose between the whole panel and that one series. The row itself is not changed and stays a hand edit.
+
+## [0.2.97.66] - 2026-11-10
+
+### Added
+- **ADAPT can compare a series that has no baseline with a value you set.** A series that no baseline run has (a new transaction, a new pod) was always reported as incomparable, so it could never fail a run however far it moved. Set **When the baseline has no data → Compare against** in a panel's or series' ADAPT settings on the anomaly card, or `defaultValueIfControlGroupMissing` in an ADAPT template, and ADAPT compares the run with that value instead: for example 0 for an error count that should stay at zero. The percentage and absolute thresholds apply; the IQR threshold needs a baseline and is skipped. A baseline that has the series with too few samples is still reported as incomparable. The anomaly table and the report's Regressions section mark such a control value as configured.
+
+### Changed
+- **Configs no longer carry a default of 0 for that setting.** The anomaly card, the ADAPT template applier and the performance-test pipeline wrote `defaultValueIfControlGroupMissing: 0` on every config, though nothing read it. Leaving it out now means off. Migration 1824 removes the stored 0s, so existing panels keep reporting a series without a baseline as incomparable; it does not mark any ADAPT result stale, since no verdict changes. A value other than 0, set through the API, and a template that names the setting, are kept and take effect from this version. Run the migration before the new worker: a worker that runs first compares new series on those panels with 0 until it does.
+
+## [0.2.97.65] - 2026-11-10
+
+### Fixed
+- **Editing a profile SLO now changes the SLOs it created.** Profile SLOs ("every scenario", "Dynatrace — all hosts" and Grafana templates) used to be written once: after a change to the profile SLO, every system kept judging the old panel or threshold. A change to the threshold, operator, aggregation, unit, match pattern or panel is now written to those SLOs straight away. For "Dynatrace — all hosts", each host gets its own panel for the new metric, and a host without that panel has its SLO switched off.
+- **Deleting a profile SLO switches off the SLOs it created.** They used to keep evaluating forever. They are disabled, not deleted, so past results stay readable.
+- **Changing what a profile SLO covers** (its source, dashboard pattern or workload pattern) switches its SLOs off. Each one is switched back on, with the new settings, the next time a test run of that workload finishes and the profile still covers that dashboard.
+- **An SLO you edited by hand stays yours.** None of the above touches an SLO someone has saved in the system's SLO list since it was created: it keeps its values and stays on, even when the profile SLO is deleted.
+- **Renaming a Dynatrace query no longer leaves its SLOs with nothing to evaluate.** A rename gives the query a new panel id. Its SLOs and ADAPT settings now move to that id with it. Previously they read "No targets found", which counts as a pass.
+- **Unmapping a Dynatrace host, or deleting one of its queries, switches off the SLOs on it.** If the host is mapped again, its profile SLOs come back on the next run.
+- **A profile SLO change that would put a second enabled SLO on a panel is refused with a 409**, and nothing is saved. Change the match pattern or disable the other SLO first.
+
+### Known limitations
+- The system's SLO list does not show which SLOs come from a profile, and does not warn that editing one stops it following the profile.
+- A changed source or pattern takes effect from the next test run. Until then that profile SLO is not evaluated on the dashboards it covered.
+
+## [0.2.97.64] - 2026-11-10
+
+### Removed
+- **`ignoreMeanDiffSmallerThan` is gone from ADAPT templates.** ADAPT never read it, and an absolute threshold (`absThreshold`) is how a small mean difference is ignored. The template dialog no longer offers "Ignore mean difference below", and the API refuses the field with a message naming `absThreshold`. In `template_ds_compare_configs.yaml` an item that still sets it is provisioned without it and the API logs a warning, so existing files keep loading; delete the line to silence the warning. Templates that set it stop writing it into the panels' anomaly detection configs, so on the next completed run those panels' configs change once and their earlier ADAPT results are marked stale. Verdicts do not change, since nothing read the value.
+
+## [0.2.97.63] - 2026-11-10
+
+### Fixed
+- **A completion call that leaves out `tags` no longer clears the run's tags.** The test-run update endpoint (`POST /api/test`) treated a missing `tags` field as an empty list, so a CI step that posted `completed: true` without repeating the tags wiped them. Since v0.2.97.57 the completing run's tags choose its profile ADAPT templates, so such a call also reverted every profile-configured panel of the workload and marked its earlier results stale. An omitted `tags` now keeps the stored tags; sending `"tags": []` still clears them.
+- **The Default Organization can be named when creating a team, an API key, a system under test, a metrics source, an event or an alert tag filter, and in the audit log filter.** Its seeded id (`00000000-0000-0000-0000-000000000001`) is not a version-4 UUID, and these fields used the strict UUID check, so naming it answered 400. Organization and team ids are now checked the loose way, as profiles already were.
+
+## [0.2.97.62] - 2026-11-10
+
+### Security
+- **`profiles.yaml` no longer takes over a profile that belongs to another organization.** Provisioning matched profiles by name alone and, when the file named an organization, moved an existing profile of that name into it with the file's tags. Its dashboards, SLOs and, since v0.2.97.57, its ADAPT templates moved with it, so an admin of one organization could create a profile under a name about to be added to the file for another organization, attach templates that hide regressions, and have them applied to the other organization's runs after the next restart. Such a profile is now left alone and the API logs an error naming both organizations. For the rest of that boot, the files' dashboards, SLOs and templates for that name are skipped too, rather than being attached to the other organization's profile. Rename one of the two profiles to resolve it. A `profiles.yaml` without `organizationId` still takes a profile over by name and leaves it in its own organization.
+
+## [0.2.97.61] - 2026-11-09
+
+### Added
+- **"Dynatrace — all hosts" profile SLO.** The profile SLO form has a new dashboard entry beside **Performance test metrics — every scenario**. Pick it and a host panel (CPU Usage, Memory Usage, the disk latency, IOPS and queue panels, Network Traffic, or the older Disk Utilization), and every Dynatrace host mapped on a system gets that SLO on its next test run, including hosts mapped later. Each host's SLO is an ordinary Dynatrace SLO on that host's own panel, so it shows, edits and evaluates like one you made by hand. Only enabled host queries in the run's own workload and organization are covered.
+- **`source: dynatrace-hosts` in the profile API and `profile_benchmarks.yaml`.** `dashboardUid` is a regex over the host dashboard uids (default `^dynatrace-dynatrace-host-metrics-`), and it can only ever narrow the Dynatrace host dashboards. `panelId` must be one of the host panel ids listed in `@perfana/shared/constants` (`DYNATRACE_HOST_PROFILE_PANELS`). Any other id is refused by the API, including on an update that changes only the panel, and skipped with a warning by provisioning.
+
+### Known limitations
+- **Host SLOs are written once.** As with the "every scenario" option, changing or deleting the profile SLO later does not change or remove the host SLOs it already created; edit or delete those on the system. Renaming a host query's panel in the Queries tab leaves its SLO with nothing to evaluate.
+
+## [0.2.97.60] - 2026-11-09
+
+### Fixed
+- **Editing an SLO saves its threshold in the same unit the dialog showed it in.** The Edit dialog showed the value in one unit, checked and converted it against another, and saved it under a third label, so a threshold could be stored in one unit and read in another: an SLO that always passes or always fails, with nothing logged. One unit now drives all of it. Cases this fixes:
+  - A Grafana panel whose unit changed after the SLO was made: the SLO keeps its own unit, and the dialog now says the panel shows something else.
+  - A former trend SLO edited as an average no longer keeps `%/h` as its unit, so a typed `0.5s` is converted again.
+  - **Duplicate** onto a different panel takes that panel's unit: `90` on a 0-1 percentage panel is saved as 0.9, not 90.
+  - A trend with no stored unit switched to an average on a 0-1 percentage panel is converted the same way.
+  - Dynatrace SLOs keep their unit whether or not the dialog finds their metric, so `1s` is still saved as 1000 ms.
+- **An SLO with no stored unit on a 0-1 percentage panel now opens as a percentage.** It used to show the raw 0.9; it shows 90 and saves 0.9, the same number, under the panel's unit. If you type over the value before the panel has loaded, your number is saved as typed, never scaled twice.
+## [0.2.97.59] - 2026-11-09
+
+### Security
+- **Creating or editing an SLO no longer reads another organization's dashboard.** `POST /api/benchmarks` and `PUT /api/benchmarks/:id` looked up the `applicationDashboardId` in the body by id alone, and copied that dashboard's Grafana instance label (since v0.2.97.56), its tags and its metrics source into the SLO, where the caller could read them back. Nothing checked that the dashboard belonged to the system under test the request was authorized for, and a default deploy has no row-level security to catch it (`DB_ENABLE_RLS_ROLE` is off). The lookup is now limited to the SLO's own system and environment.
+- **An SLO can no longer point at a dashboard outside its system and environment.** Such an id used to be stored as given, so the response told a caller whether another organization's dashboard existed: 201 when it did, 500 when it did not. Both now answer the same 400, as does an id that is not a uuid. The Add and Edit SLO dialogs only offer dashboards of the SLO's own system and environment, so they are unaffected.
+- **A new SLO's `metricsSourceId` has to be its dashboard's.** `POST /api/benchmarks` stored any `metricsSourceId` it was sent. Another organization's id was saved and readable back, and while it was referenced that organization could not delete its own metrics source; a missing id hit the foreign key (500). Anything other than the metrics source of the SLO's `applicationDashboardId` now gets one 400, including an id sent without a dashboard. The web client never sends this field.
+- **Moving an SLO to another system checks that system.** `PUT /api/benchmarks/:id` accepted any `systemUnderTestId`, so an SLO could be moved into another organization's system, where its runs would be checked against it. The target system now has to be one the caller can access, and the SLO takes that system's organization and team, as a new SLO does. The UI never moves an SLO between systems.
+- **A refused system id no longer reveals whether it exists.** Creating, copying and duplicating SLOs answered "System under test X not found" for a missing system and "You do not have access to this system" for another organization's. Both now give the same 403.
+
+## [0.2.97.58] - 2026-11-09
+
+### Fixed
+- **SLOs on performance-test panels show their unit in the SLO list.** An SLO created on a panel such as Request RT Avg read "Less than 0.5" with no unit, because the Add and Edit dialogs dropped the panel's unit. They now keep it, so the list reads "Less than 500 ms", and a threshold typed with a unit is converted to the panel's: `0.5s` on Request RT Avg is saved as 500 ms. Error-rate panels use percent (0-100), and a suffix that cannot apply (`5%` on a ms panel) is refused.
+- **Existing performance-test SLOs pick up their unit on the next save.** An SLO saved before this release has no unit stored. Open it with **Edit** and save: it takes the panel's unit, and a value typed with a unit is converted into it. The stored number is not changed by a save you make without retyping it, so check that the threshold still means what you intended (a value entered as `0.5` meaning seconds is 0.5 ms on a ms panel).
+- **Edit finds the right panel for SLOs created in the Add dialog.** It looked the panel up by a field the Add dialog never writes and fell back to matching titles, so a panel sharing a title could be picked. It now matches the panel id first.
+- **A typed `90%` is converted on a percentunit panel in Edit.** For an SLO with no stored unit it was saved as 90 against 0-1 data, an SLO that could never fail. A bare number on such a panel is still left as shown, so 0.9 is never saved as 0.009.
+
+## [0.2.97.57] - 2026-11-09
+
+### Added
+- **ADAPT (anomaly detection) templates on a profile.** A profile's page has a new **ADAPT templates** tab. A template there applies only to runs whose tags match the profile, in the profile's organization, so JVM and .NET services in one organization can get different template sets. For the same dashboard match it comes before the organization's and the install-wide templates; two matching profiles are decided by profile name. A run with no matching tag gets only the organization and install-wide templates, so a workload whose runs carry different tags from one run to the next switches between the two sets. Templates can be added under a provisioned (read-only) profile too. Templates of every scope now carry a **Profile**, **Organization** or **Install-wide** badge, and **Copy to another scope** offers your profiles as targets.
+- **`profile` in `template_ds_compare_configs.yaml`.** An item with `profile: <name>` is a profile template, resolved by name like `profile_benchmarks.yaml`. An item naming a profile that does not exist is skipped with a warning, and while it is in the file the provisioned templates of every profile that no other item resolves are not pruned. An item whose `organizationId` (on the item or the file) is not its profile's is skipped and its template kept. `profileId`, `profileName` and `profiles` are refused rather than ignored, because ignoring a misspelt scope key would provision the item for a whole organization or the install; like any item whose identity cannot be read, it stops the prune for that boot. **Export YAML** writes profile templates last, by profile name, as `profile: <name>`; in a file spanning several organizations each profile item also names its profile's organization, so a profile name another organization takes later cannot claim the template.
+- **`/api/profiles/:id/compare-templates`.** List, create, replace and delete a profile's templates, with the same rules as `/api/compare-templates`: the body is one file item, validated by the file's own parser; a profile outside your organizations answers 404; changing templates needs the SLO management permission in the profile's organization; a provisioned template answers 409 on edit and delete. Writes are audit-logged. `GET /api/profiles` and `GET /api/profiles/:id` report `adaptTemplateCount`.
+
+### Changed
+- **Deleting a profile deletes its ADAPT templates, and the confirmation says how many.** That includes templates provisioned from the file; they come back on the next boot only if the file still names the profile and a profile of that name exists again, in the same organization when the item or the file states one (an export spanning several organizations always does).
+- **Profiles are scoped to your organizations.** `GET`, `PUT` and `DELETE /api/profiles/:id`, and a profile's dashboard and SLO routes, used to check only that you were an organization admin somewhere, so an admin of one organization could read, edit or delete another organization's profile, which with this version would also have deleted or retargeted its ADAPT templates. A profile outside your organizations now answers 404 (a missing profile's dashboards and SLOs too, which used to answer an empty list), and changing a profile or its dashboards and SLOs needs organization admin in the profile's own organization. `GET /api/profiles?organizationId=` lists nothing for an organization you do not belong to, where it used to list that organization's profiles. A new profile is created in the organization the profiles page is showing (`organizationId` on `POST /api/profiles`, which needs organization admin there), or without one in the first of your organizations where you are an admin, in a stable order. A malformed profile, dashboard or SLO id now answers 400 instead of 500.
+- **A panel no ADAPT template claims any more goes back to ADAPT's own defaults.** When a template is deleted, or a profile template's run tags stop matching, a compare-config row the template system inserted is now removed (and the panel's earlier results marked stale) instead of being kept with the template system's starting values, so untagged runs are compared exactly as before the template existed.
+- **grafana-sync matches profiles to runs with the same rule as the template applier, which fails closed on a missing organization.** A profile with no organization no longer matches every organization's runs, and a run with no organization no longer matches every profile. Both columns are NOT NULL in the database, so no real row changes behaviour.
+- **Upgrade notes.**
+  - **Migration 1823** adds `profile_id` to the template table and rebuilds its unique index with the profile in the key. It needs no data fix-up: no existing template changes identity.
+  - **Do not roll back below this version while profile templates exist.** An older API reads a profile template as an organization template of the profile's organization and applies it to every run there. Migration 1823's `down()` deletes profile templates before restoring the old index. **Remove every `profile:` item from `template_ds_compare_configs.yaml` before rolling back**, with or without `down()`: an older API ignores the key and provisions the item for its stated organization, or for the whole install when none is named.
+  - **The profiles pages and every template read need migration 1823.** Until it has run, the profile list, the template pages and `classify-metric` answer 500, a profile's page answers 404 (Profile not found), template provisioning fails, and completed runs skip the template applier. The pages and the applier recover once the migration has run; template provisioning runs only at API start, so restart the API after the migration (nothing orders the API behind it) or file templates stay unapplied until the next restart.
+
+## [0.2.97.56] - 2026-11-09
+
+### Added
+- **The report builder offers to save your changes back to the template.** When a report started from a template has sections added, removed, moved, retitled or reconfigured, **Generate Report** first asks whether to save those changes to the template: *Save and generate*, *Generate without saving*, or *Keep editing*. The template is saved before the report is queued, so a failed save (no permission, say) leaves you in the builder with the error and nothing generated. Turning on **Save as template** skips the question, since the report is being saved as a new template.
+- **Leaving the builder with unsaved template changes asks first.** Cancel, Escape, a click outside the dialog, **Back to Template** and the browser's Back button all show the same question, with *Save to template*, *Discard changes* or *Keep editing*. A reload or tab close gets the browser's own "leave site?" prompt. A change that is put back counts as no change, and a report started from scratch is never asked about.
+
+## [0.2.97.55] - 2026-11-08
+
+### Added
+- **Manage ADAPT (anomaly detection) templates in the UI.** Settings → Profiles has two new entries at the top: **All runs in &lt;organization&gt;** and **All runs on this install**. Each opens a page listing that scope's templates with what each one forces, and lets you add, edit, copy and delete them. A template applies on the next completed run of matching workloads, to panels nobody has edited by hand. In the dialog you tick each field the template should force; a field left unticked keeps each panel's own value, and direction can be set to "no direction". Organization templates can be changed by org admins and members; install-wide ones by global admins. The reference page "Compare Config Templates" describes both.
+- **Export the templates as `template_ds_compare_configs.yaml`.** Global admins get **Export YAML** on the install-wide page. It produces the whole provisioning file, every template in every organization, ready to commit in place of the installed one. After the commit, the next restart takes the templates created in the UI over as provisioned (read-only), and a second restart changes nothing.
+- **Templates from the provisioning file are shown locked.** They can be viewed and copied to another scope for editing, but not changed or deleted in the UI; change them in the file.
+- **`/api/compare-templates` and `/api/provisioning/compare-templates/export`.** CRUD for organization (`?organizationId=`) and install-wide (`?scope=install`) templates, in the YAML item's own shape, validated by the same rules as the file. A duplicate answers 409 naming the template it collides with. Writes are audit-logged.
+
+### Changed
+- **Profile-scoped templates are not in this release.** The design's per-profile templates (a template that applies only to runs whose tags match a profile) follow in a later release.
+
+## [0.2.97.54] - 2026-11-08
+
+### Added
+- **Changing a compare-config template now reaches the panels it already configured.** A template in the provisioning file (`template_ds_compare_configs.yaml`) used to be applied once, when a panel first got its anomaly detection config, and never again. Now each run that reports its completion re-applies the template to every panel it owns: edit a threshold in the file, restart the API, and the next run of each workload uses it. A run closed by stale detection does not apply templates yet. A panel someone has edited by hand is never touched, and ADAPT results are marked stale only where the configuration actually changed. The page "Compare Config Templates" in the reference docs describes the file, the precedence rules and what a template owns.
+- **Templates removed from the provisioning file are removed from the database.** Each boot prunes the provisioned templates the file no longer declares. Nothing is pruned when an item in the file cannot be identified or a write failed on that boot, so a typo cannot wipe your templates.
+- **The provisioning file is checked as it is read.** An unknown key is reported with a suggestion when it looks like a misspelling (`absoluteThreshold` for `absThreshold`), out-of-range values are refused (`percentageThreshold` is a fraction, so `15` is rejected), a regex that could hang the matcher is refused, and an `organizationId` that is not a UUID makes the item unidentified instead of silently matching nothing.
+- **Two API replicas booting together no longer write duplicate templates.** Provisioning runs under a lock and waits up to 30 seconds for the other replica.
+
+### Changed
+- **Upgrade notes. Read these before deploying.**
+  - **Migration 1822 refuses to run while duplicate template rows exist** and names them. The reference page gives the query to find them; delete all but the oldest of each group and deploy again.
+  - **Restart the API once after the migration** if it started before the migration finished. Provisioning only runs at boot, and that boot skips it.
+  - **The first boot prunes every provisioned template your file no longer declares.** Before this version they stayed in the database.
+  - **A file that sets `organizationId` now scopes its templates to that organization.** Before, the value was only recorded and the template reached every organization. A single-organization install is unaffected; on one with several, remove `organizationId` to keep a template install-wide.
+  - **A template that leaves out `higherIsBetter` no longer clears a panel's direction.** A row seeded by the worker or by a Dynatrace host mapping keeps the direction it was seeded with, so a regression on it can now fail a run. Write `higherIsBetter: null` on the item to keep the old behaviour.
+  - **Panels the template applier configured before the upgrade start following their template, where the template agrees with them.** Before v0.2.95.42 saving a compare config did not record who saved it, so such a panel can hold a hand edit under the template's name. One the template would change is left alone, as before, and counted in the run's log line. Delete that config to hand the panel to its template.
+  - **Until migration 1822 has run, the anomaly card cannot read or save compare configs.** Run the migration before the API takes traffic; it recovers by itself once the migration lands.
+  - **Do not roll back to an older API with a template file that uses `metricName` or a per-item `organizationId`.** The older API ignores both and can write a series-level template's values over the panel-level one.
+
+### Fixed
+- **Saving an anomaly detection config for one series no longer overwrites the panel's config.** When a panel had only a panel-level config, saving a config for a single series on it rewrote the panel's row with that series' settings, which then applied to every other series on the panel. The save now writes a row for that series and leaves the panel row alone.
+- **Applying templates on test completion is safe alongside other writers.** A compare config someone saves while templates are being applied keeps their save. A config another process creates at the same moment no longer aborts applying the rest. A stored regex template that could hang the matcher is skipped instead of run.
+
+## [0.2.97.53] - 2026-11-08
+
+### Security
+- **The perfana-report image picks up Alpine security fixes again.** CI restores image layers from its build cache, so the report stage's `apk upgrade` kept replaying the package set from when that layer was first built. v0.2.97.51 shipped glib 2.86.3, with 17 open Snyk issues including a critical Integer Underflow (SNYK-ALPINE323-GLIB-22281442), eight hours after Alpine 3.23 had published the fixed 2.86.5. The stage now declares `BUILD_DATE`, which CI sets to the commit timestamp, so every release resolves its packages fresh. The `openssl-patch` stage, the source of the patched `libssl3` in the api, web, worker and grafana-sync images, had the same gap and gets the same fix, as does its copy in the migration image, whose CI job now passes `BUILD_DATE` too.
+
+## [0.2.97.52] - 2026-11-08
+
+### Fixed
+- **Compare card: switching the baseline no longer leaves a stale graph open.** Moving from the control group to a run kept the open graph, which then read "Baseline (null)" with no baseline line until it was closed and opened again. An open graph now closes when the baseline changes. A slow comparison request can also no longer overwrite a newer one. Before, picking a run while the control group was still loading could fill the table with the group's numbers under the run's name.
+- **Report: a control-group comparison where nothing pairs says so, instead of reporting everything within range.** When the group's pooled statistics were missing, held another source, or the section selected only series anomaly detection does not pool (the URL panels and "All aggregated"), every row read "vs –" and was counted as within range, and a stored CI report kept that. The section now shows an empty state saying why. When it is the run itself that has no statistics, the message names the run instead. A row graph whose section leaves out the Avg column now says that is why no mean is drawn, and the mean line uses the control group's own unit.
+- **Control-group rows now pair the way anomaly detection does: by metrics source as well as dashboard, panel and series.** A series anomaly detection calls incomparable, for example because its metrics source changed since the group's runs, showed a delta and a coloured band in the report. The Compare card could pair one dashboard's value with another's when two dashboards share a metrics source. Both now leave such a series without a baseline.
+- **Smaller control-group fixes.**
+  - A graph that was still loading when the baseline changed no longer reopens under the new baseline.
+  - The group's run count no longer reads 0 beside a list of runs.
+  - A control value with no unit takes the series' unit instead of being scaled as unitless.
+  - An out-of-range `panelId` is answered with a 400, not a 500.
+- **API docs.** `GET /api/metrics/control-group/:testRunId` is documented as answering a 200 with an empty body when there is no group. It never sent `null`. `count` from `GET /api/metrics/control-group-statistics/:testRunId` is documented as the mean per-run sample count. The compare preset API documents the `control-group` baseline value. The user guide's "Compare test runs" page now explains the Control group option.
+
+## [0.2.97.51] - 2026-11-07
+
+### Added
+- **Compare against the control group.** The Compare card's baseline picker and the report Comparisons section's baseline picker now offer **Control group** next to the single runs. It compares the run against the earlier runs anomaly detection judges it against, using their pooled statistics: the same control values the Anomaly Detection card shows, and less noisy than one other run. The option is offered only when the run has a control group. A first run, or one whose analysis has not finished, has none.
+
+  In the Compare card, the caption under the picker names the group's runs. A row's graph draws the group's mean as a flat dashed line, because a pooled group has no time series of its own. A compare preset saved against the control group restores it on any run. It is saved as a generic preset by default, because every run has its own control group.
+
+  In a report, the section names the group's runs under its heading, because a group is rebuilt on every re-evaluate. A section with no dashboard selection compares Transaction RT Avg per transaction, the panel anomaly detection reads, rather than raw response-time percentiles. A row graph draws the group's mean as a flat line, which needs the `avg` metric. The dashboard mapping does not apply, because a control group shares the run's environment. Templates and the ad-hoc API take it as `"baselineTestRunId": "control-group"`.
+
+  The synthetic "All aggregated" series and the URL panels have no control-group statistics, so they are listed with the current value only.
+
+  New endpoints: `GET /api/metrics/control-group/:testRunId` and `GET /api/metrics/control-group-statistics/:testRunId`. `GET /api/metrics/ds-metrics-comparison` now accepts a request without `baselineTestRunId` and returns the current run alone.
+
+## [0.2.97.50] - 2026-11-07
+
+### Changed
+- **A generated report is private until someone shares it.** Every report used to get a public link the moment it was generated. Its row in the Reports card now has a share menu: **Create share link** turns the link on and copies it, **Stop sharing** turns it off, and turning it back on restores the same link. Changing this needs `test-run:update` on the report's run, so an org viewer can read a report but not publish it.
+
+  **Existing reports keep the setting they have, which is on.** Pipelines that fetch `/html/download` or `/pdf/download` with an API key are unaffected, but a script that builds a public link from `share_id` now has to call `PUT /api/reports/:reportId/share` first, or the link answers 404.
+- **The report's Apdex section now excludes the ramp-down as well as the ramp-up**, so it reads the same window as the Performance Analysis card and the report's own graphs. Its Apdex table, averages, percentiles, throughput and virtual-user figures all move on a run with a ramp-down configured, so a report generated after this version can differ from an earlier one of the same run; stored reports keep their numbers. A run too short for its offsets is read whole rather than coming out empty, and that applies to every report section using the analysis window.
+
+### Fixed
+- **The Performance Analysis P95 and P99 are now real percentiles.** The tiles and scenario rows showed an average of the transactions' percentiles, which reads far too low when a slow minority forms the tail: 383 ms against a real 844 ms on the demo run. They now come from `GET /test-runs/:id/transactions/percentiles`, which merges the digests behind those rows over the same window, including for any selection of scenarios. If the API cannot answer, the old figure stays and is labelled as an average. Figures can differ from the report's by a couple of percent, because the digests are approximate.
+- **The report's Apdex section prints real percentiles too.** Its overall and per-scenario P95 and P99 had the same averaging problem, printed as "95th percentile". The average and the Apdex score stay weighted, because for those the weighting is exact. Regenerate a report to get the new figures.
+- **A report template can be deleted once a report has been made from it.** A report generated straight from a template, which is the CI path, made that template undeletable: the delete answered 500 and the page said nothing. Reports now outlive their template (migration 1821), and only regenerating one needs it, so `POST /reports/:id/retry` answers 400 for those.
+- **A public share link no longer redirects to the sign-in page**, and the links Perfana copies point at the web app's real default port.
+- **A stopped or expired share link's PDF answers 404.** The public PDF route answered 400, where the HTML route and the route's own docs say 404.
+- **The report's Header section uses its settings.** Header Text, Header Level and Section Title were ignored. The text also accepts `{perfana-…}` values now, and a collapsed Header card names itself rather than showing the raw placeholder.
+- **A section preview of the Header looks like the report.** The preview had none of the cover or summary styling.
+- **The report's Anomaly Detection badge no longer claims NO REGRESSIONS for a run ADAPT did not compare.** A first run, a changepoint or a run with nothing comparable now reads NOT EVALUATED.
+- **The report's response-times chart no longer draws a false zero.** A transaction with no samples in a bucket dropped to 0 and back; the line now breaks there. A chart with a single bucket no longer produces invalid coordinates.
+- **A SUT import keeps a report with no template**, rather than dropping it as a row with a missing parent.
+- **The Performance Analysis card's Apdex no longer leaves out transactions that ran fewer than 50 times.** That sample floor is for one transaction's own rating, but the card also applied it to the overall and per-scenario scores, so they dropped exactly the slow transactions that run less often. On the demo run it removed 6 of Checkout's 8 transactions, including the two slowest at 0.500, and showed the run as **0.993 Excellent** where every execution scores **0.935 Good**. The overall tile, the scenario rows and the collapsed card now count every transaction, weighted by its successful executions, and match the report's Apdex section. A transaction row still reads "Too few" on its own, and so does a whole scope with fewer than 50 successful executions. **This can lower the headline Apdex shown for existing runs**, most on short runs.
+- **A run too short for its analysis offsets is now analysed whole everywhere, not only by the statistics.** Before this, with the analysis window on, the Performance Analysis card showed nothing for such a run, and a transaction Apdex SLO failed with `NO_DATA` when the ramp-up alone was longer than the run. The card, the report, the Graphs card's analysis band, and the Apdex and aggregated SLOs now read the whole run, as ADAPT and the metric SLOs already did. Per-second throughput over those runs divides by the whole run too. **This can change an SLO verdict on such a run when it is re-evaluated**, from `NO_DATA` or "Too few" to a real pass or fail. A run analysed before this version needs its rollup rebuilt: re-save its analysis start offset with the same value, then re-evaluate.
+
+## [0.2.97.49] - 2026-11-07
+
+### Added
+- **A how-to for checking the UI with Vibium.** `docs/reference/Operations/Vibium.md` covers installing it, a scripted sign-in on the demo stack, opening Perfana pages reliably, reading chart values, checking what Copy produces, and the known issues. Vibium is installed per user and is not a repo dependency.
+
+## [0.2.97.48] - 2026-11-07
+
+### Fixed
+- **A graph preset now brings back the title you gave the chart.** The title was never saved, so loading a preset replaced it with a name generated from the series, whatever you had typed. It is now stored with the preset. A preset saved before this version shows its preset name, which the save dialog defaults to the title on screen.
+- **A Trends preset now titles its chart.** The chart stayed at `Trends (avg)` whichever preset was loaded. It now reads `<preset name> (avg)`, and saving a preset retitles it the same way. Removing every series goes back to `Trends (avg)`. Compare is unaffected: its charts are titled by the metric they show, not by a preset.
+- **The copy button on an emptied Graphs or Trends chart is disabled.** It used to stay active and put a blank titled image on the clipboard.
+- **A chart copied or downloaded from the Compare or Trends card now carries its title and legend.** Both exported only the plot, so a pasted image had unnamed lines and nothing saying what it showed. Their copy and download are now buttons in the card header, as on the Graphs card, replacing the buttons that floated over the plot.
+- **A title you type on the Graphs card survives adding or removing a series.** Any change to the series used to overwrite it. Removing every series still resets it, and a chart whose title you never touched keeps naming itself after its series.
+- **Split-by-unit lanes no longer get squashed together.** After a window resize, a tab switch or a panel opening, the next hover shrank the chart to 300px and squeezed every lane into it, overlapping their captions and axis labels. The Trends card could do the same, until its next hover.
+- **A line can no longer run off the top of a chart's y-axis.** The axis stopped at the tick nearest the largest value, which could be below it: a series peaking at 466 ms was drawn on a 0-400 axis with its peak cut off. The axis now always reaches the data. This affects the Graphs card over a whole run, and Compare.
+
 ## [0.2.97.47] - 2026-11-05
 
 ### Changed

@@ -6,7 +6,7 @@
  * Modern UI for building custom reports with template support
  */
 
-import { Fragment, useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -69,6 +69,7 @@ import {
   generateAdHocReport,
   getTemplateSummaries,
   getTemplate,
+  updateTemplate,
   type TemplateSummary,
   type TemplateDetail,
   type ReportSectionConfig,
@@ -100,6 +101,9 @@ import {
 } from './SectionConfigs';
 import { BaselineRunSelect, useBaselineCandidates, type BaselineCandidate } from './BaselineRunSelect';
 import { sectionSummary } from './section-summary';
+import { sectionsFingerprint } from './template-changes';
+import { SaveTemplateChangesDialog, type TemplateChangesExit } from './SaveTemplateChangesDialog';
+import { useHistoryBackGuard } from './useHistoryBackGuard';
 
 // ==================== Types ====================
 
@@ -245,6 +249,15 @@ export function GenerateReportDialog({
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDetail | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [showTemplateSelector, setShowTemplateSelector] = useState(!isTemplateBuilder);
+  // Changes on top of the template the report started from. The fingerprint of the template's
+  // sections is taken when it loads (and again when the changes are saved into it), so editing a
+  // section and then putting it back reads as unchanged. Only a report built from a template has
+  // one: a report from scratch has nothing to save the changes to.
+  const [templateFingerprint, setTemplateFingerprint] = useState<string | null>(null);
+  // Set while the "save changes to the template?" prompt is up, to what the user was doing.
+  const [pendingExit, setPendingExit] = useState<TemplateChangesExit | null>(null);
+  const [savingTemplateChanges, setSavingTemplateChanges] = useState(false);
+  const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
   // Reset while rendering, not in an effect: this dialog stays mounted while closed on the test-run
   // page, and one commit with the old value mounts the last report's whole builder, with every
   // card's form firing its fetches, only for the starting point to replace it.
@@ -252,6 +265,10 @@ export function GenerateReportDialog({
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open && !isTemplateBuilder) setShowTemplateSelector(true);
+    if (open) {
+      setPendingExit(null);
+      setTemplateSaveError(null);
+    }
   }
 
   // Report builder state
@@ -296,6 +313,15 @@ export function GenerateReportDialog({
 
   // Report generation state (polling handled by parent component)
   const [generationStatus, setGenerationStatus] = useState<string>('');
+
+  const currentFingerprint = useMemo(() => sectionsFingerprint(sections), [sections]);
+  const hasTemplateChanges =
+    open &&
+    !isTemplateBuilder &&
+    !showTemplateSelector &&
+    selectedTemplate !== null &&
+    templateFingerprint !== null &&
+    currentFingerprint !== templateFingerprint;
 
   // Template-level baseline: sections that compare against a baseline test run
   // can all be pointed at one run from a single dropdown.
@@ -572,6 +598,7 @@ export function GenerateReportDialog({
       setSelectedTemplate(detail);
       const loaded = sortByOrder(detail.sections ?? []);
       setSections(loaded);
+      setTemplateFingerprint(sectionsFingerprint(loaded));
       setSectionKeys(freshKeys(loaded.length));
       setShowTemplateSelector(false);
     } catch (err) {
@@ -584,6 +611,7 @@ export function GenerateReportDialog({
   // Handle starting from scratch (no template)
   const handleStartFromScratch = () => {
     setSelectedTemplate(null);
+    setTemplateFingerprint(null);
     setSections([]);
     setSectionKeys([]);
     setShowTemplateSelector(false);
@@ -645,12 +673,59 @@ export function GenerateReportDialog({
     }
   };
 
+  // ==================== Leaving with changes on top of the template ====================
+
+  /** Does what the user asked for once the prompt is answered (or was not needed). */
+  const proceedWith = (exit: TemplateChangesExit) => {
+    setPendingExit(null);
+    setTemplateSaveError(null);
+    if (exit === 'generate') void handleGenerate();
+    else if (exit === 'back-to-templates') setShowTemplateSelector(true);
+    else onClose();
+  };
+
+  /** Every way out of the builder goes through here, so none of them loses changes silently. */
+  const requestExit = (exit: TemplateChangesExit) => {
+    if (isSubmitting || savingTemplateChanges) return;
+    if (hasTemplateChanges) setPendingExit(exit);
+    else proceedWith(exit);
+  };
+
+  const handleSaveTemplateChanges = async () => {
+    if (!selectedTemplate || !pendingExit) return;
+    const exit = pendingExit;
+    setSavingTemplateChanges(true);
+    setTemplateSaveError(null);
+    try {
+      const updated = await updateTemplate(selectedTemplate.id, {
+        sections: sections.map((section, order) => ({ ...section, order })),
+      });
+      setSelectedTemplate(updated);
+      setTemplateFingerprint(currentFingerprint);
+      setTemplates((ts) => ts.map((t) => (t.id === updated.id ? { ...t, section_count: sections.length } : t)));
+      proceedWith(exit);
+    } catch (err) {
+      setTemplateSaveError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to update template');
+    } finally {
+      setSavingTemplateChanges(false);
+    }
+  };
+
+  // Backdrop click and Escape. Escape during a drag is dnd-kit's cancel (see disableEscapeKeyDown).
+  const handleDialogClose = () => {
+    if (dragging) return;
+    requestExit('close');
+  };
+
+  // An accidental browser Back would otherwise leave the page and take the changes with it.
+  const handleHistoryBack = useCallback(() => setPendingExit((p) => p ?? 'close'), []);
+  useHistoryBackGuard(hasTemplateChanges, handleHistoryBack);
 
   return (
     <ReportVariablesProvider testRunId={testRunId} enabled={open}>
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={handleDialogClose}
       disableEscapeKeyDown={dragging}
       // During a drag the whole dialog drops out of hit-testing except the canvas scroller, which
       // keeps the wheel, and shows one grabbing cursor wherever the drag goes. The palette preview
@@ -723,7 +798,7 @@ export function GenerateReportDialog({
                 sx={{ maxWidth: 280, minWidth: 0 }}
               />
             </Tooltip>
-            <Button size="small" sx={{ ml: 'auto' }} onClick={() => setShowTemplateSelector(true)}>
+            <Button size="small" sx={{ ml: 'auto' }} onClick={() => requestExit('back-to-templates')}>
               Back to Template
             </Button>
           </>
@@ -1089,13 +1164,14 @@ export function GenerateReportDialog({
           </Typography>
         )}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-          <Button onClick={onClose} disabled={isSubmitting} sx={{ textTransform: 'none' }}>
+          <Button onClick={() => requestExit('close')} disabled={isSubmitting} sx={{ textTransform: 'none' }}>
             Cancel
           </Button>
           {!showTemplateSelector && (
             <Button
               variant="contained"
-              onClick={handleGenerate}
+              // A report saved as a NEW template is not asked about the one it started from.
+              onClick={() => (saveAsTemplate ? void handleGenerate() : requestExit('generate'))}
               disabled={isSubmitting || sections.length === 0 || (saveAsTemplate && !templateName.trim()) || templateNameTaken || baselineBlockReason !== null}
               startIcon={isSubmitting ? <CircularProgress size={16} color="inherit" /> : <DescriptionIcon />}
               sx={{
@@ -1112,6 +1188,18 @@ export function GenerateReportDialog({
         </Box>
       </DialogActions>
     </Dialog>
+    <SaveTemplateChangesDialog
+      exit={pendingExit}
+      templateName={selectedTemplate?.name ?? ''}
+      saving={savingTemplateChanges}
+      error={templateSaveError}
+      onSave={() => void handleSaveTemplateChanges()}
+      onDiscard={() => pendingExit && proceedWith(pendingExit)}
+      onKeepEditing={() => {
+        setPendingExit(null);
+        setTemplateSaveError(null);
+      }}
+    />
     </ReportVariablesProvider>
   );
 }

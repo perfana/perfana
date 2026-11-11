@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { analysisOffsetsFit } from '@perfana/shared/database/run-window';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import {
   ReportDataFetcherService,
@@ -425,9 +426,18 @@ export class GraphsRenderer {
    * The offsets belong to the test run, not to the section: they are the same
    * `analysisStartOffset` / `analysisEndOffset` (seconds) the Graphs card reads,
    * so the report and the card mark the same band. Without a clock to anchor
-   * them to, neither end is marked.
+   * them to, neither end is marked, and offsets that do not fit the run mark nothing either,
+   * because the whole run is what was analysed.
    */
   private analysisWindow(testRun: TestRun, only = false): ChartWindow {
+    const fits = analysisOffsetsFit({
+      start_time: testRun.startTime,
+      end_time: testRun.endTime,
+      ramp_up: testRun.analysisStartOffset,
+      ramp_down: testRun.analysisEndOffset,
+    });
+    if (!fits) return { from: null, to: null, only };
+
     const start = testRun.startTime ? new Date(testRun.startTime).getTime() : null;
     const end = testRun.endTime ? new Date(testRun.endTime).getTime() : null;
     return {

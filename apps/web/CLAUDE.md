@@ -160,6 +160,13 @@ Two consequences:
    the exact failure the flag exists to remove. `sloShape` has no production caller today; give
    it a paper ref before wiring one into a narrowed view.
 
+A zero-pinned axis uses the last entry of `tickValues` (`lib/charts/format.ts`) as its top, so that
+list has to reach the data. Until v0.2.97.48 it stopped at the tick nearest `max`, so 466 on a step
+of 200 gave `[0, 200, 400]`: a 0-400 axis with the peak cut off and nothing logged. Only a max less
+than half a step past a tick showed it, and the series table only gives it away when the peak sits
+inside the analysis window, since its stats cover that window alone. It now
+runs to the first tick at or above `max`, which costs some headroom (401 tops out at 600).
+
 ### The Graphs zoom reset
 
 1. **A reset is recognised only by `xaxis.autorange`, never by a full-span range.** Plotly
@@ -219,7 +226,7 @@ observes its own wrapper div, and calls `Plotly.Plots.resize` on **its own** gra
 call sites should import it (`import Plot from '@/components/ResponsivePlot'`) rather than writing
 `dynamic(() => import('@/components/plotly-cartesian'))` again.
 
-Four things about it are load-bearing:
+Five things about it are load-bearing:
 
 1. **It resizes that one chart, deliberately.** Dispatching a window resize instead — what
    `kickPlotlyResize` in `app/test-runs/[id]/components/shared/ExpandableCardHeader.tsx` does — wakes
@@ -236,10 +243,21 @@ Four things about it are load-bearing:
    `.js-plotly-plot` yet (the lazy chunk has not drawn) → skip, its first draw measures the current
    size anyway; and `Plots.resize` rejects when the div is hidden, so the call is `.catch`ed or the
    rejection surfaces as a page error.
-4. **Only three call sites use it so far** — `anomaly-detection/components/TrendChart.tsx`,
-   `anomaly-detection/.../AnomalyExpandedContent.tsx`, and `compare/CurrentTestRunChart.tsx`. Nine
-   others still call `dynamic(() => import('@/components/plotly-cartesian'))` directly and therefore still respond
-   to a window resize only; that is deliberate scope, tracked in TODOS.md, not an oversight.
+4. **Three call sites still bypass it** — `dynatrace/HostPerformanceGraphs.tsx`,
+   `service-level-objectives/AggregatedSloChart.tsx` and `service-level-objectives/SLOMetricsChart.tsx`
+   call `dynamic(() => import('@/components/plotly-cartesian'))` directly and therefore respond to a
+   window resize only; that is deliberate scope, tracked in TODOS.md, not an oversight.
+5. **It hands Plotly a copy of the layout, because `Plots.resize` deletes `width` and `height` from
+   the object it holds** (v0.2.97.48), and react-plotly gives it the caller's own. `GraphsChart` and
+   `TrendsChart` size their container from `layout.height ?? <300px default>`, so after any resize the
+   next render that reused the layout (on Graphs, any hover) took the default, and the following resize autosized the plot to
+   it. A lanes chart's domains are fractions, so four lanes built for 694px squeezed into 300 with
+   their captions over each other's ticks. An overlay chart's real height IS 300, so it never showed.
+   What triggers it is any `Plots.resize`: `config.responsive`'s window listener, `kickPlotlyResize`,
+   the observer above, a tab switch. The copy is memoized on the caller's layout, because a fresh
+   object per render reads as a new figure to react-plotly, which on Graphs is a `Plotly.react` per
+   hover. Trends and Compare already rebuild their layout on hover (`cursorIndex` is in their memo
+   deps), which is why a Trends chart squashed only until its next hover.
 
 jsdom has no `ResizeObserver`. `apps/web/jest.setup.js` stubs it so a component that observes its
 container mounts in tests at all.
@@ -254,14 +272,23 @@ violation reaches the `catch`, nothing distinguishes it from a dead network. Eve
 the button failed on **every chart, in every browser, on localhost and in production alike**,
 and reported it as a network error. Fixed in v0.2.96.27.
 
-`apps/web/lib/plotly.ts` is now the one implementation. All eight modebar copy buttons go
-through it: `graphs/utils/chart-utils.ts`, `compare/components/ComparisonPlot.tsx`,
+`apps/web/lib/plotly.ts` is now the one implementation. `components/charts/ChartActions.tsx` and
+six modebar copy buttons go through it: `graphs/utils/chart-utils.ts`,
 `compare/current-test-run-chart/utils/current-test-run-chart-utils.ts`,
-`anomaly-detection/components/utils/trends-plot-utils.ts`, `trends/hooks/useTrendsPlot.ts`,
+`anomaly-detection/components/utils/trends-plot-utils.ts`,
 `performance-analysis/RequestTimeSeriesModal.tsx`,
 `performance-analysis/transaction-graph-modal/utils/chart-config.ts`, and
-`service-level-objectives/utils/slo-chart-utils.ts`. A ninth button writes its own
+`service-level-objectives/utils/slo-chart-utils.ts`. Another button writes its own
 `toImage` chain at your peril.
+
+**A chart on the Analyst layout exports through `ChartActions`, never its graph div** (v0.2.97.48).
+`lib/charts/layout.ts` puts neither a title nor a legend on the canvas: both are HTML around the
+plot, so `plotlyPngBlob(gd, ...)` rasterises an unlabelled chart with unnamed lines. Compare's
+`ComparisonPlot` and Trends' `useTrendsPlot` did that from a modebar button, and Plotly's own
+download button does it too, so those cards hide the modebar (`displayModeBar: false`) rather than
+just swapping the copy handler. `GraphsChart` and `TrendsChart` clear their `graphEl` in `onPurge`,
+because their plot unmounts while the card stays and a purged div exports a blank image. The other modebar charts draw their own title or legend on the
+canvas, so they are not this bug. `card-chart-export.test.tsx` pins both cards.
 
 What the module owns, and why each piece is there:
 
@@ -696,6 +723,32 @@ Three rules follow:
 the server's `UpdateGraphPresetDto` omits it too and the global `ValidationPipe` strips it, so
 sending it is a silent no-op that reads like a re-scope.
 
+### A graph's title is a preset field, and it is state only once someone chose it
+
+`useGraphsData` holds `customChartName` (`string | null`) and derives
+`chartName = customChartName ?? generateChartName(addedSeries)` (v0.2.97.48). It used to be an effect
+that regenerated the name on every series change, so loading a preset overwrote the title, and so
+did adding one series to a chart you had just named. Four things are easy to undo:
+
+- **`??`, never `||`.** An empty string is what the field holds while someone retypes it. With `||`
+  the generated name snaps back on the last backspace.
+- **The title lives in `chartOptions.title`, not in the preset's `name`.** The save dialog only
+  defaults the name to the title, and the two can differ. A preset with no stored title falls back
+  to its name, which is the best guess for one saved before v0.2.97.48.
+- **A loaded title equal to the composed default goes back to `null`,** so adding a series to that
+  chart keeps its name accurate instead of freezing a description of the old set.
+- **`chartOptions` is unvalidated and global presets are shared,** so the load path checks `typeof`
+  rather than trusting the type. A non-string reaches `exportFilename`'s `.toLowerCase()`.
+
+**Trends has no editable title and no column to store one**, so the loaded preset's `name` is the
+title: `useTrendsData.presetName`, rendered as `<name> (avg)`, set by applying or saving a preset.
+A preset that restores no series leaves it alone, because the chart still draws what it had.
+
+On both cards the title goes when the last series does, by Clear all or by removing them one at a
+time, since it named those series. Typing a Graphs title onto an empty chart first is fine: that is
+why this lives in the remove handlers and not in a derivation over `addedSeries`. Compare has
+nothing to restore, because its charts are per metric and titled by that metric.
+
 ### A compare preset's baseline is restored for both preset types, and they differ only in who wins
 
 Every `compare_filter_presets` row carries `baseline_test_run_id`, and `ComparePresetsTable`
@@ -735,6 +788,52 @@ it to unconditional fails the don't-override case. Its `setup()` deliberately do
 awaiting it never settles and every case times out at 10 s. The unwrapped-act warning is noise;
 the hang is not.
 
+### The Compare card's "Control group" baseline is a sentinel riding in `selectedTestRun`
+
+The baseline picker offers the run's control group (the runs anomaly detection judges it against)
+first, as a synthetic `RelatedTestRun` whose `test_run_id` is `CONTROL_GROUP_BASELINE` and whose
+`control_group` carries the group (`controlGroupOption` in `compare/utils/compare-utils.ts`,
+v0.2.97.51). Sharing the state keeps every id-only consumer working — "is a baseline selected",
+preset save — and makes everything that would treat the id as a run a bug unless it branches on
+`isControlGroupOption`. Four places do, and each fails silently if the branch is lost:
+
+1. **The pairing in `useCompareData`.** The baseline comes from
+   `/metrics/control-group-statistics/:run` (pooled `ds_control_group_statistics`), never from the
+   rows of `ds-metric-statistics`, which would match nothing for the sentinel. URL panels and the
+   synthetic "All aggregated" series have no pooled rows: they are fetched for the current run alone
+   and shown with an empty baseline, never a stand-in. `fetchControlGroupStatistics` sends the
+   series' dashboard id together with its metrics source, and the API ANDs them: one source can
+   back several dashboards, and filtering on the source is what anomaly detection does, so a series
+   whose source changed gets no control value, as it is incomparable there. A non-uuid dashboard id
+   (a synthetic list entry) is not sent.
+2. **The graph.** `fetchGraphData` omits `baselineTestRunId` (now optional on
+   `ds-metrics-comparison`), and `ComparisonPlot` draws the group's pooled mean — the `avg` cell's
+   `selected_value` — as a flat dashed line, since a pooled distribution has no time series.
+3. **Captions.** `baselineDisplayName` / `getTestRunDisplayText` print "control group (N runs)";
+   the raw sentinel must never reach the screen.
+4. **Preset restore.** `CompareCard` hands `useComparePresets` the `baselineOptions`, not
+   `relatedTestRuns`, so a preset stored with the sentinel finds the option. `SavePresetModal`
+   defaults such a preset to **generic**: every run has its own control group, so it is reusable.
+   The API's `baselineRunOf` (`compare-presets.service.ts`) keeps the sentinel away from the run
+   access checks — without it a non-admin's save 404s.
+
+The group is fetched once per run on first expand (`undefined` = not asked yet, `null` = none), so
+a preset applied before it lands leaves the selector alone, as for a missing run.
+
+Two things in `useCompareData` keep the modes from bleeding into each other (v0.2.97.52):
+
+- **An open graph closes when the baseline id changes.** `graphData` holds what was fetched for
+  the old baseline, and the table re-renders the open row against the new one: leaving the
+  control group for a run drew "Baseline (null)" with no line. `toggleGraph` refetches on open,
+  so closing is enough for a graph that has landed. One still loading when the baseline changes
+  is dropped in `useCompareHandlers` (`baselineIdRef`): `fetchGraphData` resolves `false`, so the
+  late answer neither writes `graphData` nor reopens the row under the new baseline.
+- **Only the latest `fetchMetricsComparison` writes state** (`comparisonRequestRef`). The
+  control-group branch waits on an extra request per panel, so it routinely answers after a run
+  picked later and would otherwise fill the table with the group's numbers under the run's
+  legend. The empty-selection arm bumps the counter too, so a request still out cannot
+  repopulate a cleared table.
+
 ### An SLO with no targets must not borrow the panel's series
 
 `useSLOMetricsChart` falls back to "every series on the panel" when a target matches no
@@ -750,6 +849,49 @@ bars.
 `ChartEmptyState` takes an optional `message` and `detail`: the headline is written for the
 user, and the pipeline's own words go underneath as supporting text, capped at `60ch` so an
 arbitrary-length message is not set as one centred line across the chart.
+
+### A perf-test panel's unit arrives as a display string, and the SLO dialogs store codes
+
+`GET /metrics/ds-metrics/panels-by-dashboard` answers each performance-test panel's unit the way
+the worker writes it (`METRIC_TYPE_PANEL_UNITS` in `apps/worker/src/constants/performance-metrics.ts`):
+`'ms'`, `'%'`, `'req/s'`, `'threads'`, `''`. The SLO dialogs convert thresholds and save
+`configuration.yAxesFormat` (which the API copies into `metric_unit`) as unit **codes** from
+`lib/units.ts`. `perfPanelUnitCode` maps the two that differ: `'%'` to `'percent'` (perf error
+rates are 0-100, never `percentunit`) and `'req/s'` to `'reqps'`. Until v0.2.97.58 both dialogs
+dropped the unit altogether, so a perf-test SLO was saved with `metric_unit` NULL: its threshold
+was never converted and the SLO list showed a bare number. Rows saved before then keep NULL until
+someone saves them in Edit.
+
+Two things to keep:
+
+- **The Add dialog stores the panel id as `configuration.id`, never `panelId`.** Edit's panel
+  upgrade matches `configuration.panelId ?? configuration.id`. Matching `panelId` alone sent every
+  UI-created SLO to title and fuzzy matching, and the matched panel's unit is what the save uses.
+- **Edit has one unit, `sloFormData.thresholdUnit`** (v0.2.97.60). It is what the stored value is
+  shown in (percentunit 0-1 as 0-100), what validation, the helper text, the placeholder and the
+  chip read, what the save converts into, and what it sends as `configuration.yAxesFormat`.
+  `thresholdUnitFormat` turns it into "no unit" for a trend, which is %/h. Nothing in Edit reads
+  the selected panel's unit for any of that; doing so again is how a stored number and its label
+  came apart, an SLO that always passes or always fails with nothing logged. It is set in three
+  places only:
+  1. **At open, from the record** (`storedThresholdUnit`): `configuration.yAxesFormat`, then
+     `configuration.metricUnit`, then `metric_unit`, skipping `'%/h'` per candidate, because the
+     API writes that label for a trend and a former trend keeps it after an edit to avg.
+  2. **When the live panel or Dynatrace metric arrives** (`adoptPanelUnit`), only if the record had
+     none. A record with a unit keeps it even when the panel's unit has changed since, and the
+     threshold section says so under the field. A Dynatrace SLO therefore keeps the record's unit
+     whether or not its metric matches; the reverted single-unit attempt took the unit from the
+     panel, which a Dynatrace synthetic or unmatched metric does not have, and saved `1s` as 1 ms.
+     Adopting percentunit re-shows the untouched value scaled, for a non-trend record only, and
+     declines if the user already typed a bare number over it: that number was entered against no
+     unit and is saved as typed (#719, never scaled twice). A typed suffix (`90%`) does not block
+     it: it converts under the adopted unit. Only the benchmark's own panel is upgraded, so in
+     Duplicate a late fetch for the original dashboard cannot swap back a panel the user picked.
+  3. **When Duplicate picks another metric** (`SLOFormFields`): the new metric's unit, since the
+     clone's record unit belongs to the old one.
+
+  For a trend the base unit is still saved in `configuration.yAxesFormat`; the API puts `'%/h'` in
+  `metric_unit` and keeps the configuration, so a later edit back to avg finds the panel's unit.
 
 ### The error rate has one threshold and one set of formatters
 
@@ -809,9 +951,48 @@ panel-level row it writes when a host is mapped, and the same value `TestRunsMet
 "A golden-path template loses to any row already on the panel" in
 [apps/api/CLAUDE.md](../api/CLAUDE.md) for the full mechanism and the bug it fixes). The web side's
 part of the contract: `handleConfigSave` above always overwrites `source` with `'metric'` or
-`'panel'` on any UI save, which is what makes a user edit distinguishable from the Dynatrace
-boilerplate in the first place — a future save path that skips this field would make every row it
-touches look machine-seeded again.
+`'panel'` on any UI save, which is what made a user edit distinguishable from the Dynatrace
+boilerplate in the first place. It is no longer the only guard: the golden path reads a
+Dynatrace-marked row as machine-seeded only when it has no author, and the API stamps one on every
+save (`updateDsCompareConfig` since v0.2.95.42, the insert in `createOrUpdateDsCompareConfig` since
+v0.2.97.54). A save path that bypassed both methods and also skipped `source` would still make every
+row it touches look machine-seeded again.
+
+### The ADAPT template dialog sends only the fields that are ticked
+
+`/settings/profiles/adapt-templates` (v0.2.97.55) manages organization and install-wide compare-config
+templates, and the profile page's **ADAPT templates** tab (v0.2.97.57) a profile's; both render
+`adapt-templates/components/AdaptTemplatesPanel.tsx`. The dialog is
+`adapt-templates/components/CompareTemplateDialog.tsx`, its state mapping `adapt-templates/template-form.ts`.
+A definition never carries its scope (`organizationId` or `profile`): the panel's scope names the
+collection, `toDto` strips the profile on the way out, and a copy POSTs the same definition to another scope.
+A template's meaning is which fields it names: a named field is forced onto every panel the template
+reaches, an absent one keeps each panel's own value. Three rules:
+
+- **Do not swap in `MetricConfigForm`.** It writes every field on every save and has no "no direction",
+  so every template saved through it would force every field. Only the option lists are shared, from
+  `@/lib/compare-config-options`, which both import; add a classification or aggregation there.
+- **`null` is a value only for `higherIsBetter` and `absThreshold`.** Every other field is omitted, never
+  sent as `null`: the API holds a definition to the YAML file's rules, and `dashboardUid: null` is an
+  error there, not a wildcard.
+- **An untouched number is sent back as stored.** The percentage is shown as a percent and stored as a
+  fraction; re-deriving the stored value from the displayed text would rewrite a provisioned
+  `0.1234567890123456` on a copy. `toDefinition` keeps the original while the text is unchanged.
+
+### "Save as template" on the anomaly card builds a definition, it does not save the row
+
+`MetricConfigForm` shows **Save as template** when given `onTemplateSaved` (v0.2.97.67). It opens
+`configuration-comparison/PromoteTemplateDialog.tsx`, which POSTs the definition built by
+`buildPromotedDefinition` (`promote-template.ts`) to an existing template collection. Three rules:
+
+- **The row is never saved by it.** Promotion must not change the workload it came from; `onSave` is not
+  called. The definition is built from the form's current values, so unsaved edits go into the template.
+- **A title template carries no panel id or uid**, and a uid template carries both. A panel id is unique only
+  within one dashboard (root CLAUDE.md #43), so `panelId` without `dashboardUid` would reach every dashboard
+  of the workload that happens to have that id.
+- **The default target is derived, not stored.** The profiles load after the dialog opens; a `useEffect` that
+  picked `targets[0]` stuck on the organization because it was still valid when the matching profile arrived.
+  `targetKey` falls back to `targets[0]` until the user picks.
 
 ### Series grouping in the web: where a group's badge comes from, and what the dialog fetches
 
@@ -976,3 +1157,31 @@ Four things fail silently when undone:
    that inserts, removes or moves a section has to edit both. Index keys handed a card's expanded
    state and form state to whichever section landed at its position, which a drop into the middle
    of the list does on every add.
+
+### The report builder asks before a template's changes are lost
+
+Since v0.2.97.56 `GenerateReportDialog` compares the builder's sections with the template they were
+loaded from and, when they differ, routes every exit through `requestExit` to
+`SaveTemplateChangesDialog`: Generate, Cancel, Escape, a backdrop click, **Back to Template** and the
+browser's Back button. Saving is a `PUT /report-templates/:id` with the sections, before the report
+is queued. Four things fail silently when undone:
+
+1. **The comparison is a fingerprint, not a dirty flag** (`template-changes.ts`). A flag set by the
+   edit handlers would fire for a form that rewrites its config on mount and for an edit that is
+   put back. The fingerprint reads array position rather than the stored `order`, a blank title as
+   none, the text through `getSectionText` and `{}` as no config, so a template loaded and left
+   alone matches itself. A new section-level field the template stores has to be added there, or a
+   change to it is never offered for saving.
+2. **The shared baseline counts as a change.** Picking a baseline run for comparison sections writes
+   `baselineTestRunId` into them, so an unpinned template is offered for saving on every report that
+   needs one. That is the honest answer, since saving would pin the run, and *Generate without
+   saving* is one click.
+3. **The browser Back guard is one extra history entry** (`useHistoryBackGuard.ts`). Its state
+   spreads the current one so Next's App Router finds its own keys and treats the pop as a same-page
+   no-op; a pop onto anything but this guard's own entry (per-arming token) re-arms and opens the
+   prompt. On release it calls `history.back()` only while its entry is still current, so a
+   navigation away is not undone. A router `replaceState` while the dialog is open overwrites the
+   entry and leaves one duplicate entry behind, which is harmless.
+4. **jsdom queues `history.back()` in two stages**, so in tests it lands in whichever test is
+   running by then. The tests dispatch `popstate` themselves and spy on `history.back`.
+

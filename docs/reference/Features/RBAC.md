@@ -59,7 +59,7 @@ Defined in `OrganizationRole`. Granted by inserting an `organization_members` ro
 | Role | String | Intent |
 |---|---|---|
 | Org admin | `org-admin` | Full control of the organization, its teams, members, integrations, and resources |
-| Org member | `org-member` | Day-to-day producer: create/manage SUTs, profiles, benchmarks, dashboards, test runs |
+| Org member | `org-member` | Day-to-day producer: create/manage SUTs, benchmarks, dashboards, test runs (profile writes need `org-admin`) |
 | Org viewer | `org-viewer` | Read-only access to the organization's resources |
 
 ### Team roles
@@ -209,9 +209,10 @@ The table below collapses 26 owned-resource entity classes into the user-facing 
 | **Test run** | org-viewer (+ team rule) | (ingested via API key) | org-member | org-admin or owner | `test-run:{read,update,delete,annotate}` |
 | Test run event | inherits test run | org-member | org-member | org-admin or owner | |
 | Test run annotation | inherits test run | org-member | org-member | org-member | `test-run:annotate` |
-| **Profile** | org-member | org-member | org-member or owner | org-admin or owner | `profile:manage` |
-| Profile ↔ benchmark mapping | inherits profile | profile owner | profile owner | profile owner | |
-| Profile ↔ dashboard mapping | inherits profile | profile owner | profile owner | profile owner | |
+| **Profile** | member of the profile's organization (any role); 404 outside | org-admin in the named organization, or the first organization by id where the caller is org-admin | org-admin in the profile's organization | org-admin in the profile's organization | Enforced in `ProfilesService` with `isOrganizationAdmin`; `profile:manage` is not consulted; no owner rule (v0.2.97.57) |
+| Profile ↔ benchmark mapping | inherits profile | org-admin in the profile's organization | org-admin in the profile's organization | org-admin in the profile's organization | |
+| Profile ↔ dashboard mapping | inherits profile | org-admin in the profile's organization | org-admin in the profile's organization | org-admin in the profile's organization | |
+| Compare-config template | organization or profile: member of that organization; install-wide: anyone signed in; 404 outside | `benchmark:manage` in the template's organization (a profile template: its profile's); install-wide: global admin | same as create | same as create | Provisioned (file-owned) templates answer 409 on edit and delete; see [[Compare Config Templates]] |
 | **Benchmark** | org-member | org-member | org-member or owner | org-admin or owner | `benchmark:manage` |
 | **Application dashboard** | org-member (+ team rule) | org-member | org-member or owner | org-admin or owner | `dashboard:manage` |
 | Grafana dashboard (synced) | org-member | (sync only) | (sync only) | (sync only) | Maintained by `grafana-sync` service |

@@ -525,7 +525,8 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         team_id,
         start_time,
         end_time,
-        ramp_up
+        ramp_up,
+        ramp_down
       FROM test_runs
       WHERE test_run_id = $1
     `;
@@ -545,7 +546,8 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       team_id: row.team_id,
       start_time: row.start_time,
       end_time: row.end_time,
-      ramp_up: row.ramp_up
+      ramp_up: row.ramp_up,
+      ramp_down: row.ramp_down
     };
 
     return testRun;

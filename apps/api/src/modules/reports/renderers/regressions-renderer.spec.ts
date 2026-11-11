@@ -115,6 +115,24 @@ describe('RegressionsRenderer', () => {
     expect(html).not.toContain('15 metrics');
   });
 
+  it('marks a control value that was configured because the series has no baseline', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({
+        regressionCount: 2,
+        regressions: [
+          makeMetric({ metricName: 'new-tx', controlValue: 0, differencePercent: null, controlIsConfigured: true }),
+          makeMetric({ metricName: 'old-tx' }),
+        ],
+      }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html.match(/configured, no baseline/g)).toHaveLength(1);
+    expect(html.indexOf('configured, no baseline')).toBeGreaterThan(html.indexOf('new-tx'));
+    expect(html.indexOf('configured, no baseline')).toBeLessThan(html.indexOf('old-tx'));
+  });
+
   it('names the runs in the control group and the window they span', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
       makeRegressionsData({ controlGroup: makeControlGroup() }),

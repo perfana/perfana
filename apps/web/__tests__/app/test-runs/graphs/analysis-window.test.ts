@@ -12,6 +12,36 @@ import { analysisRangeClip, calculateAnalysisWindowIndices } from '@/app/test-ru
 import { analysisWindowShapes, chartTheme } from '@/lib/charts';
 import { TestRun } from '@/types/test-runs';
 
+describe('calculateAnalysisWindowIndices on a run too short for its offsets', () => {
+  // Five minutes, one sample a minute.
+  const samples = [0, 1, 2, 3, 4, 5].map((m) => `2026-01-01T10:0${m}:00.000Z`);
+  const run = (analysis_start_offset: number, analysis_end_offset: number) =>
+    makeTestRun({
+      start_time: samples[0],
+      end_time: samples[5],
+      analysis_start_offset,
+      analysis_end_offset,
+    } as Partial<TestRun>);
+
+  it.each([
+    ['overrun the run together', 200, 200],
+    ['exactly fill it', 180, 120],
+    ['overrun it through the ramp-up alone', 400, 0],
+    ['overrun it through the ramp-down alone', 0, 400],
+  ])('trims nothing when the offsets %s', (_name, up, down) => {
+    expect(calculateAnalysisWindowIndices(run(up, down), samples)).toEqual({ startIndex: null, endIndex: null });
+  });
+
+  it('still trims when they fit', () => {
+    expect(calculateAnalysisWindowIndices(run(60, 60), samples)).toEqual({ startIndex: 1, endIndex: 5 });
+  });
+
+  it('cannot tell without the run clock, so it keeps measuring from the data', () => {
+    const noClock = makeTestRun({ analysis_start_offset: 400 } as Partial<TestRun>);
+    expect(calculateAnalysisWindowIndices(noClock, samples).startIndex).toBe(5);
+  });
+});
+
 function makeTestRun(overrides: Partial<TestRun> = {}): TestRun {
   return {
     id: 'test-run-uuid',

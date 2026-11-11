@@ -40,6 +40,8 @@ export default function GraphsCard({
     addedSeries: graphsData.addedSeries,
     axisMode: graphsData.axisMode,
     setAxisMode: graphsData.setAxisMode,
+    chartName: graphsData.chartName,
+    setChartName: graphsData.setChartName,
     setAddedSeries: graphsData.setAddedSeries,
     setSeriesData: graphsData.setSeriesData,
     setChartDataLoading: graphsData.setChartDataLoading,

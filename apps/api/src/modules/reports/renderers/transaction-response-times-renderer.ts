@@ -231,9 +231,11 @@ export class TransactionResponseTimesRenderer {
       if (!dataByTransaction.has(tsRow.transaction_name)) {
         dataByTransaction.set(tsRow.transaction_name, []);
       }
+      const value = parseFloat(tsRow.avg_response_time);
+      if (Number.isNaN(value)) return; // no measurement, which is a gap rather than a 0 ms bucket
       dataByTransaction.get(tsRow.transaction_name)!.push({
         time: new Date(tsRow.time_bucket),
-        value: parseFloat(tsRow.avg_response_time) || 0,
+        value,
       });
     });
 
@@ -263,15 +265,17 @@ export class TransactionResponseTimesRenderer {
       `;
     }
 
-    // Create data points array for each transaction
-    const dataPoints: number[][] = [];
+    // Create data points array for each transaction. A bucket the transaction has no samples in
+    // stays null: drawn as 0 it reads as a response time collapsing, and every transaction whose
+    // last sample landed a moment before the run's final bucket dropped to zero at the end.
+    const dataPoints: Array<Array<number | null>> = [];
     scenarioData.transactions.forEach((txn: ReportTransaction) => {
       const transactionData = dataByTransaction.get(txn.name) || [];
       const points = uniqueTimes.map((time) => {
         const dataPoint = transactionData.find(
           (d) => d.time.getTime() === time.getTime()
         );
-        return dataPoint ? dataPoint.value : 0;
+        return dataPoint ? dataPoint.value : null;
       });
       dataPoints.push(points);
     });
@@ -283,10 +287,17 @@ export class TransactionResponseTimesRenderer {
     // Same rule `legendStats` carries in chart-tokens.ts; this is the last spread here.
     let maxValue = 0;
     for (const points of dataPoints) {
-      for (const value of points) if (value > maxValue) maxValue = value;
+      for (const value of points) if (value !== null && value > maxValue) maxValue = value;
     }
     const yMin = 0;
     const yMax = Math.ceil(maxValue / 20) * 20 + 20; // Round up to nearest 20 and add buffer
+
+    // A single bucket has no span to divide, and 0 * Infinity would put it at x = NaN.
+    const xAt = (i: number): number =>
+      padding.left + (timePoints > 1 ? (chartWidth / (timePoints - 1)) * i : chartWidth / 2);
+    // Higher values sit higher on the chart, so at a lower Y coordinate.
+    const yAt = (value: number): number =>
+      padding.top + chartHeight - ((value - yMin) / (yMax - yMin)) * chartHeight;
 
     // Generate time labels
     const timeLabels = uniqueTimes.map((time) => {
@@ -315,14 +326,17 @@ export class TransactionResponseTimesRenderer {
     dataPoints.forEach((points, txnIdx) => {
       const color = chartColor(txnIdx);
 
-      // Generate line path
+      // Generate line path. A gap lifts the pen, so the next sample starts a new subpath.
+      let penDown = false;
       const pathData = points
-        .map((value: number, i: number) => {
-          const x = padding.left + (chartWidth / (timePoints - 1)) * i;
-          // Calculate Y position: higher values should be higher on chart (lower Y coordinate)
-          const normalizedValue = (value - yMin) / (yMax - yMin); // 0 to 1
-          const y = padding.top + chartHeight - (normalizedValue * chartHeight);
-          return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+        .flatMap((value, i) => {
+          if (value === null) {
+            penDown = false;
+            return [];
+          }
+          const command = penDown ? 'L' : 'M';
+          penDown = true;
+          return [`${command} ${xAt(i)} ${yAt(value)}`];
         })
         .join(' ');
 
@@ -330,12 +344,11 @@ export class TransactionResponseTimesRenderer {
       // standard pairs the two — a 2.5px dot on a 1.25px stroke reads as a bead chain.
       const line = `<path d="${pathData}" stroke="${color}" stroke-width="${CHART_SIZE.markedLine}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
       // Data point circles
-      const markers = points.map((value: number, i: number) => {
-        const x = padding.left + (chartWidth / (timePoints - 1)) * i;
-        const normalizedValue = (value - yMin) / (yMax - yMin);
-        const y = padding.top + chartHeight - (normalizedValue * chartHeight);
-        return `<circle cx="${x}" cy="${y}" r="${CHART_SIZE.marker}" fill="${color}"/>`;
-      }).join('');
+      const markers = points
+        .map((value, i) => (value === null
+          ? ''
+          : `<circle cx="${xAt(i)}" cy="${yAt(value)}" r="${CHART_SIZE.marker}" fill="${color}"/>`))
+        .join('');
 
       // One group per transaction, indexed like its row in the transactions table below
       // (which IS this chart's legend — there is no separate series table): that attribute is
@@ -348,7 +361,7 @@ export class TransactionResponseTimesRenderer {
 
     // Generate X-axis labels (rotated for readability)
     const xLabels = timeLabels.map((label, i) => {
-      const x = padding.left + (chartWidth / (timePoints - 1)) * i;
+      const x = xAt(i);
       const yPos = padding.top + chartHeight + 10;
       return tickLabel(label, x, yPos, 'end', `transform="rotate(-45 ${x} ${yPos})"`);
     }).join('');

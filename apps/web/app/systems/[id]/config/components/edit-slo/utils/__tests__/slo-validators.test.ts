@@ -4,7 +4,7 @@
  * Tests:
  * - validateSLOForm: validation of the SLO form data
  * - isFormValid: boolean validity check for form submission
- * - processPercentunitValue: converts display percentage to stored decimal
+ * - toStoredThresholdValue: converts display percentage to stored decimal
  * - convertDecimalToPercentageForDisplay: converts stored decimal to display percentage
  * - parseValueWithUnit: parses numeric values with optional unit strings
  * - SUPPORTED_PANEL_TYPES: constant export
@@ -13,8 +13,11 @@
 import {
   validateSLOForm,
   isFormValid,
-  processPercentunitValue,
+  toStoredThresholdValue,
   convertDecimalToPercentageForDisplay,
+  storedThresholdUnit,
+  adoptPanelUnit,
+  thresholdUnitFormat,
   parseValueWithUnit,
   SUPPORTED_PANEL_TYPES,
 } from '../slo-validators';
@@ -169,9 +172,15 @@ describe('convertDecimalToPercentageForDisplay', () => {
       expect(convertDecimalToPercentageForDisplay(0.001, 'percentunit')).toBe('0.1');
     });
 
-    it('should not convert a value >= 1 when format is percentunit (already percentage)', () => {
-      // A stored value that is already >= 1 should be returned as-is
-      expect(convertDecimalToPercentageForDisplay(95, 'percentunit')).toBe('95');
+    // #719: a value >= 1 used to be shown as-is, so 1 (100%) displayed as "1" and saved as 0.01.
+    it('scales a value >= 1 too: 1 is 100%', () => {
+      expect(convertDecimalToPercentageForDisplay(1, 'percentunit')).toBe('100');
+      expect(convertDecimalToPercentageForDisplay(1.5, 'percentunit')).toBe('150');
+    });
+
+    it('drops float noise', () => {
+      expect(convertDecimalToPercentageForDisplay(0.009, 'percentunit')).toBe('0.9');
+      expect(convertDecimalToPercentageForDisplay(0.07, 'percentunit')).toBe('7');
     });
   });
 
@@ -195,35 +204,58 @@ describe('convertDecimalToPercentageForDisplay', () => {
 });
 
 // ---------------------------------------------------------------------------
-// processPercentunitValue
+// toStoredThresholdValue
 // ---------------------------------------------------------------------------
 
-describe('processPercentunitValue', () => {
+describe('toStoredThresholdValue', () => {
   describe('Happy Path Scenarios — percentunit format', () => {
     it('should convert "95" to "0.95" for percentunit format', () => {
-      expect(processPercentunitValue('95', 'percentunit')).toBe('0.95');
+      expect(toStoredThresholdValue('95', 'percentunit')).toBe('0.95');
     });
 
     it('should convert "50" to "0.5" for percentunit format', () => {
-      expect(processPercentunitValue('50', 'percentunit')).toBe('0.5');
+      expect(toStoredThresholdValue('50', 'percentunit')).toBe('0.5');
     });
 
     it('should convert "100" to "1" for percentunit format', () => {
-      expect(processPercentunitValue('100', 'percentunit')).toBe('1');
+      expect(toStoredThresholdValue('100', 'percentunit')).toBe('1');
     });
   });
 
   describe('Non-percentunit formats', () => {
     it('should return the original value unchanged for ms format', () => {
-      expect(processPercentunitValue('500', 'ms')).toBe('500');
+      expect(toStoredThresholdValue('500', 'ms')).toBe('500');
     });
 
     it('should return the original value unchanged when format is undefined', () => {
-      expect(processPercentunitValue('500', undefined)).toBe('500');
+      expect(toStoredThresholdValue('500', undefined)).toBe('500');
     });
 
     it('should return the original value unchanged when format is empty string', () => {
-      expect(processPercentunitValue('500', '')).toBe('500');
+      expect(toStoredThresholdValue('500', '')).toBe('500');
+    });
+  });
+
+  // #717: the suffix used to reach the API, where Number('0.5s') stored NaN.
+  // #718: and it is converted to the panel's unit.
+  describe('Unit suffix is stripped and converted', () => {
+    it.each([
+      ['0.5s', 's', '0.5'],
+      ['500ms', 's', '0.5'],
+      ['2m', 'ms', '120000'],
+      ['500 ms', undefined, '500'],
+      [' 0.5 ', 's', '0.5'],
+      ['90%', 'percentunit', '0.9'],
+      ['95 percent', 'percentunit', '0.95'],
+    ])('%s on a %s panel -> %s', (input, format, expected) => {
+      expect(toStoredThresholdValue(input, format)).toBe(expected);
+    });
+
+    it('leaves a non-numeric value for validation to reject', () => {
+      expect(toStoredThresholdValue('abc', 's')).toBe('abc');
+    });
+    it('leaves an unconvertible unit for validation to reject', () => {
+      expect(toStoredThresholdValue('90%', 's')).toBe('90%');
     });
   });
 });
@@ -525,5 +557,121 @@ describe('isFormValid', () => {
         )
       ).toBe(true);
     });
+  });
+});
+
+describe('validateSLOForm unit check (#718)', () => {
+  it('refuses a unit that cannot be converted to the panel unit', () => {
+    const errors = validateSLOForm(
+      makeFormData({ requirementValue: '90%', selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' }, thresholdUnit: 's' })
+    );
+    expect(errors.requirementValue).toMatch(/can't be compared/);
+  });
+
+  it('accepts a convertible unit', () => {
+    const errors = validateSLOForm(
+      makeFormData({ requirementValue: '500ms', selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' }, thresholdUnit: 's' })
+    );
+    expect(errors.requirementValue).toBeUndefined();
+  });
+
+  it('does not check units for a trend, which is %/h whatever the panel measures', () => {
+    const errors = validateSLOForm(
+      makeFormData({ requirementValue: '5%', evaluateType: 'trend', selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' }, thresholdUnit: 's' })
+    );
+    expect(errors.requirementValue).toBeUndefined();
+  });
+
+  it('checks the default value too', () => {
+    const errors = validateSLOForm(
+      makeFormData({
+        selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' }, thresholdUnit: 's',
+        validateWithDefaultIfNoData: true,
+        validateWithDefaultIfNoDataValue: '1GB',
+      })
+    );
+    expect(errors.validateWithDefaultIfNoDataValue).toMatch(/can't be compared/);
+  });
+});
+
+describe('storedThresholdUnit (#719)', () => {
+  it.each([
+    [{ configuration: { yAxesFormat: 'percentunit' } }, 'percentunit'],
+    [{ configuration: { metricUnit: 'percentunit' } }, 'percentunit'],
+    [{ metric_unit: 'percentunit', configuration: {} }, 'percentunit'],
+    [{ metric_unit: 'percentunit', configuration: null }, 'percentunit'],
+    [{ configuration: { yAxesFormat: 's' }, metric_unit: 'percentunit' }, 's'],
+    // '%/h' is the trend label the API writes, never a unit, and is skipped per candidate: the
+    // chain used to return it whenever it came first, and a former trend edited as avg kept it.
+    [{ evaluate_type: 'trend', metric_unit: '%/h', configuration: { yAxesFormat: 'percentunit' } }, 'percentunit'],
+    [{ metric_unit: 'ms', configuration: { yAxesFormat: '%/h' } }, 'ms'],
+    [{ metric_unit: '%/h', configuration: {} }, undefined],
+    [{}, undefined],
+  ])('%j -> %p', (benchmark, expected) => {
+    expect(storedThresholdUnit(benchmark)).toBe(expected);
+  });
+
+  it.each([0.9, 0.95, 1, 0.07, 0.001, 1.5])('display -> save round-trips %p on a percentunit SLO', (stored) => {
+    const unit = storedThresholdUnit({ metric_unit: 'percentunit' });
+    expect(Number(toStoredThresholdValue(convertDecimalToPercentageForDisplay(stored, unit), unit))).toBe(stored);
+  });
+});
+
+// #721: Number() accepts hex, exponents and Infinity; a threshold is a plain decimal.
+describe('validateSLOForm accepts plain decimals only', () => {
+  it.each(['0x10', '1e3', 'Infinity', '1,5', '5 5'])('refuses %p', (requirementValue) => {
+    expect(validateSLOForm(makeFormData({ requirementValue })).requirementValue).toBe('Requirement value must be a valid number');
+  });
+
+  it.each(['5', '0.5', '.5', '-5', '500ms', '90%'])('accepts %p', (requirementValue) => {
+    expect(validateSLOForm(makeFormData({ requirementValue })).requirementValue).toBeUndefined();
+  });
+});
+
+// Value: protects=#719 under the one-unit model: a bare number the user typed while the field
+// had no unit is never scaled later; fails_when=adoptPanelUnit adopts percentunit over a typed
+// value, so "0.9" is saved as 0.009; why_new=the exception used to live in the save and compared
+// against the wrong record; seam=none; no_claim=the hook wiring (useEditSLOForm.thresholdUnit).
+describe('adoptPanelUnit', () => {
+  const record = { evaluate_type: 'avg', requirement_value: 0.9, configuration: {} };
+
+  it('does not adopt percentunit once the user has typed over the shown value', () => {
+    const prev = makeFormData({ requirementValue: '0.8' });
+    expect(adoptPanelUnit(prev, 'percentunit', record)).toBe(prev);
+  });
+
+  // Review finding: a suffix typed before the panel loaded blocked adoption, so "90%" was saved
+  // as 90 with no unit against 0-1 data. A suffix is unambiguous and converts under the unit.
+  it('adopts percentunit over a typed suffix and keeps the text', () => {
+    const next = adoptPanelUnit(makeFormData({ requirementValue: '90%' }), 'percentunit', record);
+    expect(next).toMatchObject({ thresholdUnit: 'percentunit', requirementValue: '90%' });
+    expect(toStoredThresholdValue(next.requirementValue, thresholdUnitFormat(next))).toBe('0.9');
+  });
+
+  it('re-shows the default value scaled too', () => {
+    const prev = makeFormData({ requirementValue: '0.9', validateWithDefaultIfNoDataValue: '0.5' });
+    const next = adoptPanelUnit(prev, 'percentunit', { ...record, configuration: { validateWithDefaultIfNoDataValue: 0.5 } });
+    expect(next).toMatchObject({ thresholdUnit: 'percentunit', requirementValue: '90', validateWithDefaultIfNoDataValue: '50' });
+  });
+
+  it('never replaces a unit the form already has', () => {
+    const prev = makeFormData({ thresholdUnit: 'ms' });
+    expect(adoptPanelUnit(prev, 's', record)).toBe(prev);
+  });
+
+  it.each([undefined, '', '%/h'])('ignores a live unit of %p', (live) => {
+    const prev = makeFormData();
+    expect(adoptPanelUnit(prev, live, record)).toBe(prev);
+  });
+});
+
+describe('thresholdUnitFormat reads thresholdUnit, not the panel', () => {
+  it('ignores the selected panel unit', () => {
+    expect(thresholdUnitFormat(makeFormData({ selectedPanel: { yAxesFormat: 's' }, thresholdUnit: 'ms' }))).toBe('ms');
+    expect(thresholdUnitFormat(makeFormData({ selectedPanel: { yAxesFormat: 's' } }))).toBeUndefined();
+  });
+
+  it('is no unit for a trend', () => {
+    expect(thresholdUnitFormat(makeFormData({ evaluateType: 'trend', thresholdUnit: 'ms' }))).toBeUndefined();
   });
 });

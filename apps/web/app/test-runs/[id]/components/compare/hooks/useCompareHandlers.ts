@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import type React from 'react';
 import {
@@ -16,7 +16,7 @@ import {
   buildAggregatedMetricName,
   isAllAggregatedDashboard,
 } from '@/lib/aggregated-perf-series';
-import { graphKeyOf } from '../utils/compare-utils';
+import { graphKeyOf, isControlGroupOption } from '../utils/compare-utils';
 import type { SeriesPick } from '../components/CompareSelectionPanel';
 
 interface UseCompareHandlersProps {
@@ -54,6 +54,11 @@ export function useCompareHandlers({
   setGraphData,
   setGraphLoading,
 }: UseCompareHandlersProps) {
+  // The baseline a graph answer belongs to. useCompareData closes every open graph when the
+  // baseline changes; an answer still in flight then must not write its data or reopen the row
+  // under the new baseline (it drew "Baseline (null)" after leaving the control group).
+  const baselineIdRef = useRef(selectedTestRun?.test_run_id);
+  baselineIdRef.current = selectedTestRun?.test_run_id;
 
   // Add the picked series to the comparison. The picks carry their own dashboard and panel,
   // so one click can add series from several panels across several dashboards.
@@ -112,30 +117,42 @@ export function useCompareHandlers({
   ]);
 
   // Fetch graph data for a specific row (dashboard+panel+metric).
-  const fetchGraphData = useCallback(async (row: { dashboardId: string; panelId: number; metricName: string }) => {
-    if (!selectedTestRun) return;
+  // Resolves true when the answer is still for the current baseline.
+  const fetchGraphData = useCallback(async (row: { dashboardId: string; panelId: number; metricName: string }): Promise<boolean> => {
+    if (!selectedTestRun) return false;
+    const startedFor = selectedTestRun.test_run_id;
+    const isCurrent = () => baselineIdRef.current === startedFor;
     const graphKey = graphKeyOf(row.dashboardId, row.panelId, row.metricName);
     setGraphLoading(prev => ({ ...prev, [graphKey]: true }));
 
     try {
       const params = new URLSearchParams({
         currentTestRunId: testRun?.test_run_id || testRunId,
-        baselineTestRunId: selectedTestRun.test_run_id,
         applicationDashboardId: row.dashboardId,
         panelId: row.panelId.toString(),
         metricName: row.metricName,
       });
+      // A control group has no time series of its own: ask for the current run alone, and the
+      // plot draws the group's pooled mean as a flat line (see ComparisonPlot).
+      if (!isControlGroupOption(selectedTestRun)) {
+        params.set('baselineTestRunId', selectedTestRun.test_run_id);
+      }
 
       const response = await authenticatedFetch(`/metrics/ds-metrics-comparison?${params.toString()}`);
+      if (!isCurrent()) return false;
       if (response.ok) {
         const data: GraphData = await response.json();
+        if (!isCurrent()) return false;
         setGraphData(prev => ({ ...prev, [graphKey]: data }));
       } else {
         showToast('Failed to load graph data');
       }
+      return true;
     } catch (error) {
+      if (!isCurrent()) return false;
       console.error('Error fetching graph data:', error);
       showToast('Error loading graph data');
+      return true;
     } finally {
       setGraphLoading(prev => ({ ...prev, [graphKey]: false }));
     }
@@ -145,9 +162,7 @@ export function useCompareHandlers({
   const toggleGraph = useCallback(async (row: { dashboardId: string; panelId: number; metricName: string }) => {
     const graphKey = graphKeyOf(row.dashboardId, row.panelId, row.metricName);
     const isCurrentlyShown = showGraphs[graphKey];
-    if (!isCurrentlyShown) {
-      await fetchGraphData(row);
-    }
+    if (!isCurrentlyShown && !(await fetchGraphData(row))) return; // baseline changed meanwhile
     setShowGraphs(prev => ({ ...prev, [graphKey]: !isCurrentlyShown }));
   }, [showGraphs, fetchGraphData, setShowGraphs]);
 

@@ -9,8 +9,7 @@ import {
   UseEditSLOHandlersProps,
   UseEditSLOHandlersReturn,
 } from '../types';
-import { validateSLOForm, isFormValid as checkFormValid, processPercentunitValue } from '../utils/slo-validators';
-import { getEffectiveUnitFormat } from '../utils/slo-formatters';
+import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue, thresholdUnitFormat } from '../utils/slo-validators';
 
 export function useEditSLOHandlers({
   benchmark,
@@ -96,15 +95,22 @@ export function useEditSLOHandlers({
       try {
         setSloFormLoading(true);
 
-        // Handle percentunit conversion - divide by 100 if panel uses percentunit format
-        // A trend threshold is %/h whatever the panel's unit, so the percentunit scaling must not touch it.
-        const effectiveUnitFormat = sloFormData.evaluateType === 'trend' ? undefined : getEffectiveUnitFormat(sloFormData.selectedPanel);
-        const processedRequirementValue = processPercentunitValue(sloFormData.requirementValue, effectiveUnitFormat);
+        // Convert into the form's one thresholdUnit: the unit the value was shown in, validated
+        // against and labelled with below (none for a trend, which is %/h). A bare number on a
+        // percentunit SLO was shown as 0-100 and is scaled back to 0-1; a typed suffix converts.
+        const unit = thresholdUnitFormat(sloFormData);
+        const processedRequirementValue = toStoredThresholdValue(
+          sloFormData.requirementValue,
+          unit,
+        );
 
         // Handle percentunit conversion for default value too
         let processedDefaultValue = sloFormData.validateWithDefaultIfNoDataValue;
         if (sloFormData.validateWithDefaultIfNoData) {
-          processedDefaultValue = processPercentunitValue(sloFormData.validateWithDefaultIfNoDataValue, effectiveUnitFormat);
+          processedDefaultValue = toStoredThresholdValue(
+            sloFormData.validateWithDefaultIfNoDataValue,
+            unit,
+          );
         }
 
         const payload = {
@@ -112,7 +118,9 @@ export function useEditSLOHandlers({
           testEnvironment: environment,
           workload: workload,
           source: sloFormData.source,
-          grafanaInstance: sloFormData.selectedDashboard?.grafanaInstance?.label || 'Default',
+          // Dashboard and Metric are locked in Edit, so the Grafana instance, config title and panel
+          // title are not sent: the API keeps the stored ones. Rebuilding them here overwrote the
+          // instance with 'Default' (the real dashboard row has no label) and prefixed the title (#720).
           dashboardLabel:
             sloFormData.source === 'dynatrace'
               ? sloFormData.selectedDashboard?.dashboardLabel || ''
@@ -128,14 +136,6 @@ export function useEditSLOHandlers({
             sloFormData.source === 'dynatrace'
               ? sloFormData.selectedPanel?.applicationDashboardId || benchmark.application_dashboard_id || ''
               : sloFormData.selectedDashboard?.id || '',
-          configTitle:
-            sloFormData.source === 'dynatrace'
-              ? `${sloFormData.selectedDashboard?.dashboardLabel || 'Dashboard'} - ${sloFormData.selectedPanel?.panelTitle || 'Metric'}`
-              : `${sloFormData.selectedDashboard?.dashboard_label || 'Dashboard'} - ${sloFormData.selectedPanel?.title || 'Metric'}`,
-          panelTitle:
-            sloFormData.source === 'dynatrace'
-              ? sloFormData.selectedPanel?.panelTitle || ''
-              : sloFormData.selectedPanel?.title || '',
           evaluateType: sloFormData.evaluateType,
           requirementOperator: sloFormData.requirementOperator,
           requirementValue: processedRequirementValue,
@@ -150,7 +150,9 @@ export function useEditSLOHandlers({
             dashboardUid: sloFormData.selectedDashboard?.dashboard_uid,
             // Grafana panels carry `id`, Dynatrace metrics `panelId` (see useAddSLOHandlers).
             id: sloFormData.selectedPanel?.id ?? sloFormData.selectedPanel?.panelId,
-            yAxesFormat: sloFormData.selectedPanel?.yAxesFormat || sloFormData.selectedPanel?.metricUnit || null,
+            // The same unit the value was converted into, a trend included: the API writes '%/h'
+            // into metric_unit for a trend and keeps this, so an edit back to avg finds it.
+            yAxesFormat: sloFormData.thresholdUnit || null,
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,
             matchPattern: sloFormData.matchPattern,

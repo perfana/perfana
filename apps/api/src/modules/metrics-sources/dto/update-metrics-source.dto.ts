@@ -62,11 +62,11 @@ export class UpdateMetricsSourceDto {
 
   @ApiPropertyOptional({ description: 'Organization ID' })
   @IsOptional()
-  @IsUUID()
+  @IsUUID('loose')
   organizationId?: string;
 
   @ApiPropertyOptional({ description: 'Team ID' })
   @IsOptional()
-  @IsUUID()
+  @IsUUID('loose')
   teamId?: string;
 }

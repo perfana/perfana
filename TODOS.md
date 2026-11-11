@@ -300,6 +300,26 @@ comments in 1799 and in "The consolidated schema's policy loops…" below that a
 
 ---
 
+## Profile SLOs
+
+### A retargeted profile SLO goes unevaluated until the next sweep (P3)
+
+**Origin:** v0.2.97.65, propagating profile SLO edits.
+
+A source, uid-pattern or workload-pattern change cannot be applied in place, because which
+dashboards a profile SLO covers is decided by grafana-sync's sweep. `ProfilesService` disables the
+provisioned rows (`metadata.autoDisabled`) and the sweep re-enables the still-matched ones when a
+run of that workload ends inside its 5-minute window — which can be after that run's
+`checks-evaluation`, so the first run after the change may carry no verdict for it. Two smaller
+residues: a re-enable refused by `uq_benchmarks_active_metric_target` is retried (and warned about)
+on every sweep while the row keeps its marker; and propagation is scoped to the profile's
+organization (an org admin's request must not write another tenant's rows), while provisioning
+matches profiles by name across organizations — so rows a profile provisioned into another
+organization's runs stay write-once. Fix the first by having the API enqueue a sweep for
+the affected workloads after commit (`runAfterRequestCommit`).
+
+---
+
 ## System under test deletion
 
 ### The dashboard delete still writes a non-segmentby `ds_metrics` predicate (P2)
@@ -413,36 +433,12 @@ for the chart tokens, with a drift spec that preflight runs (`chart-tokens.spec.
 drift spec asserting the two values still match. Low stakes on its own — a divergence shows up
 as the Graphs card and the report drawing slightly different margins, never as wrong data.
 
-### A typed graph title is overwritten whenever a series is added or removed
-
-**Priority:** P3
-**Origin:** found while adding Clear all to the Graphs card (v0.2.96.28+).
-
-`useGraphsData` has an effect that regenerates `chartName` from `addedSeries` on every
-change:
-
-```ts
-useEffect(() => {
-  setChartName(generateChartName(addedSeries));
-}, [addedSeries]);
-```
-
-The card's title is an editable `InputBase`, so a user can type a name — and then loses it
-the moment they add or remove one series. Clearing all series empties it entirely, which is
-how this surfaced. The auto-name is useful as a *default*; it should stop applying once the
-user has edited the field (track a `nameIsUserEdited` flag, or only generate while the name
-is still the previously generated one).
-
-Pinned as current behaviour in
-`__tests__/app/test-runs/graphs/useGraphsData.addSeries.test.ts` so a fix has to update
-that test deliberately.
-
-### The eight chart copy buttons have no end-to-end test
+### The six modebar copy buttons have no end-to-end test
 
 **Priority:** P3
 **Origin:** test-coverage and testing reviews of v0.2.96.27.
 
-`apps/web/lib/plotly.ts` is well covered, but the eight modebar adapters that call it are
+`apps/web/lib/plotly.ts` is well covered, but the six modebar adapters that call it are
 not: no test asserts the filename, the toast, or that the download fallback fires. jsdom
 has no CSP, so the original bug could not have been caught there either — this wants one
 representative integration test (`transaction-graph-modal/utils/chart-config.ts` has a
@@ -986,22 +982,21 @@ that is a delete+insert on a compressed chunk, not an in-place update.
 
 ---
 
-### Profile-provisioned SLOs are write-once and can miss a scenario dashboard created late
+### Profile-provisioned SLOs come back after a delete, and can miss a scenario dashboard created late
 
 **Priority:** P3
 **Origin:** red-team review on `feat/profile-perf-test-slos` (2026-09-22, v0.2.96.6). Both
 pre-existing for Grafana templates; a perf-test row fans out to N scenarios, so both now scale
-with scenario count.
-**Why:** (1) `createBenchmarkIfNotExists` only inserts; editing the profile benchmark never
-propagates to the rows it provisioned, `ProfilesService.deleteBenchmark` leaves them behind
-(`benchmarks.generic_check_id` has no FK), and a row deleted in the SUT SLO table is re-created
-within 2 min while any run of the workload is inside the auto-config window. (2) That window is
+with scenario count. Edits and deletes of the profile SLO itself propagate since v0.2.97.65.
+**Why:** (1) a row deleted in the SUT SLO table is re-created within 2 min while any run of the
+workload is inside the auto-config window (disabling it instead is the supported way out), and
+provisioned rows are not marked read-only in the SUT UI, so a person's edit silently takes the row
+out of profile propagation (`updated_by` is set). (2) That window is
 `end_time >= now - 5 min`; a scenario dashboard written only by the analyze full pass (SUT import,
 force re-fetch, a scenario first seen in the final tick) can land after the window closes when
 analyze parks behind `HeavyStageMutex`, so that SUT/env/workload has no SLO until a later run.
-**What:** (1) use the existing update branch of `insertBenchmarkBasedOnProfileBenchmark` when the
-profile row's `updated_at` is newer, cascade `deleteBenchmark` by `generic_check_id`, and mark
-provisioned rows read-only in the SUT UI. (2) also select runs whose `application_dashboards`
+**What:** (1) show provisioned rows as profile-owned in the SUT UI, and say there that an edit
+detaches the row from its profile. (2) also select runs whose `application_dashboards`
 rows were created in the last N minutes, or have `DashboardManager` enqueue auto-config after it
 creates a scenario dashboard.
 
@@ -2061,6 +2056,18 @@ expensive part (apps/worker/CLAUDE.md, "ADAPT's baseline depends on the `pct_agg
 
 ## SLO configuration
 
+### Perf-test panel units have no guard beyond the units table
+
+**What:** Add `count`, `threads` and `txn/s` to `apps/web/lib/units.ts`, and a drift test pinning `perfPanelUnitCode` against `METRIC_TYPE_PANEL_UNITS` in `apps/worker/src/constants/performance-metrics.ts`.
+
+**Why:** A unit code missing from the table converts nothing and rejects nothing, so `500ms` on Avg Active Threads is saved as 500. A new perf unit string added in the worker would reach `metric_unit` raw.
+
+**Context:** v0.2.97.58 started carrying these units onto perf-test panels. `unitLabel` returning `''` is what makes `convertThresholdToPanelUnit` pass the value through. Adding entries also gives those columns a unit in comparison tables, which `err/s` already does. `/metrics/ds-metrics/panels-by-dashboard` picks the unit with `MIN(s.unit)` across every run, so a legacy blank row hides the unit. That degrades safely, but taking the latest run's unit is more correct.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
 ### `PUT /benchmarks/:id` takes an untyped inline body, so nothing validates it
 
 **Priority:** P2
@@ -2541,11 +2548,12 @@ Wrapping the `cascade` prop in `useCallback` instead is the trap — its deps in
 invalidates would serve a stale dashboard list.
 
 
-### Nine Plotly call sites still resize on `window` only
+### Three Plotly call sites still resize on `window` only
 
 **Priority:** P3
 **Origin:** deliberate scope cut in v0.2.95.2 (`fix/plotly-hover-align-resize-observer`), which
-fixed the three anomaly-detection charts and left the rest.
+fixed the three anomaly-detection charts and left the rest. Six of the nine it left have moved
+over since.
 **Why:** `react-plotly.js` 2.6.0's `useResizeHandler` is a `window` resize listener and nothing
 else, so a chart whose *container* changes size without the window changing keeps Plotly's cached
 geometry. The visible symptom is a hover label whose text and background box drift apart — the text
@@ -2562,12 +2570,8 @@ site and the chart, so anywhere the chart is sized or positioned by the element 
 currently renders needs a look. Do them in small batches with a visual check, not as one sweep.
 (Chart export is unaffected — the modebar handler is handed the graph div by Plotly itself, see
 `apps/web/lib/plotly.ts`.)
-**Where:** `compare/components/ComparisonPlot.tsx`, `dynatrace/HostPerformanceGraphs.tsx`,
-`graphs/GraphsChart.tsx`, `performance-analysis/RequestTimeSeriesModal.tsx`,
-`performance-analysis/error-analysis/components/ErrorsOverTimeChart.tsx`,
-`performance-analysis/transaction-graph-modal/components/TransactionChart.tsx`,
-`service-level-objectives/AggregatedSloChart.tsx`,
-`service-level-objectives/SLOMetricsChart.tsx`, `trends/components/TrendsChart.tsx` — all under
+**Where:** `dynatrace/HostPerformanceGraphs.tsx`, `service-level-objectives/AggregatedSloChart.tsx`
+and `service-level-objectives/SLOMetricsChart.tsx`, all under
 `apps/web/app/test-runs/[id]/components/`.
 
 **Do not delete the `onEntered` resize kicks as part of this.** MUI clips a `Collapse` rather than
@@ -2611,6 +2615,10 @@ code: for each preset the caller does not own it calls `validateTestRunAccess` o
    starts `true` and is only reassigned inside those two `if` blocks, so such a row is pushed
    unchecked — visible across organizations. The SQL explicitly ORs
    `preset.createdForTestRunId IS NULL`, so that shape is reachable by design, not an edge case.
+   Since v0.2.97.51 a preset whose baseline is the `control-group` sentinel counts as carrying no
+   run id too (`baselineRunOf` returns undefined for it), so a global preset with that baseline and
+   no created-for run is the same shape. Only the API can create one; the web UI always sends a
+   created-for run. Found by the security review of PR #711; kept here rather than fixed there.
 2. **It is an N+1**: two access queries per preset per list, where the org filter could be one
    predicate. Invisible at 2 presets; not at 200.
 
@@ -2661,6 +2669,86 @@ scroll container, which may make the shared hook unnecessary; check before reach
 
 
 ## Reports
+
+### A control-group Comparisons section with no selection labels per-bucket percentiles as P90/P95 (P3)
+
+**Priority:** P3
+**Origin:** review of PR #711 (2026-11-08), control-group baseline.
+**Why:** With no dashboard selected, a performance-metrics section against the control group reads panel 101
+(Transaction RT Avg) from `ds_metric_statistics`, so its P90/P95 columns are percentiles of the per-bucket averages. The
+run-vs-run default computes the same headers with `PERCENTILE_CONT` over raw `transactions`. Switching a template from
+`previous` to `control-group` therefore lowers the CURRENT run's P90/P95 for the same run under identical headers. The avg
+column is unaffected. Reading raw percentiles for the group is not an option (it would scan every member run, and it is
+not what ADAPT compares), so the fix is a header or caption that says what the columns are on this path.
+Two more differences the red-team pass found: the statistics cover the analysis window only
+(`ramp_up = false`) where the run-vs-run default reads the full run, and the read keeps the
+`metrics_source_id IS NULL` arm, so a legacy or SUT-imported Grafana panel that happens to have id
+101 and no source would join the default. Options: read p90/p95/p99 from their own panels
+(102/103/104), restrict the control-group default to avg, or label the columns; and drop the NULL arm
+for the default.
+**Where:** `getControlGroupComparison` (`PERF_TXN_RT_AVG_PANEL_ID`) in `report-data-fetcher.service.ts`; the column
+headers in `comparisons-renderer.ts`.
+
+### Control-group baseline: deferred findings from the PR #711 review (P3)
+
+**Priority:** P3
+**Origin:** /ship review of PR #711 (2026-11-08): seven specialists plus a red-team pass. The real bugs
+were fixed in that PR; these were judged follow-ups.
+**Why / what, one line each:**
+1. **The Compare card counts baseline-less rows as "within range".** The report shows an empty state
+   when nothing pairs with the group; the card has no such rule, so a panel whose group statistics
+   are missing reads "N within range". `MetricsComparisonTable`'s band tally treats a null diff as ok.
+2. **ADAPT's sample floor is not applied.** ADAPT folds `ADAPT_MIN_SAMPLE_COUNT` (or a config's
+   `thresholds.minSampleCount`) into `control_exists`, so a 1-vs-1 artefact series is incomparable
+   there. The report and the card draw a regression band for it. Panels 301-303 need a floor of 1.
+3. **Membership and pooled statistics can describe different groups.** A re-evaluate rewrites
+   `ds_control_groups` before `control-group-statistics` runs (heavy stage, softFail, upsert with no
+   DELETE), and `delete-test-run`'s `updateControlGroup` deletes the group's statistics without
+   recomputing them. The heading names the current members beside numbers from another membership,
+   or none. Candidate: read only rows with `s.updated_at >= g.updated_at`.
+4. **Unscoped and fanned-out reads.** The report reads the group's whole `ds_control_group_statistics`
+   per section; the card sends one `/metrics/control-group-statistics` per panel, each re-authorizing
+   and re-resolving the group. Scope by `cur`'s dashboard and panel ids; add a batch endpoint.
+5. **Units.** The worker picks a control row's unit by `DISTINCT ON` order, not recency, and the card
+   does not rescale control values by unit while the report does.
+6. **Design polish.** The graph's series table shows equal min/mean/max for the flat mean line; an
+   empty "Control group" row and footer remain when there is no mean; the caption under the picker
+   lists up to five long run ids and repeats the run count; the field label still says "Select Test
+   Run"; the two pickers describe the control group in different words; `SavePresetModal`'s baseline
+   chip uses mode-blind `error.dark` (pre-existing styling).
+7. **Simplification (advisory).** `ParseUUIDPipe`/`ParseIntPipe` instead of the hand-rolled checks in
+   `getControlGroupStatistics`; `ControlGroupInfo` duplicates `ControlGroupSummary`;
+   `ControlGroupSqlRunner` duplicates `series-grouping/run-scope.ts`'s `SqlRunner`;
+   `getControlGroupComparison` re-implements the run-vs-run selection helpers.
+8. **The card's CURRENT side still lets the metrics source win.** v0.2.97.52 made the control side
+   AND the dashboard and source ids, but `findDSMetricStatisticsMultiple` (shared with run-vs-run
+   and Trends) still takes the source alone, and the card pairs by series name on a response that
+   carries no dashboard id. On a source shared by two dashboards the current value can be the other
+   dashboard's. Predates the control group; fix on the shared read and check Trends.
+9. **A partly paired report section still counts never-compared rows as "within range".** The
+   empty-state rule covers a section where NOTHING pairs; beside pooled series, every URL or "All
+   aggregated" row (and in run-vs-run, every series missing from the baseline run) is rank 0 and
+   lands in the ok tally and its filter chip. Needs a "not compared" band in the renderer, which
+   touches the CSS-only filter contract (see "The Comparisons groups and filters run with no script"
+   in `apps/api/CLAUDE.md`).
+10. **Failures read as facts.** `getControlGroupForRun` maps a database error to "no control group
+    yet" in a stored report; the web caches a failed `fetchControlGroup` as "no group" for the
+    session, and maps a 4xx/5xx statistics answer to "not pooled".
+11. **A zero baseline reads as "within range".** `percentDiff` returns null for a 0 baseline, so a
+    healthy group's 0% error rate against 5% now is neutral. Pre-existing, but common in this mode.
+12. **The sentinel is not reserved.** A run whose id is literally `control-group` (or `previous`,
+    `previous-successful`) would be read as the sentinel. Reserve the names at ingestion.
+
+### Two Compare-card wirings for the control group have no test
+
+**Priority:** P3
+**Origin:** review of PR #711 (2026-11-08).
+**Why:** Both were checked by hand in the running app, and nothing pins them. `CompareCard` hands `useComparePresets`
+`compareData.baselineOptions` rather than `relatedTestRuns`; revert that and a preset saved against the control group
+silently stops restoring its baseline (series load, card renders nothing). `MetricsComparisonTable` passes
+`{ mean: row.byColumn.avg?.selected_value }` to `ComparisonPlot`; mis-key it and the flat mean line disappears. The
+existing tests feed the hook and the plot hand-built props, so neither revert fails a test. Needs a render of each
+parent, not of the child.
 
 ### A late template load in the settings dialog can overwrite a different template
 
@@ -4178,7 +4266,313 @@ were used). Each is correct code without a test; mutations noted survive today.
 **Where:** `.../hooks/__tests__/usePerformanceAnalysisData.test.ts`,
 `apps/web/__tests__/app/test-runs/performance-analysis/PerformanceAnalysisCard.test.tsx`.
 
+## Compare-config templates
+
+Design: `docs/design/2026-11-08-compare-config-templates-design.md` (ADAPT templates in the UI with
+a YAML round trip). Both items came out of its eng review (D13, D15).
+
+### Release provisioned compare-config templates to the UI (P3)
+
+**What:** A global-admin action on the ADAPT templates tab that clears `read_only` on chosen
+provisioned template rows, so they become UI-editable instead of being deleted.
+
+**Why:** Once templates are provisioned from `template_ds_compare_configs.yaml` they are locked in
+the UI. A customer who stops using provisioning has one exit: commit `items: []`, which prunes every
+provisioned template, then re-create each one by hand. A missing file is "no opinion" and changes
+nothing, so simply removing the file leaves them locked forever.
+
+**Pros:** Leaving provisioning keeps the templates and the rows they own. Small: one action, a
+confirmation and an audit entry.
+
+**Cons:** One more admin control to explain, and a released row reappearing in a later file is taken
+over again, which has to be said in the confirmation.
+
+**Context:** Prune and takeover are keyed on `read_only` (design §3). Releasing a row is
+`read_only = false` plus `updated_by` set to the admin; the next boot then treats it as a UI row,
+and a file that declares its key takes it over again. Nobody has asked for this yet; build it when
+the first customer leaves provisioning.
+
+**Effort:** S (human ~3h / CC ~20min)
+**Priority:** P3
+**Depends on:** nothing since v0.2.97.55, which shipped the ADAPT templates page
+(`/settings/profiles/adapt-templates`) and the `/compare-templates` API. The action belongs in its
+table, beside the lock.
+
+### Retire `POST /test-runs/:testRunId/classify-metric` and its system-scoped template rows (P3)
+
+**What:** Remove the classify-metric endpoint (`test-runs-analysis.controller.ts:370`,
+`TestRunsMetricsService.classifyMetric`) and decide whether to delete the rows it wrote into
+`provisioned_template_ds_compare_configs` (those with `system_under_test_id` set).
+
+**Why:** It is a second writer to the template table. Its rows are read by nothing found on
+2026-11-08: the golden-path applier reads only `system_under_test_id IS NULL`, and no `apps/web`
+code calls the endpoint. Every new template path has to fence those rows off with the same filter.
+
+**Pros:** One writer to the table; the `system_under_test_id IS NULL` fence becomes belt and braces
+rather than load-bearing.
+
+**Cons:** An external script or CI step may call the endpoint; removal breaks it. The rows'
+fate (delete or keep) is a data decision.
+
+**Context:** Before removing, check API access logs or customer CI configs for callers, and check
+`apps/mcp` (its `helpers.ts` `classifyMetric` is an unrelated local function, not a caller). The
+compare-config templates design keeps every PR 1 and PR 2 path scoped to
+`system_under_test_id IS NULL`, so nothing there depends on this cleanup.
+
+**Effort:** S (human ~2h / CC ~15min, plus the caller check)
+**Priority:** P3
+**Depends on:** None (independent of the design's PRs).
+
+### Measure, then index, the stale trigger a template re-merge fires (P2)
+
+**What:** Read the golden-path summary line (`rewrote=<rows> in <ms>ms`) on a production install after
+a template edit. If the time is material, add a partial index on
+`ds_adapt_results (application_dashboard_id, panel_id) WHERE is_stale = false` (1814/1822's plpgsql
+`lock_timeout` retry), or move the applier out of the completion request into the first stage of the
+analyze job ahead of `adapt-analysis`.
+
+**Why:** Each row the re-merge rewrites fires `trigger_mark_stale_on_config_update`, whose `UPDATE`
+reaches `ds_adapt_results` only through the single-column `idx_ds_adapt_results_app_dashboard`, so it
+visits the dashboard's results across every run and workload. Before v0.2.97.54 the trigger fired at
+most once per row ever; now one edit to a wildcard or regex template rewrites every row it owns on each
+workload's next completion, inside the CI's completion request with its RLS transaction open.
+Raised by the performance review (2026-11-08); unmeasured because the dev database is small.
+
+**Context:** `EXPLAIN (ANALYZE, BUFFERS)` the trigger's `UPDATE` on the largest dashboard first.
+The second rewrite of an already-stale panel is cheap once the partial index exists.
+
+**Depends on:** a production template edit to measure against. The /ship adversarial review
+(2026-11-08) adds a reason to move it out of the request: a CI client that times out on completion
+retries `completed=true` and starts a second applier. That is safe since v0.2.97.54 (writes are
+conditional on the author read, a 23505 insert is skipped), but it doubles the work.
+
+### Derive a real base for rows the pre-1822 applier inserted (P3)
+
+**What:** In a migration, set `template_base` for `ds_compare_config` rows with
+`created_by = updated_by = 'system:golden-path' AND template_base IS NULL`: their `config_data` with
+`metricClassification` reset to `{classification: 'none', higherIsBetter: null}`,
+`thresholds.absoluteThreshold` set to null, and `ignore` / `ignoreMeanDiffSmallerThan` removed.
+
+**Why:** Today such a row takes its current, already-merged config as its base on its first re-merge
+after the upgrade, so the old template's values are baked in and removing the template never strips
+them. For rows the old applier INSERTED (64 of 80 golden-path rows on the dev database) the true base
+is derivable, because the old insert wrote only those fields over fixed defaults. Merged rows keep
+the current behaviour; their seeded original is gone. Raised by the data-migration review (2026-11-08).
+
+**Context:** Do not use `INSERT_BASE` as-is: it would drop later non-template edits such as migration
+1806's `minSampleCount`. And keep v0.2.97.54's rule: a pre-1822 row whose template would change it is
+left alone, because before v0.2.95.42 a hand edit kept `updated_by = 'system:golden-path'`. A derived
+base is safe only for a row whose `config_data` equals what the old insert would have written.
+
+**Depends on:** nothing.
+
+### An empty template file prunes every provisioned template (P3)
+
+**What:** Refuse to prune more than a set share of provisioned templates in one boot unless the file
+says so explicitly (for example `pruneAll: true`), and log what was held back.
+
+**Why:** `items: []` is deliberately "declared empty" and prunes everything, which a spec pins. But a
+Helm default or an empty ConfigMap produces exactly that file, and the consequence is wide: on each
+workload's next completion every template-owned row reverts to its base, and restoring the file
+recreates the templates under new ids, so every row is rewritten again. Raised by the /ship
+adversarial review (2026-11-08). Worse since v0.2.97.57: rows the applier inserted are now DELETED when
+no template wins them, so an accidental `items: []` also removes those rows at each workload's next
+completion, marks that panel's ADAPT history stale and moves the panels to ADAPT's default aggregation
+(median). Restoring the file re-inserts them on the next completion.
+
+**Depends on:** nothing.
+
+### Stale flags from the applier's row removal are never cleared (P3)
+
+**What:** Clear (or re-key) `ds_adapt_results.is_stale` when a removed compare-config row is
+re-inserted, or stop marking metric-level-governed series stale when a panel-level row is removed.
+
+**Why:** Removing a panel-level row marks every metric of that panel stale in every historical run of the
+workload (the trigger's own predicate), and re-inserting it on the next tagged run marks nothing and
+un-stales nothing (`trigger_mark_stale_on_config_update` is AFTER UPDATE only). A workload whose runs
+alternate tags accumulates stale flags on runs nobody re-analyses; `auto_mark_fresh_on_analysis` clears a
+run's flags when it is re-analysed and its results change. No verdict reads the flag, but users see it:
+`test-runs-anomaly.service.ts` counts it into the anomaly card's "N outdated results" badge and returns
+the stale row's compare config, so those runs show a re-analyse prompt that a re-analyse may not need.
+Raised by the /ship adversarial review of PR #716.
+
+**Effort:** S **Priority:** P3 **Depends on:** nothing.
+
+### The applier's one-failure bound on stale marking: three gaps (P3)
+
+**What:** In `applyGoldenPathClassifications` (`test-runs-metrics.service.ts`), `staleMarkingFailed`
+stops the hand-written `UPDATE ds_adapt_results` after the first failure in a pass. Three gaps remain:
+(1) it does not cover the stale marking `trigger_mark_stale_on_config_update` does inside each rebuild
+`updateRow`, which runs in the same request and is unbounded per row; (2) any error sets the flag,
+including a one-off that a retry would clear, so one transient failure leaves every later removal in
+the pass unmarked (counted as `staleUnmarked`, never retried); (3) the spec for the bound checks that one
+UPDATE is issued and the error is logged, but not the `staleUnmarked` count in the summary line.
+
+**Why:** The bound was added to keep a slow or locked `ds_adapt_results` from stalling a completion request
+once per removed row. Gap 1 is the same cost on the rebuild path; gap 2 trades accuracy of the
+re-analyse badge for that bound; gap 3 means the summary count can regress unnoticed. Raised by the
+/ship adversarial review of PR #716, after the fix cycles the user authorized.
+
+**Effort:** S **Priority:** P3 **Depends on:** nothing.
+
+### A profile created without an organization lands in the Default Organization for its admins (P3)
+
+**What:** Prefer a non-default organization in `resolveCreateOrganization`'s sorted fallback, or require
+`organizationId` when the caller administers more than one organization.
+
+**Why:** The fallback sorts the caller's organizations for determinism, and the seeded Default
+Organization (`00000000-0000-0000-0000-000000000001`) sorts first, so an API or CLI caller who omits
+`organizationId` and administers it always creates the profile there. The web sends the selected
+organization, so only direct API callers hit it. Raised by the /ship adversarial review of PR #716.
+
+**Effort:** XS **Priority:** P3 **Depends on:** nothing.
+
+### Runs closed by stale detection never run the golden-path applier (P3)
+
+**What:** Call `applyGoldenPathClassifications` from `TestRunsStaleDetectionService` before it enqueues
+the analysis, the way `TestRunsMutationService` does on `completed=true`.
+
+**Why:** A run whose client never posts completion is closed by stale detection
+(`triggerAnalysisForStaleRun`), which only enqueues analysis. Such a workload never gets template
+inserts, and since v0.2.97.54 never gets template edits either. Pre-existing for inserts. Raised by the
+/ship adversarial review (2026-11-08).
+
+**Depends on:** nothing.
+
+### A wildcard `panelId` template reaches panels with that number on every dashboard (P3)
+
+**What:** For a template with `panelId` and no `dashboardUid`, apply it only on dashboards that
+actually carry that panel (`ds_panels`, or the perf-test panel list for perf-test dashboards).
+
+**Why:** Grafana panel ids are per dashboard, so `panelId: 105` meant for the perf-test Transaction
+Error Rate panel also classifies, direction included, Grafana panel 105 on any large dashboard of the
+system. Pre-existing; the re-merge now re-asserts it on every completion. Raised by the /ship
+adversarial review (2026-11-08).
+
+**Depends on:** nothing.
+
+### The template parser accepts values the insert rejects (P3)
+
+**What:** Bound `panelId` to the int4 range and `dashboardUid`, `metricName` and `dashboardLabel` to
+255 characters and `panelTitle` to 500 in `parseTemplateItem`.
+
+**Why:** Such a value passes parsing, fails the INSERT, counts as a write failure, and so suppresses
+the prune on every boot until the file is fixed. Failing the item at parse time keeps its key known and
+lets the prune run. The failure is safe today, just noisy. Raised by the /ship adversarial review
+(2026-11-08).
+
+**Depends on:** nothing.
+
+### Judge a run on the profile templates its own tags chose (P2)
+
+**What:** Record the profiles a completing run matched, and have analyze and re-evaluate re-apply the
+golden path for that run's tags under the `sut:env:workload` scope lock before ADAPT reads the config.
+
+**Why:** Profile templates are chosen by the completing run's tags but stored per workload in
+`ds_compare_config`, and ADAPT reads them when the run's analysis starts (`CompareConfigCache`), which
+can wait as Queued behind `HeavyStageMutex`. A differently tagged completion of the same workload in
+between, or a re-evaluate of an older run, judges that run on the other set. Before v0.2.97.57 the set
+changed only when a template was edited, so ordering did not matter. Raised by the /ship red-team
+review of PR #716 (2026-11-09); documented as a caveat in the reference page and apps/api/CLAUDE.md.
+
+**Effort:** M (human ~2d / CC ~1h) **Priority:** P2 **Depends on:** nothing.
+
+
+### Profile dashboards resolve a Grafana instance by label across organizations (P2)
+
+**What:** Scope the `grafanaInstanceRepo` lookups by label in `ProfilesService.createDashboard`,
+`updateDashboard` and `findDashboardsByProfileId` to the profile's organization.
+
+**Why:** `grafana_instances.label` has no unique constraint and duplicate labels across organizations are
+required (root CLAUDE.md, "The first-row class"), so these `findOne`/`find` by label can match another
+tenant's instance: an org admin who guesses a dashboard uid and label can validate against it and read
+its name and tags back. Left out of the v0.2.97.57 profile-scoping fix because it assumes a profile's
+organization always equals its Grafana instance's, which was not verified against provisioned data; if
+that is wrong, scoping breaks dashboard creation. grafana-sync already resolves the label in the run's
+organization (`dashboard-finder.service.ts`). Also: profile names are unique install-wide, so create and
+rename answer "already exists" for a name another tenant holds (a schema change, since
+`profile_grafana_dashboards.profile` is keyed on the name).
+
+**Effort:** S (human ~4h / CC ~25min) **Priority:** P2 **Depends on:** confirming profile org = instance org.
+
+### ADAPT templates: label profile copy targets with their organization (P3)
+
+**What:** In the panel's Copy dialog, show `Profile jvm · Acme` and list the template's own organization's
+profiles first, as organization targets already name their organization.
+
+**Why:** `fetchProfiles()` is unfiltered, so a global admin sees every profile on the install and a member
+of several organizations all of theirs; copying to "Profile jvm" gives no hint which tenant receives the
+template. Raised by the /ship red-team review of PR #716.
+
+**Effort:** S (human ~2h / CC ~15min) **Priority:** P3 **Depends on:** nothing.
+
+### ADAPT templates tab polish and a component test for the panel (P3)
+
+**What:** From the /ship design review of PR #716, left out as polish: the panel's nested Card inside the
+tab Card (two borders), its Add button on the right while the sibling tabs lead with theirs on the left,
+its own filled Snackbar beside the page's standard one, the empty state's `<h6>` and "in this scope" copy,
+a first-load error with no Retry and an empty Card under it, the read-only view drawn as a disabled form
+(about 2.7:1), the profile badge above the tab copy repeating what the page already says, the long
+delete-confirmation sentence, the tab label's casing ("ADAPT templates" beside Title Case siblings), the
+hard-coded gradient on the page's other Add buttons, and `GET /profiles` fetched on every panel mount for
+copy targets alone. Also the one coverage gap the /ship audit left: `AdaptTemplatesPanel`'s save, copy,
+delete and load-error handlers have no component test (they moved out of the page untested).
+
+**Effort:** S (human ~1d / CC ~45min) **Priority:** P3 **Depends on:** nothing.
+
+### No CHECK keeps `profile_id` NULL on system-scoped template rows (P3)
+
+**What:** Add `CHECK (system_under_test_id IS NULL OR profile_id IS NULL)` to
+`provisioned_template_ds_compare_configs`, beside 1822's `ck_..._panel`.
+
+**Why:** Only system-scoped rows travel in a SUT bundle (`bySut`), and no writer sets `profile_id` on them
+today, but nothing enforces it: a system-scoped row carrying a `profile_id` would FK-fail (23503) and abort
+an import into an environment without that profile. Raised by the /ship data-migration review of PR #716.
+
+**Effort:** XS **Priority:** P3 **Depends on:** a new migration.
+
 ## Completed
+
+- **Implement `defaultValueIfControlGroupMissing` in ADAPT, the anomaly card and the template dialog** — **Completed:** v0.2.97.66 (2026-11-10).
+  A series with no baseline row is judged against the configured value instead of reading `incomparable`,
+  only when the config holds an explicit number; absent or `null` is off. A baseline row with too few
+  samples stays `incomparable`, and the IQR check is invalid against a constant. The three writers that
+  stored `0` by default no longer do, and migration 1824 strips the stored 0s. The anomaly card's settings
+  have the field, the template dialog no longer files it under "not yet read", and the anomaly table and
+  the report's Regressions section mark a control value that was configured.
+
+- **Remove `ignoreMeanDiffSmallerThan` from compare-config templates** — **Completed:** v0.2.97.64 (2026-11-10).
+  ADAPT never read it and `absThreshold` covers it (product owner, 2026-11-10). The template codec, the
+  applier and the template dialog no longer carry it; a file item that still names it is provisioned with
+  a warning pointing at `absThreshold`, and the API refuses it in a body. `defaultValueIfControlGroupMissing`,
+  filed with it in the same P3, is now its own P1 above.
+
+- **A completion call that omits tags wipes the run's tags, and now its profile templates** — **Completed:** v0.2.97.63 (2026-11-10).
+  An update that leaves `tags` out keeps the stored ones (`TestRunsMutationService` passes it through as
+  omitted, `UpdateTestRunHandler` falls back to the row's tags); an explicit `[]` still clears them. A create
+  still starts with none.
+
+- **Strict `@IsUUID()` refuses the Default Organization in six more DTOs** — **Completed:** v0.2.97.63 (2026-11-10).
+  Every organization and team id validated with the strict default is `@IsUUID('loose')`: the six the item
+  named plus `CreateSystemUnderTestDto`, found by sweeping the API for the same shape.
+  `src/common/validation/default-organization-uuid.spec.ts` pins all of them.
+
+- **`profiles.yaml` upserts a profile by name across organizations** — **Completed:** v0.2.97.62 (2026-11-10).
+  `provisionProfiles` refuses a same-name profile in another organization than the file's instead of
+  moving it, and the refused name is skipped by the dashboard, SLO and template files for the rest of the
+  boot. Keying profiles on organization plus name was not done: `profiles.name` stays install-wide unique.
+  A file without `organizationId` still takes a profile over by name, leaving its organization alone.
+
+- **The Edit SLO dialog decides its unit in more than one place** — **Completed:** v0.2.97.60 (2026-11-09).
+  Edit holds one `thresholdUnit`, set from the record at open, from the live panel only when the
+  record has none, and from the picked metric in Duplicate. Display, validation, conversion and the
+  saved `configuration.yAxesFormat` all read it. See apps/web/CLAUDE.md, "A perf-test panel's unit
+  arrives as a display string, and the SLO dialogs store codes".
+
+- **Delete an applier-inserted row when its template is gone** — **Completed:** v0.2.97.57 (2026-11-09).
+  A row the golden path inserted (`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`) that
+  no template wins any more is deleted and its ADAPT results marked stale, so ADAPT's own default applies
+  again. Raised to a merge blocker by the /ship adversarial review: profile tags made it normal operation.
 
 ### A landed card-link could not be recovered after a tab switch, and its key omitted the run
 

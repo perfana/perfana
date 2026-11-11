@@ -669,6 +669,66 @@ describe('AutoConfigUpdatesService', () => {
         expect(createArg).not.toHaveProperty('organization_id');
       });
 
+      it("writes a dynatrace-hosts profile SLO as an ordinary Dynatrace SLO on the host's own panel", async () => {
+        const profileBenchmark: any = {
+          id: 'pb-dt',
+          source: 'dynatrace-hosts',
+          dashboard_uid: '^dynatrace-dynatrace-host-metrics-',
+          panel_id: 1, // synthetic profile id, not the host's panel
+          panel_title: 'CPU Usage',
+          panel_type: 'dynatrace',
+          metric_unit: 'percent',
+          requirement_operator: 'lt',
+          requirement_value: 80,
+          tags: [],
+          metadata: {},
+          read_only: false,
+        };
+        const testRun: any = {
+          testRunId: 'test-1',
+          systemUnderTest: { name: 'shop' },
+          testEnvironment: 'acc',
+          workload: 'load',
+          organizationId: 'org-1',
+        };
+        const applicationDashboard = {
+          id: 'ad-host-a',
+          dashboardLabel: 'Dynatrace host metrics host-a',
+          dashboardUid: 'dynatrace-dynatrace-host-metrics-host-a',
+        } as any;
+
+        systemUnderTestRepo.findOne.mockResolvedValue({ id: 'sut-1' });
+        benchmarkRepo.create.mockReturnValue({});
+        benchmarkRepo.save.mockResolvedValue({ id: 'b-1' });
+
+        await service.insertBenchmarkBasedOnProfileBenchmark(
+          profileBenchmark,
+          testRun,
+          applicationDashboard,
+          {
+            panelId: 41234,
+            panelTitle: 'CPU Usage',
+          },
+        );
+
+        expect(benchmarkRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            source: 'dynatrace',
+            grafana_instance: 'Dynatrace',
+            application_dashboard_id: 'ad-host-a',
+            generic_check_id: 'pb-dt',
+            panel_title: 'CPU Usage',
+            configuration: expect.objectContaining({
+              id: '41234',
+              type: 'dynatrace',
+              // The hand-made shape the SUT edit dialog splits on ' - '.
+              title: 'Dynatrace host metrics host-a - CPU Usage',
+              yAxesFormat: 'percent',
+            }),
+          }),
+        );
+      });
+
       it('should handle grafana instance from applicationDashboard object', async () => {
         // Arrange
         const mockSut = { id: 'sut-1' };
@@ -805,6 +865,44 @@ describe('AutoConfigUpdatesService', () => {
           wasCreated: false,
           skippedDuplicateTarget: true,
         });
+      });
+
+      it('re-enables a row the system switched off and drops only its marker', async () => {
+        systemUnderTestRepo.findOne.mockResolvedValue({ id: 'sut-1', name: 'my-app' });
+        benchmarkRepo.findOne.mockResolvedValue({
+          id: 'existing-1',
+          enabled: false,
+          metadata: { autoDisabled: 'profile-slo-retargeted', keep: 1 },
+        });
+        benchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+        const result = await service.insertBenchmarkBasedOnProfileBenchmark(
+          {
+            id: 'pb-1',
+            source: 'jmeter',
+            panel_id: 7,
+            panel_title: 'Throughput',
+            requirement_value: 5,
+            tags: [],
+          } as any,
+          {
+            testRunId: 't',
+            systemUnderTest: { name: 'my-app' },
+            testEnvironment: 'e',
+            workload: 'w',
+          } as any,
+          { id: 'ad-1', dashboardLabel: 'L', dashboardUid: 'u' } as any,
+        );
+
+        expect(result.wasCreated).toBe(false);
+        expect(benchmarkRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: 'existing-1',
+            enabled: true,
+            requirement_value: 5,
+            metadata: { keep: 1 },
+          }),
+        );
       });
 
       it('should rethrow a save failure that is not the duplicate-SLO-target constraint', async () => {

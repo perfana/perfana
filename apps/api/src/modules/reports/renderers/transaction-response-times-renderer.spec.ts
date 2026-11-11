@@ -73,6 +73,74 @@ describe('TransactionResponseTimesRenderer', () => {
     dataFetcher = module.get(ReportDataFetcherService);
   });
 
+  describe('response times chart: buckets with no samples', () => {
+    const series = (name: string, values: Array<number | null>) =>
+      values.flatMap((value, i) => (value === null
+        ? []
+        : [{
+            transaction_name: name,
+            time_bucket: `2025-06-01T10:0${i}:00Z`,
+            avg_response_time: String(value),
+          }]));
+    const chartOf = (timeSeries: unknown[]) => renderer.renderResponseTimesChart(makeScenarioData({ timeSeries } as Partial<ScenarioData>));
+    // The transactions are drawn in order, each as one <g> holding its path and its markers.
+    const groupOf = (html: string, index: number) => html.split(/<g\b/).slice(1)[index]!;
+    const yOf = (group: string) => [...group.matchAll(/<circle [^>]*cy="([^"]+)"/g)].map((m) => Number(m[1]));
+
+    // REGRESSION GUARD. A missing bucket was drawn as 0 ms, so a transaction whose last sample
+    // landed just before the run's final bucket appeared to collapse to zero at the end.
+    it('should not draw a missing trailing bucket at zero', () => {
+      const html = chartOf([...series('Login', [100, 200, 300]), ...series('Search', [100, 200, null])]);
+      const login = groupOf(html, 0);
+      const search = groupOf(html, 1);
+
+      expect(yOf(login)).toHaveLength(3);
+      expect(yOf(search)).toHaveLength(2);
+      expect(search.match(/ L /g)).toHaveLength(1);
+      // The real values still land where the complete series puts them.
+      expect(yOf(search)).toEqual(yOf(login).slice(0, 2));
+    });
+
+    it('should lift the pen across a gap rather than bridge it', () => {
+      const html = chartOf([...series('Login', [100, 200, 300, 400]), ...series('Search', [100, null, 300, 400])]);
+      const path = /<path d="([^"]+)"/.exec(groupOf(html, 1))![1]!;
+
+      expect(path.match(/M /g)).toHaveLength(2);
+      expect(path.match(/L /g)).toHaveLength(1);
+    });
+
+    it('should draw a transaction with no samples at all as nothing', () => {
+      const html = chartOf(series('Login', [100, 200, 300]));
+      const search = groupOf(html, 1);
+
+      expect(search).toContain('<path d=""');
+      expect(search).not.toContain('<circle');
+    });
+
+    it('should keep a measured zero', () => {
+      const html = chartOf([...series('Login', [100, 200]), ...series('Search', [0, 200])]);
+
+      expect(yOf(groupOf(html, 1))).toHaveLength(2);
+    });
+
+    it('should treat an unparseable average as a gap, not a zero', () => {
+      const html = chartOf([
+        ...series('Login', [100, 200]),
+        ...series('Search', [100]),
+        { transaction_name: 'Search', time_bucket: '2025-06-01T10:01:00Z', avg_response_time: null },
+      ]);
+
+      expect(yOf(groupOf(html, 1))).toHaveLength(1);
+    });
+
+    it('should place a single bucket on the chart instead of at x = NaN', () => {
+      const html = chartOf(series('Login', [100]));
+
+      expect(html).not.toContain('NaN');
+      expect(yOf(groupOf(html, 0))).toHaveLength(1);
+    });
+  });
+
   describe('section header', () => {
     it('should render with default title and shared header pattern', async () => {
       const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());

@@ -86,6 +86,11 @@
       "development": "./src/utils/index.ts",
       "default": "./dist/utils/index.js"
     },
+    "./utils/profile-match": {
+      "types": "./dist/utils/profile-match.d.ts",
+      "development": "./src/utils/profile-match.ts",
+      "default": "./dist/utils/profile-match.js"
+    },
     "./security": {
       "types": "./dist/security/index.d.ts",
       "development": "./src/security/index.ts",

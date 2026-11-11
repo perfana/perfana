@@ -278,11 +278,12 @@ export class TrackedResultsSQLBuilder {
    * Build WITH dynamic_statistics CTE
    */
   private buildWithDynamicStatisticsCTE(): string {
+    const fragments = new AdaptSQLFragments();
     return `-- Re-run full ADAPT analysis (same as processAdaptResults CTEs)
       with_dynamic_statistics AS (
           SELECT
               wcc.*,
-              ${new AdaptSQLFragments().buildControlExistsColumn()},
+              ${fragments.buildControlExistsColumn()},
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -297,7 +298,7 @@ export class TrackedResultsSQLBuilder {
                   WHEN 'q99' THEN wcc.test_q99 WHEN 'p99' THEN wcc.test_q99
                   ELSE wcc.test_median
               END as test_stat_value,
-              CASE (wcc.compare_config->'thresholds'->>'aggregation')
+              ${fragments.wrapControlStatValue(`CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.control_mean
                   WHEN 'median' THEN wcc.control_median
                   WHEN 'min' THEN wcc.control_min
@@ -310,7 +311,8 @@ export class TrackedResultsSQLBuilder {
                   WHEN 'q95' THEN wcc.control_q95 WHEN 'p95' THEN wcc.control_q95
                   WHEN 'q99' THEN wcc.control_q99 WHEN 'p99' THEN wcc.control_q99
                   ELSE wcc.control_median
-              END as control_stat_value
+              END`)},
+              ${fragments.buildDefaultValueColumns()}
           FROM with_compare_config wcc
       )`;
   }
@@ -465,8 +467,7 @@ export class TrackedResultsSQLBuilder {
           jsonb_build_object('test', test_all_missing, 'control', control_all_missing) as all_missing,
           jsonb_build_object('test', test_last, 'control', control_last) as last_value,
           jsonb_build_object('test', NOT COALESCE(test_all_missing, true), 'control', NOT COALESCE(control_all_missing, true)) as exists_flags,
-          false as uses_default_value,
-          NULL as default_value,
+          ${new AdaptSQLFragments().buildStoredDefaultValueColumns()},
           compare_config,
           compare_config->'metricClassification' as metric_classification,
           statistic,

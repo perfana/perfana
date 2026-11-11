@@ -14,8 +14,10 @@ import {
   UseEditSLOFormReturn,
   initialSLOFormData,
 } from '../types';
-import { SUPPORTED_PANEL_TYPES, convertDecimalToPercentageForDisplay } from '../utils/slo-validators';
+import { SUPPORTED_PANEL_TYPES, adoptPanelUnit, convertDecimalToPercentageForDisplay, storedThresholdUnit, thresholdUnitFormat } from '../utils/slo-validators';
+import { getEffectiveUnitFormat } from '../utils/slo-formatters';
 import { isPerformanceTest } from '@/lib/metrics-source-utils';
+import { perfPanelUnitCode } from '@/lib/units';
 
 export function useEditSLOForm({
   open,
@@ -152,6 +154,7 @@ export function useEditSLOForm({
           id: row.panel_id,
           title: row.panel_title,
           type: 'timeseries',
+          yAxesFormat: perfPanelUnitCode(row.unit),
         }));
         setAvailablePanels(panels);
       } else {
@@ -173,11 +176,10 @@ export function useEditSLOForm({
       // here, a duplicate-target 409 raised on one SLO is still on screen when the user
       // reopens Edit on a different one.
       setValidationErrors({});
-      // Handle percentunit conversion for display - convert decimal back to percentage
-      // A trend threshold is stored as typed (%/h), never percentunit-scaled.
-      const effectiveUnitFormat = benchmark.evaluate_type === 'trend'
-        ? undefined
-        : benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit;
+      // The record's unit is the form's one thresholdUnit (see SLOFormData). A percentunit
+      // decimal is shown as a percentage; a trend's %/h number is shown as stored.
+      const thresholdUnit = storedThresholdUnit(benchmark);
+      const effectiveUnitFormat = thresholdUnitFormat({ thresholdUnit, evaluateType: benchmark.evaluate_type || 'avg' });
       const displayRequirementValue = convertDecimalToPercentageForDisplay(
         benchmark.requirement_value,
         effectiveUnitFormat
@@ -223,8 +225,7 @@ export function useEditSLOForm({
             id: rawPanelId != null ? Number(rawPanelId) : undefined,
             title: panelTitle,
             type: 'timeseries',
-            yAxesFormat: benchmark.configuration?.yAxesFormat,
-            metricUnit: benchmark.configuration?.metricUnit || benchmark.metric_unit,
+            yAxesFormat: thresholdUnit,
           };
 
       setSloFormData({
@@ -242,6 +243,7 @@ export function useEditSLOForm({
         validateWithDefaultIfNoData: benchmark.configuration?.validateWithDefaultIfNoData || false,
         validateWithDefaultIfNoDataValue: displayDefaultValue,
         enabled: benchmark.enabled !== false,
+        thresholdUnit,
       });
 
       // Also fetch real dashboards in background — if a match is found, it will
@@ -360,7 +362,11 @@ export function useEditSLOForm({
       if (matchingMetric) {
         // Only upgrade the synthetic panel. After the user re-points the dashboard the
         // panel is null on purpose, and the benchmark's old title must not re-select one.
-        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: matchingMetric } : prev));
+        // The metric's unit is adopted only when the record had none: an unmatched or unit-less
+        // metric must never take the record's unit away (1s was once saved as 1 ms that way).
+        setSloFormData((prev) => (prev.selectedPanel
+          ? adoptPanelUnit({ ...prev, selectedPanel: matchingMetric }, getEffectiveUnitFormat(matchingMetric), benchmark)
+          : prev));
       }
     }
   }, [availableDynatraceMetrics, benchmark]);
@@ -373,8 +379,11 @@ export function useEditSLOForm({
       let matchingPanel: unknown = null;
 
       // 1. Try to match by panel ID from configuration (most reliable)
-      if (benchmark.configuration?.panelId) {
-        const panelId = benchmark.configuration.panelId;
+      // The Add dialog stores the id as `configuration.id`, not `panelId`. Without it every
+      // UI-created SLO fell to title and fuzzy matching, and the matched panel's unit is now
+      // what the save converts against and stores.
+      const panelId = benchmark.configuration?.panelId ?? benchmark.configuration?.id;
+      if (panelId != null && panelId !== '') {
         matchingPanel = availablePanels.find((panel) => {
           const p = panel as GrafanaPanel;
           // Handle both string and number panel IDs
@@ -415,7 +424,13 @@ export function useEditSLOForm({
       if (matchingPanel) {
         // Only upgrade the synthetic panel. After the user re-points the dashboard the
         // panel is null on purpose, and the benchmark's old title must not re-select one.
-        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: matchingPanel } : prev));
+        // The panel's unit is adopted only when the record had none (adoptPanelUnit).
+        // Only the benchmark's own panel is upgraded: in Duplicate a late fetch for the original
+        // dashboard must not swap back a panel the user picked, which carries its own unit.
+        const panel = matchingPanel as SLOFormData['selectedPanel'];
+        setSloFormData((prev) => (prev.selectedPanel && (prev.selectedPanel.id == null || panelId == null || String(prev.selectedPanel.id) === String(panelId))
+          ? adoptPanelUnit({ ...prev, selectedPanel: panel }, getEffectiveUnitFormat(panel), benchmark)
+          : prev));
       }
     }
   }, [availablePanels, benchmark]);

@@ -17,6 +17,7 @@ import {
   createProfileDashboard,
   updateProfileDashboard,
   deleteProfileDashboard,
+  createProfile,
   type Profile,
   type ProfileDashboard,
   type CreateProfileDashboardData,
@@ -211,6 +212,38 @@ describe('Profiles API Client', () => {
 
       // Act & Assert
       await expect(fetchProfileDashboards(profileId)).rejects.toThrow('Database error');
+    });
+  });
+
+  describe('createProfile()', () => {
+    const created: Profile = {
+      id: 'profile-new',
+      name: 'jvm',
+      dashboardCount: 0,
+      sloCount: 0,
+      deepLinksCount: 0,
+      createdAt: '2025-01-11T00:00:00Z',
+      updatedAt: '2025-01-11T00:00:00Z',
+    };
+
+    // The organization decides which runs the profile's ADAPT templates reach, so it must reach the API.
+    it('sends the organization it is given in the request body', async () => {
+      mockAuthenticatedFetch.mockResolvedValue({ ok: true, json: async () => created } as Response);
+
+      await createProfile({ name: 'jvm', organizationId: 'org-uuid-1' });
+
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith('/profiles', expect.objectContaining({ method: 'POST' }));
+      const body = JSON.parse(mockAuthenticatedFetch.mock.calls[0]![1]!.body as string);
+      expect(body).toEqual({ name: 'jvm', organizationId: 'org-uuid-1' });
+    });
+
+    it('omits organizationId when none is given, leaving the pick to the API', async () => {
+      mockAuthenticatedFetch.mockResolvedValue({ ok: true, json: async () => created } as Response);
+
+      await createProfile({ name: 'jvm', organizationId: undefined });
+
+      const body = JSON.parse(mockAuthenticatedFetch.mock.calls[0]![1]!.body as string);
+      expect(body).not.toHaveProperty('organizationId');
     });
   });
 

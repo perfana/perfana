@@ -24,6 +24,7 @@ import {
   type ResolvedSeries,
   type SeriesGroup,
 } from './series-group-resolver';
+import { loadControlGroupForRun, loadControlGroupStatistics } from './control-group-baseline';
 
 /**
  * A zoom window on a panel's data. Narrowing the query is what buys resolution back: the
@@ -74,6 +75,34 @@ export interface ControlGroupTrendResult {
   conclusion_label: string;
   version: string | null;
   annotations: string | null;
+}
+
+/**
+ * `GET /metrics/control-group/:testRunId` — the runs the Compare card offers as "Control
+ * group". snake_case like the rest of this controller's answers.
+ */
+export interface ControlGroupResult {
+  control_group_id: string;
+  test_runs: string[];
+  n_test_runs: number;
+  first_datetime: string | null;
+  last_datetime: string | null;
+}
+
+/**
+ * `GET /metrics/control-group-statistics/:testRunId` — one series' pooled statistics over the
+ * control group, keyed like `MetricStatisticResult.statistics` (`avg`, `q90`, …) so the
+ * Compare card reads both sides of a row with the same code.
+ */
+export interface ControlGroupStatisticResult {
+  control_group_id: string;
+  application_dashboard_id: string;
+  panel_id: number;
+  panel_title: string;
+  metric_name: string;
+  unit: string | null;
+  metrics_source_id: string | null;
+  statistics: Record<string, number | null>;
 }
 
 /** What a group-aware read hands `buildSeriesRelation`. */
@@ -965,6 +994,72 @@ export class MetricsService {
     };
 
     return statisticMapping[evaluateType] || 'mean';
+  }
+
+  /**
+   * The control group behind a run's anomaly detection, or null when it has none (a first run,
+   * or ADAPT has not built one yet) or the caller cannot see the run.
+   */
+  async findControlGroup(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<ControlGroupResult | null> {
+    if (!(await this.validateTestRunAccess(testRunId, userId, roles))) return null;
+    const group = await loadControlGroupForRun(this.controlGroupsRepo, testRunId);
+    if (!group) return null;
+    return {
+      control_group_id: group.id,
+      test_runs: group.testRuns,
+      n_test_runs: group.nTestRuns,
+      first_datetime: group.firstDatetime,
+      last_datetime: group.lastDatetime,
+    };
+  }
+
+  /**
+   * A panel's statistics over the run's control group — the "control" side the
+   * anomaly-detection card compares against, offered as a baseline by the Compare card.
+   *
+   * Only the series ADAPT pooled are here: the synthetic "All aggregated" series and the URL
+   * panels have no `ds_control_group_statistics` rows, so a caller gets nothing for them and
+   * must show them without a baseline rather than inventing one.
+   */
+  async findControlGroupStatistics(
+    testRunId: string,
+    panelId: number,
+    applicationDashboardId: string | undefined,
+    userId: string = '',
+    roles: string[] = [],
+    metricsSourceId?: string,
+  ): Promise<ControlGroupStatisticResult[]> {
+    if (!(await this.validateTestRunAccess(testRunId, userId, roles))) return [];
+    const group = await loadControlGroupForRun(this.controlGroupsRepo, testRunId);
+    if (!group) return [];
+    const rows = await loadControlGroupStatistics(this.controlGroupsRepo, group.id, {
+      applicationDashboardId,
+      metricsSourceId,
+      panelId,
+    });
+    return rows.map((r) => ({
+      control_group_id: group.id,
+      application_dashboard_id: r.application_dashboard_id,
+      panel_id: r.panel_id,
+      panel_title: r.panel_title || `Panel ${panelId}`,
+      metric_name: r.metric_name ?? '',
+      unit: r.unit || null,
+      metrics_source_id: r.metrics_source_id ?? null,
+      statistics: {
+        avg: r.mean ?? null,
+        min: r.min_value ?? null,
+        max: r.max_value ?? null,
+        q50: r.median ?? null,
+        q90: r.q90 ?? null,
+        q95: r.q95 ?? null,
+        q99: r.q99 ?? null,
+        count: r.count ?? null,
+      },
+    }));
   }
 
   async findControlGroupTrends(

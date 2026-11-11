@@ -67,7 +67,8 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
         completed: data.abort === true ? true : data.completed,
         ciBuildResultsUrl: data.ciBuildResultsUrl || '',
         annotations: data.annotations || [],
-        tags: data.tags || [],
+        // Omitted keeps the stored tags (see TestRunsMutationService); an explicit [] clears them.
+        tags: data.tags ?? before?.tags ?? [],
         variables: data.variables,
         endTime: data.endTime || new Date(),
         updatedBy: data.updatedBy,

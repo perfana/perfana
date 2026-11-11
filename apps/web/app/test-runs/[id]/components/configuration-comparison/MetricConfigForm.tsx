@@ -18,7 +18,10 @@ import {
   Grid
 } from '@mui/material';
 import {} from '@/lib/api';
+import { AGGREGATION_OPTIONS, CLASSIFICATION_OPTIONS } from '@/lib/compare-config-options';
 import type { ConfigScope } from '../anomaly-detection/types';
+import { PromoteTemplateDialog } from './PromoteTemplateDialog';
+import type { PromotedConfig } from './promote-template';
 
 export interface MetricConfigData {
   rowKey: string;
@@ -30,6 +33,11 @@ export interface MetricConfigData {
   panelTitle: string;
   metricName: string | null;
   dashboardLabel: string;
+  /** The row's dashboard uid (from its ADAPT result); without it a template can only match by panel title. */
+  dashboardUid?: string | null;
+  /** The run's organization and tags: they decide which profiles "Save as template" offers. */
+  organizationId?: string | null;
+  runTags?: string[];
   currentConfig?: {
     ignore?: boolean;
     metricClassification?: {
@@ -42,6 +50,8 @@ export interface MetricConfigData {
       iqrThreshold: number | null;
       absoluteThreshold: number | null;
     };
+    /** Absent or null: off, the series reads incomparable when the baseline has no row for it. */
+    defaultValueIfControlGroupMissing?: number | null;
     configSource?: string;
   };
 }
@@ -61,45 +71,25 @@ interface MetricConfigFormProps {
         iqrThreshold: number | null;
         absoluteThreshold: number | null;
       };
+      defaultValueIfControlGroupMissing: number | null;
     },
     scope: ConfigScope
   ) => Promise<void>;
   onCancel: () => void;
+  /** Shows "Save as template" when given; called with a confirmation once one is created. */
+  onTemplateSaved?: (message: string) => void;
 }
 
-const classificationOptions = [
-  { value: 'unclassified', label: 'Unclassified' },
-  { value: 'RED_duration', label: 'RED Duration' },
-  { value: 'RED_rate', label: 'RED Rate' },
-  { value: 'RED_errors', label: 'RED Errors' },
-  { value: 'USE_saturation', label: 'USE Saturation' },
-  { value: 'USE_utilization', label: 'USE Utilization' },
-  { value: 'USE_errors', label: 'USE Errors' },
-  { value: 'business_metric', label: 'Business Metric' },
-  { value: 'infrastructure_metric', label: 'Infrastructure Metric' },
-  { value: 'application_metric', label: 'Application Metric' },
-  { value: 'custom', label: 'Custom' },
-];
-
-const aggregationOptions = [
-  { value: 'mean', label: 'Mean' },
-  { value: 'median', label: 'Median' },
-  { value: 'min', label: 'Minimum' },
-  { value: 'max', label: 'Maximum' },
-  { value: 'last', label: 'Last Value' },
-  { value: 'q10', label: '10th Percentile' },
-  { value: 'q25', label: '25th Percentile' },
-  { value: 'q75', label: '75th Percentile' },
-  { value: 'q90', label: '90th Percentile' },
-  { value: 'q95', label: '95th Percentile' },
-  { value: 'q99', label: '99th Percentile' },
-];
+// Shared with the ADAPT template dialog (settings/profiles/adapt-templates), so both offer one list.
+const classificationOptions = CLASSIFICATION_OPTIONS;
+const aggregationOptions = AGGREGATION_OPTIONS;
 
 
 export default function MetricConfigForm({
   configData,
   onSave,
   onCancel,
+  onTemplateSaved,
 }: MetricConfigFormProps) {
   // Form state - determine scope based on existing config source or metricName availability
   const [scope, setScope] = useState<ConfigScope>(() => {
@@ -116,6 +106,8 @@ export default function MetricConfigForm({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The form values "Save as template" was opened with; null while its dialog is closed.
+  const [promoting, setPromoting] = useState<PromotedConfig | null>(null);
 
   // Ignore toggle state
   const [ignore, setIgnore] = useState<boolean>(false);
@@ -129,6 +121,8 @@ export default function MetricConfigForm({
   const [percentageThreshold, setPercentageThreshold] = useState<string>('');
   const [iqrThreshold, setIqrThreshold] = useState<string>('');
   const [absoluteThreshold, setAbsoluteThreshold] = useState<string>('');
+  // Text, so an empty field means "off" and a typed 0 means "compare against 0".
+  const [defaultValue, setDefaultValue] = useState<string>('');
 
   // Initialize form state from current config
   useEffect(() => {
@@ -159,6 +153,8 @@ export default function MetricConfigForm({
       setPercentageThreshold(config.thresholds?.percentageThreshold?.toString() || '');
       setIqrThreshold(config.thresholds?.iqrThreshold?.toString() || '');
       setAbsoluteThreshold(config.thresholds?.absoluteThreshold?.toString() || '');
+      const storedDefault = configData.currentConfig?.defaultValueIfControlGroupMissing;
+      setDefaultValue(typeof storedDefault === 'number' ? String(storedDefault) : '');
 
 
       // Determine scope based on existing config source or metric availability
@@ -175,23 +171,54 @@ export default function MetricConfigForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configData?.rowKey]);
 
+  /** The form's values, or null (with the error shown) when the no-baseline value is not a number. */
+  const readValues = (): PromotedConfig | null => {
+    const trimmedDefault = defaultValue.trim();
+    const parsedDefault = trimmedDefault === '' ? null : Number(trimmedDefault);
+    if (parsedDefault !== null && !Number.isFinite(parsedDefault)) {
+      setError('The value to compare against without a baseline must be a number, or empty to leave it off.');
+      return null;
+    }
+    return {
+      ignore,
+      classification,
+      higherIsBetter,
+      aggregation,
+      percentageThreshold: percentageThreshold ? parseFloat(percentageThreshold) : null,
+      iqrThreshold: iqrThreshold ? parseFloat(iqrThreshold) : null,
+      absoluteThreshold: absoluteThreshold ? parseFloat(absoluteThreshold) : null,
+      defaultValueIfControlGroupMissing: parsedDefault,
+    };
+  };
+
+  const handlePromote = () => {
+    const values = readValues();
+    if (!values) return;
+    setError(null);
+    setPromoting(values);
+  };
+
   const handleSave = async () => {
+    const values = readValues();
+    if (!values) return;
+
     setSaving(true);
     setError(null);
 
     try {
       const config = {
-        ignore,
+        ignore: values.ignore,
         metricClassification: {
-          classification,
-          higherIsBetter,
+          classification: values.classification,
+          higherIsBetter: values.higherIsBetter,
         },
         thresholds: {
-          aggregation,
-          percentageThreshold: percentageThreshold ? parseFloat(percentageThreshold) : null,
-          iqrThreshold: iqrThreshold ? parseFloat(iqrThreshold) : null,
-          absoluteThreshold: absoluteThreshold ? parseFloat(absoluteThreshold) : null,
+          aggregation: values.aggregation,
+          percentageThreshold: values.percentageThreshold,
+          iqrThreshold: values.iqrThreshold,
+          absoluteThreshold: values.absoluteThreshold,
         },
+        defaultValueIfControlGroupMissing: values.defaultValueIfControlGroupMissing,
       };
 
       await onSave(configData?.rowKey || '', config, scope);
@@ -416,8 +443,42 @@ export default function MetricConfigForm({
         </Grid>
       </Paper>
 
+      {/* No baseline */}
+      <Paper sx={{ p: 2 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+          When the baseline has no data
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          A series with no data in any baseline run is reported as incomparable. Enter a value to compare it
+          against instead, for example 0 for an error count that should stay at zero. The thresholds above
+          apply, except the IQR threshold, which needs a baseline. A baseline with too few samples is still
+          reported as incomparable.
+        </Typography>
+        <TextField
+          label="Compare against"
+          type="number"
+          size="small"
+          value={defaultValue}
+          onChange={(e) => setDefaultValue(e.target.value)}
+          placeholder="Off"
+          helperText="Leave empty to report incomparable"
+          sx={{ maxWidth: 260 }}
+        />
+      </Paper>
+
       {/* Action Buttons */}
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', pt: 1 }}>
+        {onTemplateSaved && (
+          <Button
+            variant="text"
+            onClick={handlePromote}
+            disabled={saving}
+            sx={{ mr: 'auto' }}
+            title="Make these settings a template for other workloads; this row is not changed"
+          >
+            Save as template
+          </Button>
+        )}
         <Button
           variant="outlined"
           onClick={onCancel}
@@ -434,6 +495,27 @@ export default function MetricConfigForm({
           {saving ? 'Saving...' : 'Save Configuration'}
         </Button>
       </Box>
+
+      {onTemplateSaved && promoting && (
+        <PromoteTemplateDialog
+          open
+          source={{
+            dashboardUid: configData.dashboardUid,
+            dashboardLabel: configData.dashboardLabel,
+            panelId: configData.panelId,
+            panelTitle: configData.panelTitle,
+            metricName: configData.metricName,
+          }}
+          config={promoting}
+          formScope={scope}
+          run={{ organizationId: configData.organizationId, tags: configData.runTags }}
+          onClose={() => setPromoting(null)}
+          onSaved={(label) => {
+            setPromoting(null);
+            onTemplateSaved(`Saved as an ADAPT template in ${label}. It applies from the next completed run.`);
+          }}
+        />
+      )}
     </Box>
   );
 }

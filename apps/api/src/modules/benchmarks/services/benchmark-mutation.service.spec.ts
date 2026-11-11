@@ -8,7 +8,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Repository } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { BenchmarkMutationService } from './benchmark-mutation.service';
 import { BenchmarkQueryService } from './benchmark-query.service';
 import { BenchmarkTagHelper } from './benchmark-tag.helper';
@@ -86,9 +86,9 @@ describe('BenchmarkMutationService', () => {
         {
           provide: BenchmarkTagHelper,
           useValue: {
-            inheritTagsFromDashboard: jest.fn().mockResolvedValue([]),
+            findInScope: jest.fn().mockResolvedValue(null),
+            inheritTagsFromDashboard: jest.fn().mockReturnValue([]),
             getInheritedTagsForUpdate: jest.fn().mockResolvedValue([]),
-            metricsSourceIdOf: jest.fn().mockResolvedValue('ms-new'),
           },
         },
         {
@@ -123,12 +123,15 @@ describe('BenchmarkMutationService', () => {
     jest.clearAllMocks();
   });
 
+  const findInScope = () => (service as unknown as { tagHelper: { findInScope: jest.Mock } }).tagHelper.findInScope;
+
   describe('update() re-pointing the dashboard', () => {
     it('moves application_dashboard_id and metrics_source_id together', async () => {
       const before = buildEntity({ id: 'bm-1', application_dashboard_id: 'ad-old', metrics_source_id: 'ms-old' });
       queryService.findOne.mockResolvedValue(before as never);
       benchmarkRepo.findOne.mockResolvedValue(before);
       benchmarkRepo.update.mockResolvedValue({} as never);
+      findInScope().mockResolvedValueOnce({ id: 'ad-new', metricsSourceId: 'ms-new' });
 
       await service.update('bm-1', userId, roles, { applicationDashboardId: 'ad-new' });
 
@@ -149,6 +152,60 @@ describe('BenchmarkMutationService', () => {
       const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
       expect(data).not.toHaveProperty('application_dashboard_id');
       expect(data).not.toHaveProperty('metrics_source_id');
+    });
+  });
+
+  // #720: the web form has no instance label for a dashboard picked from the list and sent
+  // 'Default' for every new SLO; the dashboard row knows its instance.
+  describe('grafana_instance comes from the dashboard', () => {
+    const base = { systemUnderTestId: 'sut-1', testEnvironment: 'production', workload: 'loadTest', evaluateType: 'avg' };
+
+    beforeEach(() => {
+      const created = buildEntity({ id: 'bm-gi' });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+    });
+
+    it('create() stores the dashboard instance label instead of the posted Default', async () => {
+      findInScope().mockResolvedValueOnce({ id: 'ad-1', grafanaInstance: { label: 'Demo' } });
+
+      await service.create(userId, roles, { ...base, applicationDashboardId: 'ad-1', grafanaInstance: 'Default' } as never);
+
+      expect(findInScope()).toHaveBeenCalledWith('ad-1', { systemUnderTestId: 'sut-1', testEnvironment: 'production' });
+      expect((benchmarkRepo.create as jest.Mock).mock.calls[0][0]).toMatchObject({ grafana_instance: 'Demo' });
+    });
+
+    it('create() keeps the posted value when the dashboard has no Grafana instance (Dynatrace, perf metrics)', async () => {
+      findInScope().mockResolvedValueOnce({ id: 'ad-dt', grafanaInstance: null });
+
+      await service.create(userId, roles, { ...base, applicationDashboardId: 'ad-dt', grafanaInstance: 'Dynatrace' } as never);
+
+      expect((benchmarkRepo.create as jest.Mock).mock.calls[0][0]).toMatchObject({ grafana_instance: 'Dynatrace' });
+    });
+
+    it('update() re-pointing the dashboard moves the instance label with it', async () => {
+      const before = buildEntity({ id: 'bm-1', application_dashboard_id: 'ad-old', grafana_instance: 'Old' });
+      queryService.findOne.mockResolvedValue(before as never);
+      benchmarkRepo.findOne.mockResolvedValue(before);
+      benchmarkRepo.update.mockResolvedValue({} as never);
+      findInScope().mockResolvedValueOnce({ id: 'ad-new', grafanaInstance: { label: 'Demo' } });
+
+      await service.update('bm-1', userId, roles, { applicationDashboardId: 'ad-new' });
+
+      expect((benchmarkRepo.update as jest.Mock).mock.calls[0][1]).toMatchObject({ grafana_instance: 'Demo' });
+    });
+
+    it('update() without grafanaInstance in the body leaves the stored label alone', async () => {
+      const before = buildEntity({ id: 'bm-1', application_dashboard_id: 'ad-1', grafana_instance: 'Demo' });
+      queryService.findOne.mockResolvedValue(before as never);
+      benchmarkRepo.findOne.mockResolvedValue(before);
+      benchmarkRepo.update.mockResolvedValue({} as never);
+
+      await service.update('bm-1', userId, roles, { applicationDashboardId: 'ad-1', requirementValue: 1 });
+
+      const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
+      expect(data).not.toHaveProperty('grafana_instance');
+      expect(data).not.toHaveProperty('config_title');
     });
   });
 
@@ -430,6 +487,36 @@ describe('BenchmarkMutationService', () => {
 
       const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
       expect(data).not.toHaveProperty('enabled');
+    });
+  });
+
+  // #717: the web form posted "500ms"; Number() made it NaN and Postgres numeric stored it.
+  describe('requirementValue must be finite', () => {
+    const base = { systemUnderTestId: 'sut-1', testEnvironment: 'production', workload: 'loadTest', evaluateType: 'avg' };
+
+    it.each(['500ms', '0.5s', 'abc', '', NaN, Infinity])('create() refuses %p with 400 and writes nothing', async (value) => {
+      await expect(service.create(userId, roles, { ...base, requirementValue: value } as never)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(benchmarkRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('update() refuses "500ms" with 400 and writes nothing', async () => {
+      await expect(service.update('bm-x', userId, roles, { requirementValue: '500ms' } as never)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(benchmarkRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('create() still accepts a numeric string', async () => {
+      const created = buildEntity({ id: 'bm-num' });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+
+      await service.create(userId, roles, { ...base, requirementValue: '0.5' } as never);
+
+      const [payload] = (benchmarkRepo.create as jest.Mock).mock.calls[0];
+      expect(payload).toMatchObject({ requirement_value: 0.5 });
     });
   });
 

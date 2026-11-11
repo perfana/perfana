@@ -474,23 +474,26 @@ export function derivedSeriesConfigRows(rows: readonly MembershipRow[]): Derived
  *
  * `TestRunsMetricsService.applyGoldenPathClassifications` decides "a machine seeded this row" as
  * `updated_by === 'worker-pipeline'` OR (`!updated_by` AND `config_data.source` is the Dynatrace
- * marker). Unstamped, these rows read as a USER EDIT — and that method puts every existing config
- * row's `dashboard|panel` into `existingPanels` and skips a panel-level golden-path template whose
- * panel is in that set. So the first grouped analysis of a workload made every panel-level
- * golden-path template on that panel read as already-configured, permanently, with nothing logged
- * beyond `0 compare configs created`.
+ * marker). Unstamped, these rows read as a USER EDIT, which the applier never touches. What the stamp
+ * buys today: a metric-level template naming a derived series merges into this row instead of
+ * skipping it as hand-edited.
  *
- * The consequence was the exact inverse of what this write exists to prevent: with the template
- * never applied, the panel's own series — including the PRIMARY grouped series `api` — fall back to
- * `DEFAULT_COMPARE_CONFIG`, whose `higherIsBetter` is null, so a genuine regression on `api` lands
- * in `difference_count` and that panel can never flip the run to REGRESSION. It also outlived the
- * feature, since deleting the rule does not delete these rows.
+ * Before v0.2.97.44 the stamp also decided something worse. The applier then put every existing
+ * row's `dashboard|panel` into an `existingPanels` set and skipped any panel-level template whose
+ * panel was in it, so the first grouped analysis of a workload made every panel-level golden-path
+ * template on that panel read as already-configured, permanently, with nothing logged beyond
+ * `0 compare configs created`. With the template never applied, the panel's own series — including
+ * the PRIMARY grouped series `api` — fell back to `DEFAULT_COMPARE_CONFIG`, whose `higherIsBetter`
+ * is null, so a genuine regression on `api` landed in `difference_count` and that panel could never
+ * flip the run to REGRESSION. It also outlived the feature, since deleting the rule does not delete
+ * these rows.
  *
  * Why this bit here and not the two sibling machine writers: `PerformanceTestMetricsPipeline` and
- * the Dynatrace host mapping both write PANEL-level rows, which `workerSeeded` can key on and merge
- * into. This is the first metric-level machine writer, and `workerSeeded`'s key is
- * `dashboard|panel|metric`, so a panel-level template can never match one — which is why the API
- * side also has to exclude these rows from `existingPanels` rather than relying on the stamp alone.
+ * the Dynatrace host mapping both write PANEL-level rows, which a panel-level template merges into.
+ * This is the first metric-level machine writer. The applier now keys every row on
+ * `dashboard|panel|metric` and a template reaches only rows of its own `metric_name` (v0.2.97.44,
+ * kept by the v0.2.97.54 re-merge), so a panel-level template neither merges into one of these rows
+ * nor reads it as "the panel is already configured".
  *
  * The actor is a local constant in the same style as `dashboard-manager.ts` and
  * `dynatrace-dashboard-manager.ts`, and like both of those it is **bound as a parameter** rather

@@ -428,6 +428,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Busts the cached apt layer in openssl-patch so each release gets the current libssl3.
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
 
   snyk-monitor:
     name: Snyk Monitor (images + app deps)

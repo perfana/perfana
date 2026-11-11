@@ -85,6 +85,21 @@ describe('REPORT_DETAILS_CSS', () => {
       styling: Record<string, unknown>,
     ) => string).call({ utils: new ReportUtilsService() }, '<section></section>', { type: 'comparisons' }, {});
 
+  it('gives the section preview the Header section cover and summary styles too', () => {
+    // The Header markup has no inline styles, so without these its preview, under a banner saying
+    // "exact HTML", was a stack of plain lines.
+    const html = preview();
+    for (const rule of ['.cover-page {', '.cover-page h3 {', '.cover-info-card {', '.info-grid {', '.annotations-box {']) {
+      expect(html).toContain(rule);
+      expect(compile()).toContain(rule);
+    }
+    // Those read these variables, which the preview did not define.
+    for (const variable of ['--bg-card', '--bg-color', '--text-color']) {
+      expect(html).toContain(`${variable}:`);
+    }
+    expect(html).toContain('section:has(> .info-grid) > h2');
+  });
+
   it('reaches the section preview too, which renders the same groups', () => {
     expect(preview()).toContain('.report-group > summary::before');
   });

@@ -6,7 +6,7 @@ import { GraphPresetsAPI, GraphPreset } from '@/lib/graph-presets';
 import { fetchGrafanaDashboardByUid } from '@/lib/grafana-dashboards';
 import { GraphPresetFormData } from '../SaveGraphPresetModal';
 import { SeriesConfig, MetricDataPoint } from '../types';
-import { convertToSeriesConfigDto, convertFromAPISeriesConfig, extractYAxisFormat } from '../utils';
+import { convertToSeriesConfigDto, convertFromAPISeriesConfig, extractYAxisFormat, generateChartName } from '../utils';
 import { TestRun } from '@/types/test-runs';
 
 interface UseGraphsPresetsProps {
@@ -17,6 +17,10 @@ interface UseGraphsPresetsProps {
   /** Overlay / split, saved into the preset's `chartOptions`. */
   axisMode: 'overlay' | 'split';
   setAxisMode: (mode: 'overlay' | 'split') => void;
+  /** The title on screen, saved into `chartOptions` beside the axis mode. */
+  chartName: string;
+  /** `null` hands the title back to the series. */
+  setChartName: (name: string | null) => void;
   setAddedSeries: (series: SeriesConfig[] | ((prev: SeriesConfig[]) => SeriesConfig[])) => void;
   setSeriesData: (data: Map<string, MetricDataPoint[]> | ((prev: Map<string, MetricDataPoint[]>) => Map<string, MetricDataPoint[]>)) => void;
   setChartDataLoading: (loading: boolean) => void;
@@ -30,6 +34,8 @@ export function useGraphsPresets({
   addedSeries,
   axisMode,
   setAxisMode,
+  chartName,
+  setChartName,
   setAddedSeries,
   setSeriesData,
   setChartDataLoading,
@@ -132,6 +138,13 @@ export function useGraphsPresets({
       setAddedSeries(enrichedSeries);
       // Absent on presets saved before the standard: overlay is what they were drawn as.
       setAxisMode(preset.chartOptions?.axisMode === 'split' ? 'split' : 'overlay');
+      // A preset saved before the title was stored has only its name, which the save dialog
+      // defaults to the title on screen. `chartOptions` is unvalidated and global presets are
+      // shared, hence the typeof. A title that is just the composed default keeps following
+      // the series, so adding one to a loaded preset does not leave it describing the old set.
+      const storedTitle = preset.chartOptions?.title;
+      const title = typeof storedTitle === 'string' ? storedTitle : preset.name;
+      setChartName(title === generateChartName(enrichedSeries) ? null : title);
 
       // Fetch data for all series
       setChartDataLoading(true);
@@ -152,7 +165,7 @@ export function useGraphsPresets({
     } finally {
       setChartDataLoading(false);
     }
-  }, [enrichSeriesWithFormat, setAddedSeries, setAxisMode, setChartDataLoading, fetchSeriesData, setSeriesData, showToast]);
+  }, [enrichSeriesWithFormat, setAddedSeries, setAxisMode, setChartName, setChartDataLoading, fetchSeriesData, setSeriesData, showToast]);
 
   /**
    * Handle saving a preset (with upsert logic)
@@ -196,7 +209,7 @@ export function useGraphsPresets({
             name: formData.name,
             description: formData.description,
             seriesConfig: seriesConfigDto,
-            chartOptions: { axisMode },
+            chartOptions: { axisMode, title: chartName },
             isGlobal: formData.is_global
           }),
         });
@@ -211,7 +224,7 @@ export function useGraphsPresets({
             name: formData.name,
             description: formData.description,
             seriesConfig: seriesConfigDto,
-            chartOptions: { axisMode },
+            chartOptions: { axisMode, title: chartName },
             testRunId: formData.test_run_id,
             isGlobal: formData.is_global
           }),
@@ -234,7 +247,7 @@ export function useGraphsPresets({
     } finally {
       setPresetSaving(false);
     }
-  }, [addedSeries, axisMode, presets, currentUserId, showToast, fetchPresets]);
+  }, [addedSeries, axisMode, chartName, presets, currentUserId, showToast, fetchPresets]);
 
   /**
    * Handle deleting a preset

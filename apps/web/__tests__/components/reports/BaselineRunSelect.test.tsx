@@ -1,6 +1,9 @@
 /**
  * Unit tests for BaselineRunSelect.
  *
+ * Three synthetic options come first — "Previous run", "Previous SLO-passing run" and
+ * "Control group" — so a real run's option sits at index 3.
+ *
  * The picker gained a synthetic first option — "Previous run" — because pinning a specific run
  * is the wrong default for a template: a template is generated from for months, so the run
  * chosen today is stale tomorrow and every nightly report keeps comparing against it.
@@ -14,6 +17,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import {
   BaselineRunSelect,
+  CONTROL_GROUP_BASELINE,
   PREVIOUS_RUN_BASELINE,
   PREVIOUS_SUCCESSFUL_RUN_BASELINE,
   type BaselineCandidate,
@@ -42,7 +46,9 @@ describe('BaselineRunSelect previous-run option', () => {
     expect(options[0]).toHaveTextContent(/never goes stale/i);
     expect(options[1]).toHaveTextContent('Previous SLO-passing run');
     expect(options[1]).toHaveTextContent(/passed its SLOs/i);
-    expect(options[2]).toHaveTextContent('EA-acc-loadtest-00019');
+    expect(options[2]).toHaveTextContent('Control group');
+    expect(options[2]).toHaveTextContent(/anomaly detection/i);
+    expect(options[3]).toHaveTextContent('EA-acc-loadtest-00019');
   });
 
   it('is offered even when the system has no other runs to pin', () => {
@@ -51,9 +57,10 @@ describe('BaselineRunSelect previous-run option', () => {
     render(<BaselineRunSelect candidates={[]} onChange={jest.fn()} />);
 
     const options = within(openDropdown()).getAllByRole('option');
-    expect(options).toHaveLength(2);
+    expect(options).toHaveLength(3);
     expect(options[0]).toHaveTextContent('Previous run');
     expect(options[1]).toHaveTextContent('Previous SLO-passing run');
+    expect(options[2]).toHaveTextContent('Control group');
   });
 
   it('hands the caller the SLO-passed sentinel from the second option', () => {
@@ -123,6 +130,27 @@ describe('BaselineRunSelect previous-run option', () => {
   });
 });
 
+describe('BaselineRunSelect control-group option', () => {
+  it('hands the caller the control-group sentinel the API compares against', () => {
+    const onChange = jest.fn();
+    render(<BaselineRunSelect candidates={[candidate()]} onChange={onChange} />);
+
+    fireEvent.click(within(openDropdown()).getAllByRole('option')[2]!);
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ test_run_id: CONTROL_GROUP_BASELINE }));
+  });
+
+  it('explains what the control group is instead of naming a run', () => {
+    render(<BaselineRunSelect candidates={[candidate()]} value={CONTROL_GROUP_BASELINE} onChange={jest.fn()} />);
+
+    expect(screen.getByRole('combobox')).toHaveValue('Control group');
+    expect(
+      screen.getByText("Each report compares against its run's control group: the earlier runs anomaly detection judges it against, pooled"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Comparing with/)).not.toBeInTheDocument();
+  });
+});
+
 describe('BaselineRunSelect pinned runs', () => {
   it('still names a pinned run in the helper text', () => {
     render(
@@ -157,7 +185,7 @@ describe('BaselineRunSelect pinned runs', () => {
     const onChange = jest.fn();
     render(<BaselineRunSelect candidates={[candidate()]} onChange={onChange} />);
 
-    fireEvent.click(within(openDropdown()).getAllByRole('option')[2]!);
+    fireEvent.click(within(openDropdown()).getAllByRole('option')[3]!);
 
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -171,7 +199,7 @@ describe('BaselineRunSelect pinned runs', () => {
   it('shows a real run with its timestamp, not a synthetic label', () => {
     render(<BaselineRunSelect candidates={[candidate()]} onChange={jest.fn()} />);
 
-    const option = within(openDropdown()).getAllByRole('option')[2]!;
+    const option = within(openDropdown()).getAllByRole('option')[3]!;
     expect(option).toHaveTextContent('EA-acc-loadtest-00019');
     expect(option).toHaveTextContent('acc / loadTest');
     expect(option).not.toHaveTextContent(/Previous/);
@@ -226,7 +254,7 @@ describe('BaselineRunSelect run ids that collide with Object.prototype', () => {
     (id) => {
       render(<BaselineRunSelect candidates={[candidate({ test_run_id: id })]} onChange={jest.fn()} />);
 
-      const option = within(openDropdown()).getAllByRole('option')[2]!;
+      const option = within(openDropdown()).getAllByRole('option')[3]!;
       expect(option).toHaveTextContent(id);
       expect(option).toHaveTextContent('acc / loadTest');
       expect(option).not.toHaveTextContent(/Previous/);
@@ -254,7 +282,7 @@ describe('BaselineRunSelect run ids that collide with Object.prototype', () => {
       <BaselineRunSelect candidates={[candidate({ test_run_id: 'constructor' })]} onChange={onChange} />,
     );
 
-    fireEvent.click(within(openDropdown()).getAllByRole('option')[2]!);
+    fireEvent.click(within(openDropdown()).getAllByRole('option')[3]!);
 
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ test_run_id: 'constructor', test_environment: 'acc' }),
@@ -274,9 +302,10 @@ describe('BaselineRunSelect option grouping', () => {
     expect(groups).toHaveLength(2);
 
     const sentinels = within(groups[0]!).getAllByRole('option');
-    expect(sentinels).toHaveLength(2);
+    expect(sentinels).toHaveLength(3);
     expect(sentinels[0]).toHaveTextContent('Previous run');
     expect(sentinels[1]).toHaveTextContent('Previous SLO-passing run');
+    expect(sentinels[2]).toHaveTextContent('Control group');
 
     const runs = within(groups[1]!).getAllByRole('option');
     expect(runs).toHaveLength(1);

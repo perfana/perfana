@@ -17,7 +17,7 @@ import type { ReportSectionType, ReportSectionConfig } from '@/lib/api/reports';
 import { REPORT_LIMITS } from '@/lib/api/reports';
 import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { TrendsPresetsAPI, type TrendsPreset } from '@/lib/trends-presets';
-import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
+import { BaselineRunSelect, CONTROL_GROUP_BASELINE, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
 import { MarkdownField } from './MarkdownField';
@@ -25,6 +25,7 @@ import { useSectionTitle } from './SectionTitleContext';
 import {
   assignSectionAnchors,
   findAnchorProblems,
+  hasReportVariable,
   rawSlugOf,
   SECTION_ANCHOR_PREFIX,
 } from '@perfana/shared/utils';
@@ -314,10 +315,18 @@ interface HeaderConfigFormProps {
   allSections?: ReportSectionConfig[];
 }
 
+/**
+ * The preview dialog's title. A `{perfana-…}` value only resolves on the server, so a text holding
+ * one would read as raw placeholder syntax above a preview showing the real value.
+ */
+export function headerPreviewTitle(text: string | undefined): string {
+  return !text || hasReportVariable(text) ? 'Header' : text;
+}
+
 export function HeaderConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: HeaderConfigFormProps) {
   return (
     <SectionConfigShell
-      sectionTitle={config.text || 'Header'}
+      sectionTitle={headerPreviewTitle(config.text)}
       sectionType="Header"
       previewType="header"
       previewConfig={config}
@@ -1701,6 +1710,9 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
 
   // Keep in step with the renderer's default (comparisons-renderer.ts).
   const metrics = config.metrics ?? ['avg', 'p90', 'p95'];
+  // The control group shares this run's system and environment and pairs by dashboard id, so
+  // there is no differently named baseline dashboard to map: the renderer ignores a mapping.
+  const againstControlGroup = config.baselineTestRunId === CONTROL_GROUP_BASELINE;
 
   const toggleMetric = (metric: 'avg' | 'p90' | 'p95' | 'p99') => {
     const next = metrics.includes(metric) ? metrics.filter((m) => m !== metric) : [...metrics, metric];
@@ -1719,9 +1731,9 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       allSections={allSections}
       // Without a baseline the preview can only render the "no baseline configured" empty
       // state, so the button offers nothing but a round trip. An empty candidate list is NOT
-      // that case: the picker still offers the "previous run" / "previous SLO-passing run"
-      // sentinels, which the renderer resolves per report, so a selected sentinel is a
-      // perfectly good baseline even when this SUT has no other runs to pin.
+      // that case: the picker still offers the "previous run" / "previous SLO-passing run" /
+      // "control group" sentinels, which the renderer resolves per report, so a selected
+      // sentinel is a perfectly good baseline even when this SUT has no other runs to pin.
       previewDisabled={!config.baselineTestRunId}
       previewDisabledReason={
         baselineCandidates.length === 0
@@ -1851,13 +1863,20 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       />
       <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
         {config.showRowGraphs
-          ? 'Current vs baseline in an expandable row under each changed row — the ones outside the good band, worst first, at most 20. Collapsed by default; a PDF prints them all open.'
+          ? againstControlGroup
+            ? 'Current vs the control-group mean (a flat line; needs the avg metric) in an expandable row under each changed row — the ones outside the good band, worst first, at most 20. Collapsed by default; a PDF prints them all open.'
+            : 'Current vs baseline in an expandable row under each changed row — the ones outside the good band, worst first, at most 20. Collapsed by default; a PDF prints them all open.'
           : 'Off: the section is the comparison table only.'}
       </Typography>
 
       {/* Dashboard-map editor (grafana + dynatrace): pair a current-run dashboard
           with a differently named dashboard from the baseline run's environment */}
-      {source !== 'performance-metrics' && (
+      {source !== 'performance-metrics' && againstControlGroup && (config.dashboardMap?.length ?? 0) > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          The dashboard mapping is not used with the control group: its runs share this run&apos;s environment and dashboards.
+        </Typography>
+      )}
+      {source !== 'performance-metrics' && !againstControlGroup && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Typography variant="caption" color="text.secondary">
             Dashboard mapping (current → baseline) — map when the baseline run&apos;s dashboards have different names (e.g. per-environment dashboards)

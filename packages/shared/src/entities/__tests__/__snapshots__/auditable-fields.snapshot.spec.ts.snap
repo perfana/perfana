@@ -251,6 +251,8 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "higher_is_better",
     "metric_classification",
     "config_overrides",
+    "read_only",
+    "profile_id",
   ],
   "ProxyServer": [
     "proxyUrl",

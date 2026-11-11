@@ -20,6 +20,7 @@ Perfana collects metrics from performance tests and compares them against histor
 
 ### How-To
 - [How-To Tutorials](tutorials.md) — add a metrics source, add a pipeline, add an endpoint/page/migration, testing patterns
+- [Checking the UI with Vibium](Operations/Vibium.md) — install, sign in, read chart values, check exported images
 
 ### Architecture
 - [[Architecture Overview]] — System architecture and design principles
@@ -41,6 +42,7 @@ Perfana collects metrics from performance tests and compares them against histor
 
 ### Features
 - [[ADAPT Algorithm]] — Automated regression detection
+- [[Compare Config Templates]] — ADAPT settings per panel, provisioned from YAML and kept in step
 - [[Series Grouping]] — Comparing Kubernetes pod series across deployments
 - [[Real-time Monitoring]] — Live test run monitoring via WebSocket
 - [[RBAC]] — Role-based access control (Keycloak)

@@ -308,6 +308,8 @@ export interface RegressionsMetric {
   conclusionLabel: string;
   testValue: number | null;
   controlValue: number | null;
+  /** controlValue is the compare config's defaultValueIfControlGroupMissing, not a measured baseline. */
+  controlIsConfigured?: boolean;
   difference: number | null;
   differencePercent: number | null;
 }
@@ -343,6 +345,7 @@ export interface AdaptResultRow {
   unit: string | null;
   conclusion: Record<string, unknown> | null;
   statistic: Record<string, unknown> | null;
+  uses_default_value?: boolean | null;
 }
 
 /** Raw transaction row from database query */
@@ -357,6 +360,14 @@ export interface TransactionRow {
 }
 
 /** Raw transaction row with Apdex columns from database query */
+/** One scope's percentiles. `is_overall` is 1 on the whole-run row, where `scenario` is NULL. */
+export interface ApdexPercentileRow {
+  scenario: string | null;
+  is_overall: number;
+  p95_ms: string | null;
+  p99_ms: string | null;
+}
+
 export interface ApdexTransactionRow extends TransactionRow {
   scenario_name: string;
   satisfied: string;

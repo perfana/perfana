@@ -27,14 +27,15 @@ truth:
 @perfana/shared/repositories                // Custom repository classes
 @perfana/shared/database                    // Database utilities
 @perfana/shared/database/data-source-system // System-role DataSource
+@perfana/shared/database/run-window         // Run-window bounds for raw-hypertable reads
 @perfana/shared/database/system-connection  // System-role connection helper
 @perfana/shared/realtime                    // Real-time/Pub-Sub exports
 @perfana/shared/constants                   // Constants
-@perfana/shared/constants/dynatrace-metrics // Dynatrace metric constants
 @perfana/shared/services/grafana            // Grafana service
 @perfana/shared/services/metrics-source-upsert // Metrics-source upsert service
 @perfana/shared/services/proxy              // Proxy/NO_PROXY helpers
 @perfana/shared/utils                       // Utility functions
+@perfana/shared/utils/profile-match         // Which profiles a test run matches (tags + organization)
 @perfana/shared/security                    // Security helpers
 ```
 
@@ -99,6 +100,7 @@ truth:
 ### Reports (`types/reports.types.ts`)
 - Report generation types — section types, statuses, defaults
 - `PREVIOUS_RUN_BASELINE` (`'previous'`) and `PREVIOUS_SUCCESSFUL_RUN_BASELINE` (`'previous-successful'`) — the two reserved values for a comparison section's `baselineTestRunId`. `'previous'` is the run immediately before this one in the same system / environment / workload; `'previous-successful'` is the most recent earlier run whose SLOs passed (`consolidated_result.meetsRequirement`). The API resolves both in the comparisons renderer, the builder offers both as synthetic options under a "Resolved per report" group; declared once each so a rename fails the build instead of silently no longer resolving. See [[Templates]]
+- `CONTROL_GROUP_BASELINE` (`'control-group'`) — compare against the run's control group (the runs ADAPT judges it against, pooled in `ds_control_group_statistics`) instead of one run. Unlike the two above it is never resolved to a run id, so nothing may look it up in `test_runs`. Shared by the report's comparisons section (`baselineTestRunId`), the Compare card's baseline picker and the compare presets that store that picker's value (`baseline_test_run_id`)
 - `MAX_REPORT_SECTIONS` (`20`) — most sections one report may hold. The builder enforces it while composing, the ad-hoc generate DTO enforces it at the API boundary
 
 ### Other Types
@@ -130,6 +132,7 @@ truth:
 | `url-validator.ts` | Deep-link URL validation |
 | `markdown.ts` | Markdown subset renderer for report text blocks (`renderMarkdown`, `renderPlainText`, `RenderMarkdownOptions`, `TEXT_BLOCK_MARKDOWN_DEFAULT`) |
 | `report-variables.ts` | `{perfana-*}` placeholders a report's prose can use (`REPORT_VARIABLES`, `buildReportVariableValues`, `buildPreviousRunVariableValues`, `substituteReportVariables`, `escapeMarkdownValue`) |
+| `profile-match.ts` | The one rule for which profiles a test run matches (`profileMatchesRun`, `matchProfilesForRun`): a shared tag and the same organization, failing closed when either side has no organization. Used by grafana-sync's auto-config and the API's golden-path applier for profile compare-config templates (v0.2.97.57). Imported as `@perfana/shared/utils/profile-match` |
 
 > [!note] Why `markdown.ts` lives in shared
 > Two places must agree on the output structure: the API renders text blocks into

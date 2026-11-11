@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { TestRun, ProfileBenchmark, ProfileGrafanaDashboard } from '@perfana/shared/entities';
+import { matchProfilesForRun } from '@perfana/shared/utils/profile-match';
 import { TestRunFinderService } from './test-run-finder.service';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
@@ -119,28 +120,12 @@ export class AutoConfigService {
     profileBenchmarks: ProfileBenchmark[],
   ): Promise<void> {
     try {
-      // Filter profiles by organization and tags
-      const testRunTags = testRun.tags || [];
-      const testRunProfiles = profiles.filter((profile) => {
-        // Filter by tags (existing logic)
-        const hasMatchingTag = testRunTags.some((tag) => profile.tags?.includes(tag));
-        if (!hasMatchingTag) return false;
-
-        // Filter by organization (RBAC)
-        // If test run has an organizationId, only include profiles that:
-        // 1. Have the same organizationId, OR
-        // 2. Have null/undefined organizationId (for backward compatibility)
-        if (testRun.organizationId) {
-          return (
-            profile.organizationId === testRun.organizationId ||
-            profile.organizationId === null ||
-            profile.organizationId === undefined
-          );
-        }
-
-        // If test run has no organizationId, include all profiles (backward compatibility)
-        return true;
-      });
+      // Tags and organization, failing closed on a missing organization: one rule, shared with the
+      // API's golden-path applier for profile compare-config templates.
+      const testRunProfiles = matchProfilesForRun(
+        { tags: testRun.tags, organizationId: testRun.organizationId },
+        profiles,
+      );
       const profileNames = testRunProfiles.map((p) => p.name);
 
       this.logger.log(

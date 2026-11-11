@@ -48,7 +48,7 @@ export class CreateDsCompareConfigDto {
   metricName?: string;
 
   @ApiProperty({
-    description: 'Configuration data stored as JSON',
+    description: 'Configuration data stored as JSON. An optional numeric `defaultValueIfControlGroupMissing` makes ADAPT judge a series with no baseline row against that value instead of reporting it incomparable; omit it to leave that off.',
     example: {
       metricClassification: {
         classification: 'RED_duration',
@@ -59,8 +59,7 @@ export class CreateDsCompareConfigDto {
         percentageThreshold: 10,
         iqrThreshold: 1.5,
         absoluteThreshold: 100
-      },
-      defaultValueIfControlGroupMissing: 0
+      }
     }
   })
   @IsObject()
@@ -69,7 +68,7 @@ export class CreateDsCompareConfigDto {
 
 export class UpdateDsCompareConfigDto {
   @ApiProperty({
-    description: 'Configuration data stored as JSON',
+    description: 'Configuration data stored as JSON. An optional numeric `defaultValueIfControlGroupMissing` makes ADAPT judge a series with no baseline row against that value instead of reporting it incomparable; omit it to leave that off.',
     example: {
       metricClassification: {
         classification: 'RED_duration',
@@ -80,8 +79,7 @@ export class UpdateDsCompareConfigDto {
         percentageThreshold: 10,
         iqrThreshold: 1.5,
         absoluteThreshold: 100
-      },
-      defaultValueIfControlGroupMissing: 0
+      }
     }
   })
   @IsObject()
@@ -144,8 +142,7 @@ export class DsCompareConfigDto {
         percentageThreshold: 10,
         iqrThreshold: 1.5,
         absoluteThreshold: 100
-      },
-      defaultValueIfControlGroupMissing: 0
+      }
     }
   })
   configData!: Record<string, unknown>;

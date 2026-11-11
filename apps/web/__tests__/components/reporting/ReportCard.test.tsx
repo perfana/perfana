@@ -67,6 +67,8 @@ jest.mock('@/lib/api/reports', () => ({
   isCompletedStatus: jest.fn((status) => status === 'html_complete' || status === 'pdf_complete'),
   isFailedStatus: jest.fn((status) => status === 'failed'),
   buildShareUrl: jest.fn((shareId) => `http://localhost:4001/reports/share/${shareId}`),
+  enableSharing: jest.fn(),
+  disableSharing: jest.fn(),
 }));
 
 // Mock KPIDisplay component
@@ -450,6 +452,7 @@ describe('ReportCard', () => {
         const shareButton = shareIcons[0].closest('button');
         if (shareButton) fireEvent.click(shareButton);
       });
+      fireEvent.click(await screen.findByText('Copy share link'));
 
       await waitFor(() => {
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -459,6 +462,105 @@ describe('ReportCard', () => {
           'Share link copied to clipboard',
           'success'
         );
+      });
+    });
+
+    describe('share menu', () => {
+      // A completed report that is not shared, which is how every report now starts.
+      const privateReport = {
+        ...mockReports[0],
+        id: 'report-private',
+        name: 'Private Report',
+        share_enabled: false,
+        share_id: 'share-uuid-private',
+      };
+
+      const openMenuFor = async (name: string) => {
+        const row = (await screen.findByText(name)).closest('tr') as HTMLElement;
+        fireEvent.click(within(row).getByTestId('ShareIcon').closest('button') as HTMLElement);
+      };
+
+      beforeEach(() => {
+        (reportsApi.listReports as jest.Mock).mockResolvedValue({ items: [privateReport, mockReports[0]], total: 2 });
+        (reportsApi.enableSharing as jest.Mock).mockReset().mockResolvedValue({});
+        (reportsApi.disableSharing as jest.Mock).mockReset().mockResolvedValue({});
+        navigator.clipboard.writeText = jest.fn().mockResolvedValue(undefined);
+      });
+
+      it('offers a private report a link, and says who can read it', async () => {
+        render(<ReportCard {...defaultProps} expanded={true} />);
+
+        await openMenuFor('Private Report');
+
+        expect(await screen.findByText('Create share link')).toBeInTheDocument();
+        expect(screen.getByText('Anyone with the link can view this report without signing in')).toBeInTheDocument();
+        expect(screen.queryByText('Stop sharing')).not.toBeInTheDocument();
+      });
+
+      it('turns sharing on and copies the link', async () => {
+        render(<ReportCard {...defaultProps} expanded={true} />);
+        await openMenuFor('Private Report');
+
+        fireEvent.click(await screen.findByText('Create share link'));
+
+        await waitFor(() => {
+          expect(reportsApi.enableSharing).toHaveBeenCalledWith('report-private');
+          expect(navigator.clipboard.writeText).toHaveBeenCalledWith('http://localhost:4001/reports/share/share-uuid-private');
+          expect(mockOnSnackbar).toHaveBeenCalledWith('Sharing is on. Link copied to clipboard', 'success');
+        });
+
+        // The row reflects it without a reload: its menu now offers the other two actions.
+        await openMenuFor('Private Report');
+        expect(await screen.findByText('Stop sharing')).toBeInTheDocument();
+      });
+
+      it('still reports sharing as on when the browser refuses the clipboard', async () => {
+        navigator.clipboard.writeText = jest.fn().mockRejectedValue(new Error('not focused'));
+        render(<ReportCard {...defaultProps} expanded={true} />);
+        await openMenuFor('Private Report');
+
+        fireEvent.click(await screen.findByText('Create share link'));
+
+        await waitFor(() => {
+          expect(mockOnSnackbar).toHaveBeenCalledWith('Sharing is on. Copy the link from the share menu', 'success');
+        });
+      });
+
+      it('does not copy or claim anything when the server refuses', async () => {
+        (reportsApi.enableSharing as jest.Mock).mockRejectedValue(new Error('You do not have permission'));
+        render(<ReportCard {...defaultProps} expanded={true} />);
+        await openMenuFor('Private Report');
+
+        fireEvent.click(await screen.findByText('Create share link'));
+
+        await waitFor(() => {
+          expect(mockOnSnackbar).toHaveBeenCalledWith('You do not have permission', 'error');
+        });
+        expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+
+        await openMenuFor('Private Report');
+        expect(await screen.findByText('Create share link')).toBeInTheDocument();
+      });
+
+      it('stops sharing', async () => {
+        render(<ReportCard {...defaultProps} expanded={true} />);
+        await openMenuFor(mockReports[0].name);
+
+        fireEvent.click(await screen.findByText('Stop sharing'));
+
+        await waitFor(() => {
+          expect(reportsApi.disableSharing).toHaveBeenCalledWith(mockReports[0].id);
+          expect(mockOnSnackbar).toHaveBeenCalledWith('Sharing is off. Existing links no longer work', 'success');
+        });
+      });
+
+      it('offers nothing on a report that has not finished generating', async () => {
+        (reportsApi.listReports as jest.Mock).mockResolvedValue({ items: mockReports, total: mockReports.length });
+        render(<ReportCard {...defaultProps} expanded={true} />);
+
+        const row = (await screen.findByText('SLO Analysis')).closest('tr') as HTMLElement;
+
+        expect(within(row).getByTestId('ShareIcon').closest('button')).toBeDisabled();
       });
     });
 
@@ -900,6 +1002,7 @@ describe('ReportCard', () => {
         const shareButton = shareIcons[0].closest('button');
         if (shareButton) fireEvent.click(shareButton);
       });
+      fireEvent.click(await screen.findByText('Copy share link'));
 
       await waitFor(() => {
         expect(mockOnSnackbar).toHaveBeenCalledWith(

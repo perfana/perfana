@@ -213,7 +213,8 @@ export interface ReportSummary {
 export interface ReportDetail {
   id: string;
   test_run_id: string;
-  template_id: string;
+  /** Null once the template has been deleted; the report itself is kept. */
+  template_id: string | null;
   name: string;
   generated_by: string;
   html_content?: string;
@@ -877,7 +878,11 @@ export async function deleteTemplate(templateId: string): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to delete template: ${response.statusText}`);
+    const error = await response.json().catch(() => ({ message: response.statusText }));
+    const detail = error && typeof error === 'object' && 'message' in error
+      ? (error as { message: string }).message
+      : response.statusText;
+    throw new Error(`Failed to delete template: ${detail}`);
   }
 
   // DELETE returns 204 No Content with no body

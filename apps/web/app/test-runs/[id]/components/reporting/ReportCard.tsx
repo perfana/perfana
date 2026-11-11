@@ -48,6 +48,9 @@ import {
   DialogContent,
   DialogActions,
   Button,
+  Menu,
+  MenuItem,
+  ListItemText,
 } from '@mui/material';
 import {
   ExpandMore,
@@ -69,6 +72,8 @@ import {
   getReportStatusColor,
   isCompletedStatus,
   buildShareUrl,
+  enableSharing,
+  disableSharing,
   type ReportSummary,
   type ReportListItem,
   type ReportStatus,
@@ -155,6 +160,9 @@ export function ReportCard({
   const [viewerReportName, setViewerReportName] = useState<string>('');
   const [viewerShareId, setViewerShareId] = useState<string | undefined>(undefined);
   const [viewerHtmlContent, setViewerHtmlContent] = useState<string | undefined>(undefined);
+
+  // Which report's share menu is open, and what it is anchored to
+  const [shareMenu, setShareMenu] = useState<{ anchor: HTMLElement; report: ReportListItem } | null>(null);
 
   // Snackbar callback - defined early to avoid initialization errors
   const handleSnackbar = useCallback(
@@ -371,6 +379,41 @@ export function ReportCard({
       handleSnackbar('Failed to copy share link', 'error');
     }
   }, [handleSnackbar]);
+
+  const setRowShared = useCallback((reportId: string, shared: boolean) => {
+    setReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, share_enabled: shared } : r)));
+  }, []);
+
+  // Turn the public link on, then hand it over: asking for it is why someone opened this menu.
+  const handleEnableSharing = useCallback(async (report: ReportListItem) => {
+    setShareMenu(null);
+    try {
+      await enableSharing(report.id);
+    } catch (err) {
+      handleSnackbar(err instanceof Error ? err.message : 'Failed to turn on sharing', 'error');
+      return;
+    }
+    setRowShared(report.id, true);
+    try {
+      await navigator.clipboard.writeText(buildShareUrl(report.share_id));
+      handleSnackbar('Sharing is on. Link copied to clipboard', 'success');
+    } catch {
+      // A browser can refuse the clipboard after a network round trip. The link itself is fine.
+      handleSnackbar('Sharing is on. Copy the link from the share menu', 'success');
+    }
+  }, [handleSnackbar, setRowShared]);
+
+  const handleDisableSharing = useCallback(async (report: ReportListItem) => {
+    setShareMenu(null);
+    try {
+      await disableSharing(report.id);
+    } catch (err) {
+      handleSnackbar(err instanceof Error ? err.message : 'Failed to turn off sharing', 'error');
+      return;
+    }
+    setRowShared(report.id, false);
+    handleSnackbar('Sharing is off. Existing links no longer work', 'success');
+  }, [handleSnackbar, setRowShared]);
 
   // Handle download PDF
   const _handleDownloadPdf = useCallback(async (report: ReportListItem) => {
@@ -597,12 +640,15 @@ export function ReportCard({
                       </Tooltip>
 
                       {/* Share */}
-                      <Tooltip title={report.share_enabled ? 'Copy Share Link' : 'Sharing Disabled'}>
+                      <Tooltip title={report.share_enabled ? 'Shared: anyone with the link can view it' : 'Share Report'}>
                         <span>
                           <IconButton
                             size="small"
-                            onClick={() => handleCopyShareLink(report)}
-                            disabled={!report.share_enabled || !isCompletedStatus(report.status)}
+                            color={report.share_enabled ? 'primary' : 'default'}
+                            aria-label={report.share_enabled ? `Sharing options for ${report.name}, sharing is on` : `Share ${report.name}`}
+                            aria-haspopup="menu"
+                            onClick={(e) => setShareMenu({ anchor: e.currentTarget, report })}
+                            disabled={!isCompletedStatus(report.status)}
                           >
                             <ShareIcon fontSize="small" />
                           </IconButton>
@@ -627,6 +673,37 @@ export function ReportCard({
           </Table>
         </TableContainer>
       )}
+
+      <Menu
+        anchorEl={shareMenu?.anchor}
+        open={shareMenu !== null}
+        onClose={() => setShareMenu(null)}
+      >
+        {shareMenu?.report.share_enabled
+          ? [
+              <MenuItem
+                key="copy"
+                onClick={() => {
+                  const { report } = shareMenu;
+                  setShareMenu(null);
+                  void handleCopyShareLink(report);
+                }}
+              >
+                Copy share link
+              </MenuItem>,
+              <MenuItem key="stop" onClick={() => void handleDisableSharing(shareMenu.report)}>
+                Stop sharing
+              </MenuItem>,
+            ]
+          : shareMenu && (
+              <MenuItem onClick={() => void handleEnableSharing(shareMenu.report)}>
+                <ListItemText
+                  primary="Create share link"
+                  secondary="Anyone with the link can view this report without signing in"
+                />
+              </MenuItem>
+            )}
+      </Menu>
 
       {/* Loading State */}
       {loading && (

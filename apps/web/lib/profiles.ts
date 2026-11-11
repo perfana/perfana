@@ -12,6 +12,8 @@ export interface Profile {
   dashboardCount: number;
   sloCount: number;
   deepLinksCount: number;
+  /** ADAPT templates of this profile, provisioned ones included: deleting the profile deletes them. */
+  adaptTemplateCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -208,6 +210,12 @@ export interface CreateProfileData {
   name: string;
   description?: string;
   tags?: string[];
+  /**
+   * Organization to create the profile in; the caller must be an org-admin there. It decides which
+   * runs the profile's ADAPT templates reach. Omitted, the API picks the first organization, by id,
+   * in which the caller is an org-admin, which for a user in several need not be the one on screen.
+   */
+  organizationId?: string;
 }
 
 /**

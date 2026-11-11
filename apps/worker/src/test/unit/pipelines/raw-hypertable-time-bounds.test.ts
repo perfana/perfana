@@ -80,7 +80,57 @@ describe('worker raw-hypertable time bounds (#674)', () => {
     }
   };
 
+  /** The one window every hypertable read in the current mock was bound by. */
+  const boundsRead = () => {
+    const reads = hypertableReads();
+    expect(reads.length).toBeGreaterThan(0);
+    const dates = (reads[0][1] ?? []).filter((p): p is Date => p instanceof Date);
+    return dates.map((d) => d.toISOString());
+  };
+  const WHOLE_RUN = ['2026-01-01T09:00:00.000Z', '2026-01-01T12:00:00.000Z'];
+  // The head alone: these SLO paths have never trimmed the tail. See the comment at the read.
+  const HEAD_TRIMMED = ['2026-01-01T10:02:00.000Z', '2026-01-01T12:00:00.000Z'];
+
+  /**
+   * An SLO on a run too short for its offsets is judged on the whole run, as metric SLOs and ADAPT
+   * are. It used to read part of the run, or with a long enough ramp-up nothing at all, which an
+   * Apdex SLO reports as NO_DATA with meets_requirement false: a failure on a run that has data.
+   */
+  const SHORT_RUN_CASES: [string, number, number, string[]][] = [
+    ['trims the head when the offsets fit', 120, 60, HEAD_TRIMMED],
+    ['reads the whole run when they overrun it together', 3000, 3000, WHOLE_RUN],
+    ['reads the whole run when only the ramp-down makes them overrun it', 120, 3500, WHOLE_RUN],
+    ['reads the whole run when the ramp-up alone overruns it', 4000, 0, WHOLE_RUN],
+  ];
+
   describe('ApdexCalculator', () => {
+    const apdexRow = [{ satisfied_count: '1', tolerating_count: '0', frustrated_count: '0', total_count: '1', observed_count: '1', avg_response_time_ms: '1' }];
+
+    it.each(SHORT_RUN_CASES)('%s', async (_name, ramp_up, ramp_down, expected) => {
+      query.mockImplementation(async (sql: string) =>
+        /test_run_transaction_stats|test_run_sampler_stats/.test(sql) ? [] : apdexRow);
+
+      await new ApdexCalculator(pino({ level: 'silent' }), manager).calculateApdex({
+        testRun: { ...testRun, ramp_up, ramp_down },
+        transactionName: null, thresholdMs: 500, includeFailedRequests: false, excludeRampUp: true,
+      });
+
+      expect(boundsRead()).toEqual(expected);
+    });
+
+    it('applies the same rule to a preview, which loads its own run row', async () => {
+      query.mockImplementation(async (sql: string) => {
+        if (/SELECT test_run_id, system_under_test_id/.test(sql)) {
+          return [{ ...testRun, ramp_up: 3000, ramp_down: 3000 }];
+        }
+        return /test_run_transaction_stats|test_run_sampler_stats/.test(sql) ? [] : apdexRow;
+      });
+
+      await new ApdexCalculator(pino({ level: 'silent' }), manager).previewApdex('run-001', 'checkout', 500);
+
+      expect(boundsRead()).toEqual(WHOLE_RUN);
+    });
+
     it.each([false, true])('bounds the raw transactions scan (excludeRampUp=%s)', async (excludeRampUp) => {
       query.mockImplementation(async (sql: string) => {
         if (/start_time, ramp_up, end_time, ramp_down/.test(sql)) return RUN_WINDOW_ROW;
@@ -108,6 +158,19 @@ describe('worker raw-hypertable time bounds (#674)', () => {
   });
 
   describe('AggregatedBenchmarkEvaluator', () => {
+    it.each(SHORT_RUN_CASES)('%s', async (_name, ramp_up, ramp_down, expected) => {
+      const evaluator = new AggregatedBenchmarkEvaluator(pino({ level: 'silent' }), manager);
+      await evaluator.evaluate({ ...testRun, ramp_up, ramp_down }, {
+        id: 'b1',
+        aggregate_metric: 'error_percentage',
+        requirement_operator: 'lt',
+        requirement_value: 5,
+        exclude_ramp_up_time: true,
+      } as never);
+
+      expect(boundsRead()).toEqual(expected);
+    });
+
     it.each([false, true])('bounds the raw error-rate scan (excludeRampUp=%s)', async (excludeRampUp) => {
       const evaluator = new AggregatedBenchmarkEvaluator(pino({ level: 'silent' }), manager);
       await evaluator.evaluate(testRun, {

@@ -290,6 +290,29 @@ describe('TestRunsTimeSeriesQueryService', () => {
     const WINDOW_START = new Date('2026-05-06T23:00:00.000Z');
     const WINDOW_END = new Date('2026-05-07T02:00:00.000Z');
 
+    describe('the ramp cutoff on a run too short for its offsets', () => {
+      const cutoffFor = async (ramp_up: string, ramp_down: string) => {
+        repo.query.mockResolvedValueOnce([{
+          start_time: '2026-05-07T00:00:00.000Z', end_time: '2026-05-07T01:00:00.000Z', ramp_up, ramp_down,
+        }]);
+        const { cutoffTime } = await (service as unknown as {
+          getRunBounds: (id: string, exclude: boolean) => Promise<{ cutoffTime: Date | null }>;
+        }).getRunBounds(TEST_RUN_ID, true);
+        return cutoffTime;
+      };
+
+      it('trims when the offsets fit', async () => {
+        expect((await cutoffFor('60', '30'))!.toISOString()).toBe('2026-05-07T00:01:00.000Z');
+      });
+
+      it.each([['2000', '2000'], ['60', '3600'], ['3600', '0']])(
+        'draws the whole run for ramp_up=%s ramp_down=%s',
+        async (up, down) => {
+          expect(await cutoffFor(up, down)).toBeNull();
+        },
+      );
+    });
+
     it('rejects aggregationSeconds=1 with BadRequestException', async () => {
       primeOrgAccessAndRamp(repo);
       await expect(

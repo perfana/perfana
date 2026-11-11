@@ -35,6 +35,8 @@ export interface SeriesConfig {
 export interface GraphChartOptions {
   /** One axis per unit family overlaid, or one lane each. Defaults to `overlay`. */
   axisMode?: 'overlay' | 'split';
+  /** The chart's title when saved. Absent on older presets, which fall back to their name. */
+  title?: string;
 }
 
 /**

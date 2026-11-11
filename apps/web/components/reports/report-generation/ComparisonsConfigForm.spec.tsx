@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ComparisonsConfigForm } from './SectionConfigs';
 // The sentinel by name, not the literal 'previous' — a rename becomes a compile error here
 // rather than a test that silently stops exercising the resolved-per-report path.
-import { PREVIOUS_RUN_BASELINE } from './BaselineRunSelect';
+import { CONTROL_GROUP_BASELINE, PREVIOUS_RUN_BASELINE } from './BaselineRunSelect';
 import { authenticatedFetch } from '@/lib/api';
 
 const CANDIDATES = [
@@ -464,6 +464,34 @@ it('renders mapping rows as dropdowns (current + baseline dashboard autocomplete
   );
   expect(screen.getByLabelText(/current dashboard/i)).toBeInTheDocument();
   expect(screen.getByLabelText(/baseline dashboard/i)).toBeInTheDocument();
+});
+
+/**
+ * A control group shares this run's environment and pairs by dashboard id, so there is no
+ * differently named baseline dashboard to map — the renderer ignores a stored mapping. The
+ * editor would only offer a setting that does nothing.
+ */
+it('hides the dashboard mapping for the control group and says a stored one is unused', async () => {
+  render(
+    <ComparisonsConfigForm
+      config={{ source: 'grafana', baselineTestRunId: CONTROL_GROUP_BASELINE, dashboardMap: [{ current: 'a', baseline: 'b' }] }}
+      onChange={jest.fn()}
+      systemUnderTestId="sut-1"
+      testRunId="run-1"
+    />
+  );
+
+  expect(screen.queryByRole('button', { name: /add dashboard mapping/i })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/baseline dashboard/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/dashboard mapping is not used with the control group/i)).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole('button', { name: /preview/i })).toBeEnabled());
+});
+
+it('describes the control-group row graph as a flat mean line', () => {
+  render(
+    <ComparisonsConfigForm config={{ baselineTestRunId: CONTROL_GROUP_BASELINE, showRowGraphs: true }} onChange={jest.fn()} />
+  );
+  expect(screen.getByText(/control-group mean \(a flat line; needs the avg metric\)/i)).toBeInTheDocument();
 });
 
 /**

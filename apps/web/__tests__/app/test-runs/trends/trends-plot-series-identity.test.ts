@@ -29,7 +29,6 @@ it('draws one trace per series, not per metric name', () => {
     metricsData: [row(rt, '10', 280), row(err, '10', 0), row(rt, '12', 300), row(err, '12', 0.01)],
     trendsExpanded: true,
     addedSeries: [rt, err],
-    showToast: jest.fn(),
     cursorIndex: null,
   };
   const { result } = renderHook(() => useTrendsPlot(props));
@@ -47,7 +46,6 @@ it('names a series in its trace and in its table row, so the two cannot disagree
     metricsData: [row(err, '10', 0)],
     trendsExpanded: true,
     addedSeries: [rt, err],
-    showToast: jest.fn(),
     cursorIndex: null,
   };
   const { result } = renderHook(() => useTrendsPlot(props));
@@ -69,7 +67,6 @@ it('clears the plot when the card is collapsed or has no data', () => {
     metricsData: [row(rt, '10', 280)],
     trendsExpanded: false,
     addedSeries: [rt],
-    showToast: jest.fn(),
     cursorIndex: null,
   };
   const { result } = renderHook(() => useTrendsPlot(props));

@@ -257,8 +257,8 @@ describe('BenchmarkFormDialog', () => {
         />
       );
 
-      // 2 profile dashboards + the synthetic "every scenario" entry.
-      expect(screen.getByText(/3 available/i)).toBeInTheDocument();
+      // 2 profile dashboards + the two synthetic entries (every scenario, all Dynatrace hosts).
+      expect(screen.getByText(/4 available/i)).toBeInTheDocument();
     });
 
     it('should be required field', () => {
@@ -342,15 +342,17 @@ describe('BenchmarkFormDialog', () => {
         />
       );
 
-      // The synthetic entry is not a profile_grafana_dashboards row, but it is selectable.
-      expect(screen.getByText(/3 available/i)).toBeInTheDocument();
+      // The synthetic entries are not profile_grafana_dashboards rows, but they are selectable.
+      expect(screen.getByText(/4 available/i)).toBeInTheDocument();
 
       await user.click(screen.getByRole('combobox', { name: /profile dashboard/i }));
       const listbox = await screen.findByRole('listbox');
       const options = within(listbox).getAllByRole('option');
-      expect(options).toHaveLength(3);
+      expect(options).toHaveLength(4);
       expect(options[2]).toHaveTextContent(/performance test metrics — every scenario/i);
       expect(options[2]).toHaveTextContent(/applies to every performance-test scenario dashboard/i);
+      expect(options[3]).toHaveTextContent(/dynatrace — all hosts/i);
+      expect(options[3]).toHaveTextContent(/applies to every mapped dynatrace host/i);
       // Real dashboards keep their instance + uid subtitle.
       expect(options[0]).toHaveTextContent(/grafana-prod • UID: jmeter-uid/);
     });

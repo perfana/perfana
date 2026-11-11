@@ -28,6 +28,8 @@ Profile
 
 A `ProfileBenchmark` normally points at one `ProfileGrafanaDashboard` and is provisioned onto the application dashboards created from that template. With `source: performance-metrics` (v0.2.96.6) it points at no profile dashboard: `dashboard_uid` holds a regex over the worker-written `Performance test metrics <scenario>` dashboard uids (default `^performance-test-metrics-(?!all-aggregated$|default$)`), and grafana-sync fans it out over every matching scenario dashboard of the system. In the profile SLO dialog this is the **Performance test metrics — every scenario** entry; the same shape works from YAML provisioning (`source: performance-metrics`, `dashboardUid` optional). Mechanics in [[Grafana Sync Overview]] → Auto-Configuration.
 
+With `source: dynatrace-hosts` (v0.2.97.61) the same shape targets the Dynatrace host dashboards the API writes when a host is mapped: `dashboard_uid` is a regex over the `dynatrace-dynatrace-host-metrics-<host>` uids (default `^dynatrace-dynatrace-host-metrics-`) and the SLO lands on every mapped host, including hosts mapped later. In the profile SLO dialog this is the **Dynatrace — all hosts** entry. A host's panel id is hashed per host, so `panelId` is one of the fixed ids in `DYNATRACE_HOST_PROFILE_PANELS` (`@perfana/shared/constants`) and grafana-sync resolves each host's real panel by title; YAML provisioning skips an item whose panel id is not in that list. Like `performance-metrics`, the per-host SLOs are written once: editing or deleting the profile SLO does not reach them (TODOS.md, "Profile SLOs").
+
 ### Dashboard Templates
 
 Grafana dashboard templates that can be propagated across multiple systems:
@@ -46,6 +48,7 @@ Accessible at `/settings/profiles`:
   - Dashboard configuration tab
   - SLO/benchmark configuration tab
   - Deep links configuration tab
+  - ADAPT templates tab (`?tab=adapt-templates`, v0.2.97.57): the profile's compare-config templates, applied only to runs whose tags match the profile. See [[Compare Config Templates]]
 
 ### Template Section Builder
 
@@ -59,18 +62,34 @@ One dialog, `GenerateReportDialog`: **Generate Report** on a test run's Reportin
 - Configurable metric selections
 - Preview functionality for report sections
 - Collapsed section cards summarize their own configuration (header level and text, text-block content, response-time scenario, baseline-run dashboard/panel count) so multiple sections of the same type can be told apart without expanding them
+- **Deleting a template keeps the reports made from it.** Their `template_id` becomes NULL (migration 1821) and they stay readable, downloadable and shared. Only regenerating one needs the template, so `POST /reports/:id/retry` answers 400 for those
 
-#### Comparison sections: pinned baseline, previous run, or previous SLO-passing run
+#### Header sections
 
-A comparison section's `baselineTestRunId` takes either a specific run, or one of **two** reserved
-values — `previous` (`PREVIOUS_RUN_BASELINE`) and `previous-successful`
-(`PREVIOUS_SUCCESSFUL_RUN_BASELINE`), both in [[Shared Package]]. Both sides must agree on the
-exact string, so each is declared once.
+**Header Text** is the title on the report's cover page and accepts the same `{perfana-…}` values as prose, while **Header Level** picks that title's heading tag, H1 by default, scaling it down from there. **Section Title** names the summary block under the cover, "Test Run Summary" when blank. A template posted straight to the API may carry the cover title as `config.title`; `config.text` wins when both are set, because the builder form can only see that one.
+
+The summary's **Anomaly Detection** badge reads NO REGRESSIONS only for a run ADAPT actually compared. A run it did not (the first run, a changepoint, nothing comparable) reads NOT EVALUATED, matching the N/A in the Anomaly Detection section.
+
+#### Sharing a report
+
+A report is private when generated. Its row in the Reports card has a share menu: **Create share link** turns on a public link and copies it, and anyone holding that link can read the report without signing in, until someone chooses **Stop sharing**. Turning it back on restores the same link. Changing this needs `test-run:update` on the report's run, so an org viewer can read a report but not publish it. Pipelines are unaffected: `/html/download` and `/pdf/download` take an API key and never need a share link. Reports generated before this default existed keep whatever setting they have, which is on.
+
+#### Percentiles in the Apdex section
+
+The overall and per-scenario **P95** and **P99** are percentiles of the executions in that scope, and so are the ones on the Performance Analysis card. Both read the analysis window, excluding the ramp-up and the ramp-down, or the whole run when the section's option is off. They agree to within a couple of percent rather than exactly, because the report sorts the executions and the card merges t-digests, which are approximate. The section's throughput and virtual-user figures read the same window. When a run is too short for its offsets, the section reads the whole run, as the analysis pipeline does. Against an API older than the card, or while a run's rollup is still being built, the card falls back to the execution-weighted average of the transactions' percentiles and labels it as that. That figure reads lower whenever a slow minority of transactions forms the tail.
+
+#### Comparison sections: pinned baseline, previous run, previous SLO-passing run, or control group
+
+A comparison section's `baselineTestRunId` takes either a specific run, or one of **three** reserved
+values — `previous` (`PREVIOUS_RUN_BASELINE`), `previous-successful`
+(`PREVIOUS_SUCCESSFUL_RUN_BASELINE`) and `control-group` (`CONTROL_GROUP_BASELINE`), all in
+[[Shared Package]]. Both sides must agree on the exact string, so each is declared once.
 
 - **A pinned run** made sense the day the template was written and ages from then on: every nightly report keeps comparing against the same run.
 - **`previous`** resolves per report to the most recent **completed** run that started strictly before the reported one, in the same system, environment and workload (ordered by `start_time`) — so a template compares each report against its own predecessor. Offered as "Previous run" at the top of the baseline picker, and documented in Swagger for templates created through the API.
 - **`previous-successful`** is the same lookup narrowed to runs whose SLOs passed (`consolidated_result.meetsRequirement` is true). The plain previous run is whatever ran last, failures included, and comparing a still-broken run against one that had already breached its objectives makes the report look flat. Offered as "Previous SLO-passing run".
-- Both reserved values sit under a **"Resolved per report"** group at the top of the picker, above the "Specific runs" group. Selecting one is a valid baseline even when the run has no earlier run to pin, so neither the section preview nor the Generate dialog is blocked by an empty candidate list.
+- **`control-group`** compares against the run's own **control group** — the earlier runs anomaly detection (ADAPT) judges it against — using their pooled statistics in `ds_control_group_statistics`, so the section shows the same "control" values as the Anomaly Detection card. Offered as "Control group". It is never resolved to a run id: the API reads the group the run's latest ADAPT conclusion names (falling back to the group keyed on the run's own id) and pairs series on `(application_dashboard_id, panel_id, metric_name, metrics_source_id)`, the identity anomaly detection compares on (v0.2.97.52), so a series whose metrics source changed since the group's runs gets no baseline here, as it is "incomparable" there. The dashboard ids agree because a control group shares the run's system and environment, which is also why a `dashboardMap` is ignored with it and its editor is hidden. Three things differ from a run baseline: a performance-metrics section with no selection compares **Transaction RT Avg** (panel 101) per transaction, the panel ADAPT reads, rather than raw `transactions` percentiles, which pooling over every member run would make expensive and which anomaly detection does not compare; the synthetic "All aggregated" series and the URL panels have no pooled control rows, so beside series that do pair they are listed with the current value only; and a row graph draws the group's pooled **mean**, in the control rows' own unit, as a flat dashed line (only when the section includes `avg`, and the graph says so when it does not), since a control group has no time series of its own. The section names the group's runs under its heading, because a group is rebuilt on every re-evaluate and a stored report has to say which runs its numbers came from. A run with no control group (a first run, or one whose analysis has not finished) gets an explicit empty state. So does a section in which no row pairs with the group (one selecting only the unpooled series above, or a group whose pooled statistics are missing or held under another metrics source), because baseline-less rows would otherwise all count as within range; when it is the run itself that has no statistics for the section's source, the empty state says that instead.
+- All three reserved values sit under a **"Resolved per report"** group at the top of the picker, above the "Specific runs" group. Selecting one is a valid baseline even when the run has no earlier run to pin, so neither the section preview nor the Generate dialog is blocked by an empty candidate list.
 - In a report, the shared **Baseline Test Run** picker above the builder shows a value only when every comparison section is on it. With one section pinned and one unset it shows none, because Generate is blocked and re-picking a value already on show fires no change; picking one applies to every section. A new comparison section starts on the shared baseline when exactly one is in use. None of this applies to a template, which has no such picker and may be saved unpinned.
 - When `previous` resolves to nothing, the run is the first in its scope, and the section says so rather than comparing the run against itself.
 - When `previous-successful` resolves to nothing, the section says **which** of three things happened rather than showing one blank empty state: the run is the first for its system, environment and workload; earlier runs exist but none had its SLOs evaluated; or earlier runs were evaluated and none passed. The middle case is kept distinct on purpose — a run that was never evaluated has no `meetsRequirement` key at all, and reporting that as "none passed" would assert a failure that never happened, in a document served unauthenticated over a share link.

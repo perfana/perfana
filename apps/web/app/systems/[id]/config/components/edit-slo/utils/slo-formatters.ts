@@ -1,7 +1,7 @@
 import { SloPanel } from '../types';
-import { getUnit } from '@/lib/units';
+import { getUnit, unitLabel } from '@/lib/units';
 import { EvaluateTypeOption, RequirementOperatorOption, SourceOption } from '../types';
-import { parseValueWithUnit } from './slo-validators';
+import { parseValueWithUnit, convertThresholdInput } from './slo-validators';
 
 /**
  * Source options for SLO configuration
@@ -147,21 +147,36 @@ export function getSourceOption(value: string): SourceOption | null {
 /**
  * Get placeholder text for requirement value input
  */
-export function getRequirementValuePlaceholder(selectedPanel: SloPanel | null | undefined): string {
-  const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
+/** A realistic threshold per panel unit; '500 s' or '500 %' on a 0-1 panel suggested nonsense (#721). */
+const PLACEHOLDER_VALUES: Record<string, string> = {
+  ns: '500000', 'µs': '500', ms: '500', dtdurationms: '500', s: '0.5', dtdurations: '0.5', m: '5', h: '1', d: '1',
+  percent: '90', percentunit: '90',
+  bytes: '1048576', decbytes: '1000000', kbytes: '512', deckbytes: '500', mbytes: '512', decmbytes: '500',
+  gbytes: '2', decgbytes: '2',
+};
+
+export function getRequirementValuePlaceholder(effectiveUnitFormat: string | null | undefined): string {
   if (effectiveUnitFormat) {
-    const unit = getUnit(effectiveUnitFormat);
-    return `e.g. 500${unit.format || ''}`;
+    return `e.g. ${PLACEHOLDER_VALUES[effectiveUnitFormat] ?? '100'} ${unitLabel(effectiveUnitFormat)}`.trim();
   }
-  return 'e.g. 500ms, 0.95%, 2GB, 50req/s';
+  return 'e.g. 500ms, 95%, 2GB, 50req/s';
 }
 
 /**
  * Get helper text for requirement value input
  */
-export function getRequirementValueHelperText(value: string, selectedPanel: SloPanel | null | undefined): string {
+export function getRequirementValueHelperText(
+  value: string,
+  effectiveUnitFormat: string | null | undefined,
+  evaluateType?: string
+): string {
+  // Say what will be stored when the typed unit differs from the panel's, or why it can't be.
+  const result = convertThresholdInput(value, evaluateType === 'trend' ? undefined : effectiveUnitFormat ?? undefined);
+  if (result && 'error' in result) return result.error;
+  if (result?.from && result.to && unitLabel(result.from) !== unitLabel(result.to)) {
+    return `${parseValueWithUnit(value.trim()).value} ${unitLabel(result.from)} = ${result.value} ${unitLabel(result.to)}`;
+  }
   const detectedUnit = getDetectedUnit(value);
-  const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
   const expectedUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;
 
   if (detectedUnit) {
@@ -173,7 +188,9 @@ export function getRequirementValueHelperText(value: string, selectedPanel: SloP
 }
 
 /**
- * Get the effective unit format from a panel
+ * A panel's (or Dynatrace metric's) own unit. In Edit this is the LIVE panel's unit, an input
+ * to `adoptPanelUnit` and the metric picker; everything that shows or converts the threshold
+ * reads the form's `thresholdUnit` instead.
  */
 export function getEffectiveUnitFormat(selectedPanel: SloPanel | null | undefined): string | undefined {
   return selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
@@ -182,11 +199,10 @@ export function getEffectiveUnitFormat(selectedPanel: SloPanel | null | undefine
 /**
  * Get the unit chip label for a value
  */
-export function getUnitChipLabel(value: string, selectedPanel: SloPanel | null | undefined, evaluateType?: string): string | null {
+export function getUnitChipLabel(value: string, effectiveUnitFormat: string | null | undefined, evaluateType?: string): string | null {
   // A trend is % of the series mean per hour regardless of what the panel measures.
   if (evaluateType === 'trend') return '%/h';
   const parsed = parseValueWithUnit(value);
-  const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   const panelUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;
 
   if (parsed.unit || panelUnit?.format) {

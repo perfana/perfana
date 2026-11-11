@@ -11,7 +11,7 @@ import { PdfGenerationProcessor } from './pdf-generation.processor';
 export interface HtmlGenerationJobData {
   reportId: string;
   testRunId: string;
-  templateId: string;
+  templateId: string | null;
   priority?: number;
   initiatedBy?: string;
   timestamp?: string;
@@ -307,7 +307,7 @@ export class HtmlGenerationProcessor implements OnModuleInit, OnModuleDestroy {
   async addJob(
     reportId: string,
     testRunId: string,
-    templateId: string,
+    templateId: string | null,
     options?: { priority?: number; initiatedBy?: string; jobId?: string },
   ): Promise<string> {
     if (!this.isAvailable()) {

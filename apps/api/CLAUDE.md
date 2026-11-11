@@ -789,7 +789,7 @@ run completion and refuses to overwrite a `ds_compare_config` row that already s
 user edits must survive. Its one exception used to be `updated_by = 'worker-pipeline'`, the default
 row `PerformanceTestMetricsPipeline` seeds during the run.
 
-**"Already sits on the panel" means a PANEL-LEVEL row, as of v0.2.97.44.** `existingPanels` counted
+**"Already sits on the panel" means a PANEL-LEVEL row, as of v0.2.97.44.** The applier's `existingPanels` set counted
 every row at any level, so one metric-level row — a per-series override — blocked the panel's
 template for good. That is wrong on its own terms: resolution picks metric before panel, so
 applying the panel default alongside an override changes nothing for the overridden series. It was
@@ -810,9 +810,11 @@ that no save path can rewrite. The marker still exists, for provenance and for t
 filed in TODOS.md — it is just not load-bearing. One behaviour change rides along: a panel whose
 only row is metric-level now receives its panel-level template on the next completed run.
 
-`workerSeeded` is unaffected and still keys on `dashboard|panel|metric`, so a metric-level template
-naming a derived series merges into the worker's row rather than being skipped — which is what the
-`created_by`/`updated_by = 'worker-pipeline'` stamp on that INSERT buys.
+Machine-seeded rows are keyed on `dashboard|panel|metric` too, so a metric-level template naming a
+derived series merges into the worker's row rather than being skipped — which is what the
+`created_by`/`updated_by = 'worker-pipeline'` stamp on that INSERT buys. (Since v0.2.97.54 the
+applier keys every row that way, `existingPanels` and `workerSeeded` are gone, and a template reaches
+only rows of its own `metric_name`.)
 
 **`createDsCompareConfigForMetric` (`modules/dynatrace/dynatrace.repository.ts`) writes a panel-level
 row the moment a HOST is mapped, and its INSERT names no `created_by`/`updated_by` at all.** So the
@@ -827,22 +829,187 @@ guaranteed no-op on every run, forever. The provisioning side was fine — the r
 The discriminator is `config_data.source`, not authorship:
 
 - The Dynatrace insert stamps `source: 'dynatrace-host'`, and a UI save rewrites it to
-  `'metric'`/`'panel'` **and** sets `updated_by` (`updateDsCompareConfig`). So
+  `'metric'`/`'panel'` **and** sets `updated_by` (`updateDsCompareConfig`; since v0.2.97.54 the
+  insert in `createOrUpdateDsCompareConfig` stamps it too). So
   `!updated_by && source === 'dynatrace-host'` is the one shape nobody has touched. 591 of the dev
   database's 592 null-author rows match it; the one that does not reads `source: 'panel'`.
 - **The merge is self-limiting.** It stamps `GOLDEN_PATH_ACTOR`, so the row stops matching after the
-  first pass — which is also why the null-author half of the test cannot be dropped.
+  first pass and is template-owned from then on — which is also why the null-author half of the test
+  cannot be dropped.
 - **It takes effect on the next completed run**, not at boot. Rows already written stay as they are
   until that run analyses.
-- `higher_is_better` comes from the template, so a template whose `panelTitle` reaches
-  `Network Traffic` would overwrite the `higherIsBetter: null` the Dynatrace path sets deliberately
-  for an informational metric. The shipped templates name CPU and Memory only.
+- The direction comes from the template only when the template names one, so a template whose
+  `panelTitle` reaches `Network Traffic` keeps the `higherIsBetter: null` the Dynatrace path sets
+  deliberately for an informational metric — unless it says `higherIsBetter` itself.
 
-A row the golden path itself authored is never revisited, so **editing a template's `absThreshold` in
-YAML does not propagate to panels it already seeded** — that was true before this fix and still is.
+**Since v0.2.97.54 a template-owned row follows its template** (migration 1822; design in
+`docs/design/2026-11-08-compare-config-templates-design.md`, file format in
+`docs/reference/Features/Compare Config Templates.md`). Before that, a row the golden path authored
+was never revisited, so editing a template's `absThreshold` in YAML reached no panel it had already
+seeded. Now every completion rebuilds each `system:golden-path` row from its `template_base` plus the
+fields the current winning template names. Eight things that are easy to undo:
+
+1. **Ownership is `updated_by`, never `template_id`.** `template_id` is display provenance with no
+   foreign key; a hand edit sets `updated_by` to the user and the row is never touched again.
+2. **`template_base` is the row's config before any template.** An inserted row gets `INSERT_BASE`; a
+   machine-seeded row gets its seeded config on its first merge; a row written before 1822 takes its
+   current config, but only when its winner would not change it (rule 7). A field the template stops
+   naming reverts to the base, and a
+   row nothing matches any more is rebuilt from the base alone, with `template_id` cleared, unless the
+   applier inserted it itself (`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`): that
+   row is deleted, conditional on the author read, and its `ds_adapt_results` marked stale by hand,
+   since a delete fires no `trigger_mark_stale_on_config_update`. Rebuilding it would leave a row the
+   panel never had (`INSERT_BASE`: mean, `none`) where ADAPT otherwise applies `DEFAULT_COMPARE_CONFIG`
+   (median, unclassified), so after one tagged run every untagged run of that workload would silently
+   switch aggregation (v0.2.97.57). A merged machine seed is still rebuilt: its base IS the panel's.
+3. **Only a difference is written.** `trigger_mark_stale_on_config_update` fires on any `config_data`
+   change, so the applier compares first; `template_id` and `template_base` sit outside `config_data`
+   and never fire it. The comparison deep-copies through JSON, not `structuredClone`: under Jest the
+   latter returns objects from Node's outer realm and `isDeepStrictEqual` then calls every row changed.
+4. **A template reaches only rows of its own `metric_name` (NULL to NULL)**, so a panel template never
+   claims a series-grouping derived row such as `api (sum)`, and an organization template only
+   dashboards of its own organization (read from the dashboard, not from the optional `TestRun` field).
+   A profile template (v0.2.97.57) reaches a dashboard only when `profileMatchesRun`
+   (`@perfana/shared/utils/profile-match`, the same rule grafana-sync uses) matches the profile against
+   the completing run's tags and the DASHBOARD's organization, and it fails closed on a missing
+   organization on either side. Profiles are read with one query, and only when a profile template
+   exists. Because the run's tags choose the winner and owned rows are rebuilt on every completion, a
+   workload whose runs carry different tags flips between template sets, and each flip that changes the
+   config fires the stale trigger; that is the profile's contract (design Open Question 4), not a bug to
+   guard against. What is NOT the contract: the result is stored per workload and ADAPT reads it when
+   the run's analysis starts (`CompareConfigCache`, possibly Queued behind `HeavyStageMutex`), so a
+   differently tagged completion in between, or a re-evaluate of an older run, judges that run on the
+   other set; recording each run's matched profiles is filed in TODOS.md. A tie between two profiles is
+   decided by profile name and reported apart from id ties (`decided by profile name:`), leaving the
+   existing `decided by template id:` text untouched. A completion call that omits `tags` keeps the run's stored
+   tags (v0.2.97.63): `UpdateTestRunHandler` used to write `data.tags || []`, which reverted every
+   profile-owned row of the workload on a CI step that did not repeat its tags. Keep the omission an
+   omission end to end; only an explicit `[]` clears them.
+5. **`higherIsBetter` is named through `config_overrides` first.** A template that omits it leaves the
+   row's own direction, where the merge used to write `null`. The `higher_is_better` column still
+   counts when set and the key is missing, and that fallback is load-bearing, not a leftover: it is
+   what 1822's backfill copies into the overrides, and it keeps a template's direction when an API
+   older than 1822 runs after the migration (a rollback, a replica not yet replaced) and rewrites
+   `config_overrides` without the key. Observed on the dev database: the old image stripped the key
+   from 22 of 68 templates on one boot while leaving the column set.
+6. **The collection-gap guard covers title-owned rows only.** A row whose `template_id` is a title
+   template, and whose panel is missing from the recent `ds_panels` list, is left alone and named in the
+   summary line, so a panel missing from one collection never makes its config flap. A row an id
+   template owns is rebuilt regardless: perf-test dashboards never get `ds_panels` rows at all, and a
+   guard keyed on "a title template reaches this dashboard" froze every owned row there for good. A row
+   with no `template_id` yet (written before 1822) is decidable when a template wins it now, and
+   otherwise waits while a title template of its own metric reaches the dashboard. The rows of a
+   template skipped for a bad pattern are left alone as well, so a regex typo in the YAML does not
+   revert everything that template owned. The applier runs `validateRegexPattern` on what is stored,
+   not only the parser on what is read: a pattern is part of the template's key, so a refused file
+   item never replaces the stored row, and patterns stored before this version were never checked.
+7. **A row written before 1822 is not proof the template wrote its current config.** Until v0.2.95.42
+   `updateDsCompareConfig` set only `config_data`, so a hand edit on a golden-path row kept
+   `updated_by = 'system:golden-path'`. Rebuilding such a row from its current config would re-assert
+   the template over the user's direction, `ignore` and thresholds on every completion. It is adopted
+   only when `rebuildConfig(current, winner)` deep-equals it; otherwise it is left alone and counted
+   (`pre-v0.2.97.54 row(s) left alone`). Do not "simplify" that into adopting every legacy row.
+8. **Every write is conditional on the author the snapshot saw** (`updateRow`: `WHERE id AND
+   updated_by = <as read>`, NULL via `IsNull()`), and `affected = 0` skips the row. The loop runs for
+   seconds on a large SUT; keyed on id alone, a user save in that window was overwritten by a rebuild
+   that also left the user's stamp on it, detaching the row with template values. An insert that hits
+   a concurrent writer's row (23505: a live tick's seed, an overlapping completion) is counted and
+   skipped rather than aborting the rest of the run; these writes are not on the request transaction,
+   so the failed INSERT aborts nothing else.
+
+**A compare-config save upserts the exact row, never the one `getDsCompareConfig` falls back to**
+(v0.2.97.54). `getDsCompareConfig` answers a series lookup with the panel's row when the series has
+none of its own, which is right for a read and wrong for a write: `createOrUpdateDsCompareConfig` used
+it as "the existing row" and so rewrote the panel row with one series' settings, which then applied to
+every series on the panel and, stamped as a hand edit, detached that row from its template for good.
+The upsert now updates only a row whose `metric_name` equals the request's (NULL to NULL) and inserts a
+series row otherwise. The insert stamps `created_by`/`updated_by` like an update does.
+
+The applier runs inside the completion request, before ADAPT is queued, so the completing run is the
+first one judged on the re-merged config. Its summary line carries `rewrote=<rows> in <ms>ms` and is
+logged at warn past 5000 ms; each rewritten row fires the stale trigger, whose cost on a large install
+has not been measured.
+
+**`provisionProfiles` refuses a same-name profile in another organization than the file's** (v0.2.97.62),
+and the refused name is threaded through the rest of the boot (`refusedProfiles`): dashboards and SLOs
+skip it (both also compare the resolved profile's organization with their own file's), and the template
+resolver reads it as unresolved. Do not drop the threading because the profile step "already refused":
+a later file without `organizationId` would otherwise resolve the name straight to the other tenant's
+profile. A file with no organization still takes a profile over by name and leaves its organization be.
+
+On the provisioning side, three rules keep the prune from deleting templates the file still means:
+the organization id is validated as a uuid and lowercased before it enters the key (Postgres returns
+it lowercase, so an upper-case spelling never matched its own row and flapped between insert and
+prune); no prune runs on a boot where any item failed to identify or to write; and each pass first
+re-marks `created_by = 'system:provisioning'` rows as `read_only`, which an older API writing after
+1822 leaves unset. The advisory lock is `pg_try_advisory_lock` with a 30 s bound, so a lock held by a
+dead backend skips the step instead of hanging the API's boot.
 
 `regex` support landed in v0.2.95.35 and `panelTitle` in v0.2.95.37; a deploy older than those
 ignores both halves of such a template.
+
+### The compare-templates API is the codec with a scope on it
+
+`/compare-templates` (CRUD) and `GET /provisioning/compare-templates/export` (v0.2.97.55) live in
+`modules/provisioning/compare-templates.{controller,service}.ts`, beside the codec they share with
+provisioning, and `/profiles/:id/compare-templates` (v0.2.97.57, `ProfileCompareTemplatesController` in
+the same file, the same service with a `profile` scope). Seven things to keep:
+
+1. **A definition goes through `parseTemplateItem`, never a validator of its own.** The body is one file
+   item; the service hands it to the codec with the scope's organization and stores `parsed.values`.
+   That is the whole reason a UI row exported and committed is taken over with identical content: the
+   provisioning side stores the same `TemplateColumns` for the same item. The DTO's class-validator
+   decorators check types and widths only. A second set of rules here would let the API store something
+   the file stores differently, and the takeover would then rewrite it silently — the takeover counter
+   cannot see content, which is why the round-trip spec compares the stored columns, not the counts.
+   **The body is typed `unknown` on purpose.** With the DTO as the parameter type, the global
+   `ValidationPipe`'s `whitelist` strips an undeclared key before the service sees it, so a misspelt
+   `absoluteThreshold` created a template that forced nothing, with a 201 (caught on the local stack, not
+   by a unit test: the spec calls the service directly). The service runs class-validator itself
+   (`validateSync`) and hands the raw object to the codec, whose unknown-field warning, near-miss hint
+   included, becomes a 400.
+2. **The scope is the collection's, and it never changes.** `?organizationId=` or `?scope=install`,
+   exactly one (a missing one is a 400, never a default). A body that names `organizationId` is a 400
+   rather than ignored, since a caller who sent it meant something by it. `PUT` replaces the definition
+   wholesale, like re-provisioning an item, and keeps the row's organization.
+3. **No RLS stands behind any of it.** The table is `rls: false`; `withRequestEm()` filters nothing. Every
+   method takes `accessibleOrgIds` as a required parameter, a template or organization outside it answers
+   404, and a global admin naming an organization that does not exist gets a 404 too (no FK on
+   `organization_id`). Install-wide templates are readable by anyone signed in and writable only by a
+   global admin; organization templates need `benchmark:manage`, checked after the 404 scoping.
+4. **Every path is `system_under_test_id IS NULL`.** `classifyMetric` writes system-scoped rows into the
+   same table; `findOne` by id includes the predicate, so those rows are a 404 here.
+5. **`read_only` rows answer 409 on `PUT` and `DELETE`**, after the capability check, so a 409 only
+   reaches someone who could otherwise write. The way out is a copy into another scope (the same scope
+   would collide on the key) or the file.
+6. **A key collision is a pre-check 409 that names the holder, and the index is the backstop.** The
+   pre-check reads the scope's templates and compares `templateKey()`; a race that slips past it hits
+   `uq_provisioned_template_ds_compare_configs_key` and is mapped to 409 by `isDuplicateTemplateKey`.
+   Nothing runs after a refused write, so no SAVEPOINT is needed (CODING_RULES.md).
+
+7. **A profile template's organization is its profile's, read at request time, never the row's copy.**
+   `organization_id` on a profile template is written from the profile for the audit log and goes stale
+   when the profile moves; `loadAuthorized`, the applier and the export all join the profile instead.
+   The scope is a profile OR an organization, never both: an organization's list and key check must say
+   `profile_id IS NULL`, or its profiles' templates show up as organization templates and collide with
+   them (`scopeWhere`). A profile template is parsed as the file item `profile: <name>` would be, with a
+   resolver that knows only the scope's profile, so takeover sees the same columns; the body may not name
+   `profile` itself. A read-only (provisioned) profile still takes UI templates (design Open Question 2).
+
+The export is `serializeTemplates` over every template row, so it is the whole file; committing a partial
+one would prune what it leaves out. It is admin-only at the guard (`@AdminOnly()`) and again in the
+service. Profile rows are handed to it with their profile's current organization and name: the
+organization counts towards the file-level `organizationId` decision (a file-level one the profile is not
+in would skip the item on the next boot), and the item is written as `profile: <name>`, plus its
+profile's `organizationId` when the file spans several organizations. That second half is what stops a
+profile name re-created in another organization from claiming the template: profile names are one
+install-wide namespace, and without a stated organization the mismatch check never runs (v0.2.97.57,
+/ship review). On the provisioning side, `profileId`, `profileName` and `profiles` are refused rather than
+warned about, since ignoring a misspelt scope key widens the template, and such an item is unidentified
+(no key), so it stops the whole prune that boot. Do not report it as an unresolved profile: that spares
+only profiles no resolved item reaches, and a `profileName: jvm` beside correctly spelt `jvm` items would
+prune its own template. An unresolved or mismatched profile item spares from the prune only the templates
+of profiles that no resolved item reaches.
 
 ### An artificial Dynatrace dashboard is per-workload, but its unique constraint is not
 
@@ -1083,6 +1250,45 @@ group name back to its members. Five things about it:
    `ds_metric_statistics` (`getMetricTrends`, `getBaselineRunComparisonFromStatistics`, the Compare
    table, ADAPT, SLO checks) already see group names and must **not** expand them. `?members=true`
    on the metric routes returns the raw per-pod series for drill-down.
+
+### A control group as a comparison baseline: one resolver, and a sentinel that is not a run
+
+`CONTROL_GROUP_BASELINE` (`'control-group'`, `@perfana/shared/types`, v0.2.97.51) lets the
+Compare card and the report's Comparisons section compare a run against its control group instead
+of one run. `modules/metrics/control-group-baseline.ts` is the one place that finds the group and
+reads its pooled `ds_control_group_statistics`; `MetricsService` (two new routes) and
+`ReportDataFetcherService.getControlGroupComparison` both go through it. Five things to keep:
+
+1. **The group is the one the latest `ds_adapt_conclusion` names**, falling back to the group keyed
+   on the run's own id — the same group the Regressions section and the anomaly card describe.
+   Neither table has an RLS policy or an org column the caller can be checked against, so every
+   reader authorizes the CURRENT run first and reads the group only after; the report path reads
+   it only once the run's own org-filtered statistics have answered.
+2. **Pair on dashboard id, panel, series AND metrics source** (v0.2.97.52), not on the labels the
+   run-vs-run path pairs on. ADAPT joins the control rows on `metrics_source_id IS NOT DISTINCT FROM` +
+   panel + series (`sql-builder.ts`), so a series whose source changed since the group's runs (a
+   renamed JMeter scenario is the known case) is "incomparable" there; leaving the source out of
+   the key made the report and the card show a delta and a band for it. The dashboard id keeps two
+   dashboards that share one source apart, which is why `loadControlGroupStatistics` ANDs both
+   ids rather than letting the source win, and the web client sends both (a non-uuid dashboard id
+   is dropped, since it names no dashboard). A control group shares the run's environment, which
+   is also why `dashboardMap` is ignored with it.
+3. **Never invent a baseline for an unpooled series.** URL panels and the synthetic "All
+   aggregated" series have no pooled rows; `getAggregatedSeriesRows` and `getUrlComparison` take
+   a `null` baseline run for this and emit the current value with an empty baseline. That is only
+   shown beside series that DO pair — see item 5.
+4. **The sentinel is stored in `compare_filter_presets.baseline_test_run_id`.** `baselineRunOf`
+   keeps it out of the run access checks, the org-inheritance parent lookup and the
+   release/annotations enrichment. A new reader of that column that treats it as a run id
+   reintroduces a 404 on save for every non-admin.
+5. **`getControlGroupComparison` has two empty answers, one rule, and the renderer words them
+   apart** (v0.2.97.52). `null` means there is nothing to show at all (the run has no statistics for the
+   source; the group is never read then). An empty `rows` list means there are rows but not one
+   has a baseline: the selection holds only unpooled series, the group's `control-group-statistics`
+   stage timed out, or its rows are under another source. Every exit goes through the same
+   `answer()` check. Returning baseline-less rows instead counts every one "within range" (the
+   renderer's rank-0 branch), which a stored CI report keeps forever. A partly paired section keeps
+   its unpaired rows, as run-vs-run does.
 
 ### Series grouping rules: who may write them, and what apply does
 
@@ -1897,3 +2103,13 @@ What is **not** closed: nothing stops the seventh site. The lint rule that would
 class, and the two unique indexes (`grafana_instances(organization_id, label)`,
 `dynatrace_queries(application_dashboard_id, label)`) that would make most of it
 unrepresentable, are filed in TODOS.md.
+
+**A child id in the request body is the same class one level down** (v0.2.97.59). An SLO's
+`applicationDashboardId` was resolved by id alone and its Grafana instance label, tags and metrics
+source copied into the SLO, while only `systemUnderTestId` had been authorized.
+`BenchmarkTagHelper.findInScope` now puts the authorized system **and** environment in the `where`,
+and a foreign id gets the same 400 as a missing one. Two details carry over to any such lookup: guard
+every scope value before the query, because TypeORM drops an undefined key and the lookup quietly
+widens to every system; and an update that may move the parent (`systemUnderTestId` on
+`PUT /benchmarks/:id`) has to authorize the new parent first, or the scope is the caller's choice.
+`benchmark-dashboard-scope.spec.ts` covers both and fails if either guard is removed.
