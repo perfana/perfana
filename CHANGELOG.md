@@ -15,6 +15,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - Documented the legend-format requirement where you set a Grafana integration up, with the log line to look for when a name was shortened. Series grouping gained the same note, because a rule can only group a pod out of a name that contains one.
 
+## [0.2.97.69] - 2026-11-11
+
+### Fixed
+- **A variable value typed in the Add or Edit dashboard dialog is no longer lost when you don't press Enter.** Text left in a templating variable's field was dropped, so clicking **Add Dashboard** or **Update Configuration** straight after typing stored the variable empty. The value is now kept as soon as you leave the field.
+
+- **A variable that depends on another one gets its values.** A query such as `label_values(jvm_uptime_seconds{namespace=~"$namespace"}, job)` was sent to Grafana with a literal `$namespace`, because the dialog asks for every variable's values before anything is picked, so it matched nothing and the dropdown stayed empty. A variable with no value yet, or set to All, now matches anything (`.*`), as Grafana does for an All variable, and `${var}`, `${var:format}` and `[[var]]` references are filled in too.
+- **Constant and interval variables offer their value.** Their values come from the variable's `query` when no options list was stored, which is the usual case, so a constant such as `maxHeapUsageProjection` no longer comes up empty.
+
+### Changed
+- **The dashboard dialogs say why a variable has no values to pick from.** When Perfana cannot look values up in Grafana, the field now shows the reason under it (for example "Grafana refused the request (HTTP 401); check the instance's credentials", "Grafana could not be reached", "the variable has no datasource configured in Grafana", or "values cannot be looked up from a datasource of type \"elasticsearch\"") instead of the same "No options found" text for every case. A variable that Grafana answered with no values says that instead. `POST /api/grafana/dashboards/variable-values` now answers 400 with the reason in `message` for these cases, where it used to answer 200 with an empty list. The message carries only Perfana's own wording: Grafana's response body is logged, never returned, and a dashboard you cannot access is reported the same as one that does not exist. A picked value that could break out of the variable's query (a quote, backslash, `;`, `|`, brace or control character) is refused with a message instead of being sent to Grafana; it was pasted in raw before, with Perfana's Grafana credentials.
+
+
 ## [0.2.97.68] - 2026-11-11
 
 ### Added

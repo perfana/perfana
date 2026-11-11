@@ -8,14 +8,13 @@ import {
   Box,
   Typography,
   TextField,
-  Autocomplete,
-  CircularProgress,
-  Chip
+  CircularProgress
 } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
 import { DashboardVariable, DashboardVariableOption } from '@/lib/types';
 import { ApplicationDashboard, VariableValue } from './types';
 import SeriesGroupingRulesSection from './SeriesGroupingRulesSection';
+import VariableValuesField, { variableValuesError } from './VariableValuesField';
 
 interface EditDashboardDialogProps {
   open: boolean;
@@ -46,6 +45,7 @@ export default function EditDashboardDialog({
   const [variableValues, setVariableValues] = useState<Record<string, string[]>>({});
   const [variableOptions, setVariableOptions] = useState<Record<string, DashboardVariableOption[]>>({});
   const [loadingVariables, setLoadingVariables] = useState<Record<string, boolean>>({});
+  const [variableErrors, setVariableErrors] = useState<Record<string, string>>({});
 
   // Helper function for auth headers
 
@@ -85,7 +85,9 @@ export default function EditDashboardDialog({
           [variable.name]: data
         }));
       } else {
-        console.error(`Failed to fetch values for variable ${variable.name}:`, response.statusText);
+        const reason = await variableValuesError(response);
+        console.error(`Failed to fetch values for variable ${variable.name}:`, reason);
+        setVariableErrors(prev => ({ ...prev, [variable.name]: reason }));
         setVariableOptions(prev => ({
           ...prev,
           [variable.name]: []
@@ -94,6 +96,10 @@ export default function EditDashboardDialog({
       
     } catch (error) {
       console.error(`Error fetching values for variable ${variable.name}:`, error);
+      setVariableErrors(prev => ({
+        ...prev,
+        [variable.name]: error instanceof Error ? error.message : 'the request could not be sent',
+      }));
       setVariableOptions(prev => ({
         ...prev,
         [variable.name]: []
@@ -121,7 +127,8 @@ export default function EditDashboardDialog({
       setVariableValues(initialVariableValues);
       setVariableOptions({});
       setLoadingVariables({});
-      
+      setVariableErrors({});
+
       // Fetch variable options from Grafana
       if (dashboard.variables && Array.isArray(dashboard.variables) && systemName && selectedEnvironment) {
         dashboard.variables.forEach(async (variable: DashboardVariable) => {
@@ -194,58 +201,16 @@ export default function EditDashboardDialog({
 
                 return (
                   <Box key={`${variable.name}-${index}`} sx={{ mt: 2 }}>
-                    <Autocomplete
-                      multiple
-                      freeSolo
-                      loading={isLoading}
-                      options={optionsWithAll}
-                      getOptionLabel={(option) => {
-                        if (typeof option === 'string') return option;
-                        return option.label;
-                      }}
+                    <VariableValuesField
+                      name={variable.name}
+                      label={variable.name}
                       value={effectiveValues}
-                      onChange={(_, newValue) => {
-                        const stringValues = newValue.map(v => {
-                          if (typeof v === 'string') return v;
-                          return v.value;
-                        });
-                        handleVariableChange(variable.name, stringValues);
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label={variable.name}
-                          variant="outlined"
-                          placeholder={`Select or enter ${variable.name} values`}
-                          helperText={
-                            options.length === 0 
-                              ? `No options found from Grafana. You can manually type values and press Enter.`
-                              : variable.query 
-                                ? `Query: ${typeof variable.query === 'string' ? variable.query : variable.query.query}` 
-                                : ''
-                          }
-                          InputProps={{
-                            ...params.InputProps,
-                            endAdornment: (
-                              <>
-                                {isLoading ? <CircularProgress size={20} /> : null}
-                                {params.InputProps.endAdornment}
-                              </>
-                            ),
-                          }}
-                        />
-                      )}
-                      renderTags={(value, getTagProps) =>
-                        value.map((option, tagIndex) => (
-                          <Chip
-                            variant="outlined"
-                            label={typeof option === 'string' ? option : option.label || option.value}
-                            size="small"
-                            {...getTagProps({ index: tagIndex })}
-                            key={typeof option === 'string' ? option : option.value}
-                          />
-                        ))
-                      }
+                      onChange={(values) => handleVariableChange(variable.name, values)}
+                      options={optionsWithAll}
+                      loading={isLoading}
+                      optionsLoaded={variable.name in variableOptions}
+                      fetchError={variableErrors[variable.name]}
+                      query={variable.query}
                     />
                   </Box>
                 );
