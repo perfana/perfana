@@ -28,10 +28,10 @@ describe('VariableValuesField', () => {
         value={[]}
         onChange={jest.fn()}
         options={[]}
-        fetchError="the Grafana query failed: 401 Unauthorized"
+        fetchError="Grafana could not be reached"
       />,
     );
-    expect(screen.getByText(/Could not load values from Grafana: the Grafana query failed: 401 Unauthorized/)).toBeInTheDocument();
+    expect(screen.getByText(/Could not load values from Grafana: Grafana could not be reached/)).toBeInTheDocument();
   });
 
   it('distinguishes an empty answer from a failure', () => {

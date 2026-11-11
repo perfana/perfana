@@ -57,8 +57,31 @@ export interface GrafanaDashboard {
  *   owned resource since RBAC Phase 4.
  * - Global admins bypass all authorization checks
  */
-/** A variable or datasource kind the value lookup does not handle; not a Grafana fault. */
-class UnsupportedVariableError extends Error {}
+/**
+ * Why a variable's values could not be looked up, worded for the user. Only this error's
+ * message leaves getVariableValues: everything else is logged and replaced, so a
+ * forbidden dashboard reads like a missing one and Grafana's raw response body (which can
+ * name internal hosts) never reaches the browser.
+ */
+class VariableLookupError extends Error {}
+
+/** A Grafana client failure reduced to its status or connection class. */
+function describeGrafanaFailure(error: unknown): string {
+  const e = (error && typeof error === 'object' ? error : {}) as {
+    message?: string; code?: string; response?: { status?: number };
+  };
+  const status = e.response?.status ?? Number(/status:? (\d{3})/i.exec(e.message ?? '')?.[1]);
+  if (status === 401 || status === 403) {
+    return `Grafana refused the request (HTTP ${status}); check the instance's credentials and that the account has at least Viewer`;
+  }
+  if (status === 404) return 'Grafana answered HTTP 404; the variable\'s datasource may no longer exist in Grafana';
+  if (status) return `Grafana answered HTTP ${status}`;
+  if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT/.test(`${e.code ?? ''} ${e.message ?? ''}`)
+    || /timeout|fetch failed/i.test(e.message ?? '')) {
+    return 'Grafana could not be reached';
+  }
+  return 'the Grafana query failed (details are in the API log)';
+}
 
 @Injectable()
 export class GrafanaDashboardsService {
@@ -567,12 +590,16 @@ export class GrafanaDashboardsService {
     // returns as the 400 message and the add/edit dashboard dialogs show under the field.
     // An empty array means Grafana answered and the variable genuinely has no values.
     try {
-      // Get the dashboard and its templating variables (access check happens in findOne)
-      const dashboard = await this.findOne(grafanaDashboardId, userId, roles);
+      // Get the dashboard and its templating variables (access check happens in findOne).
+      // Missing and forbidden get the same answer, like GET /grafana/dashboards/:id.
+      const dashboard = await this.findOne(grafanaDashboardId, userId, roles).catch((err: unknown) => {
+        this.logger.warn(`Variable lookup: dashboard ${grafanaDashboardId} unavailable: ${err instanceof Error ? err.message : err}`);
+        throw new VariableLookupError('the dashboard was not found');
+      });
 
       const variable = dashboard.templating_variables?.find(v => v.name === variableName);
       if (!variable) {
-        throw new Error(`variable "${variableName}" is not in the stored dashboard; re-sync the dashboard from Grafana`);
+        throw new VariableLookupError(`variable "${variableName}" is not in the stored dashboard; re-sync the dashboard from Grafana`);
       }
 
       // Get the Grafana instance
@@ -589,16 +616,23 @@ export class GrafanaDashboardsService {
 
         case 'interval':
         case 'constant':
-          // These types typically have predefined options
-          if (variable.options) {
+          if (variable.options?.length) {
             return variable.options.map(opt => ({ label: opt.text || opt.value, value: opt.value }));
+          }
+          // grafana-sync stores `options` only for a variable with a regex, so the value
+          // usually lives in `query`: a constant's single value, an interval's CSV list.
+          if (typeof variable.query === 'string' && variable.query.trim()) {
+            const values = variable.type === 'constant'
+              ? [variable.query.trim()]
+              : variable.query.split(',').map(v => v.trim()).filter(Boolean);
+            return values.map(v => ({ label: v, value: v }));
           }
           return [];
 
         case 'query': {
           // Get the datasource and execute the query
           if (!variable.datasource) {
-            throw new Error('the variable has no datasource configured in Grafana');
+            throw new VariableLookupError('the variable has no datasource configured in Grafana');
           }
 
           const datasourceUid = typeof variable.datasource === 'string'
@@ -606,7 +640,7 @@ export class GrafanaDashboardsService {
             : (variable.datasource.uid as string | undefined);
 
           if (!datasourceUid) {
-            throw new Error('the variable\'s datasource has no uid');
+            throw new VariableLookupError('the variable\'s datasource has no uid');
           }
 
           // Grafana embeds the concrete type beside the uid on every query variable it
@@ -628,7 +662,10 @@ export class GrafanaDashboardsService {
               : await this.grafanaClientService.getDatasource(grafanaInstance, datasourceUid);
 
             // Replace placeholders in the query
-            const processedQuery = this.processVariableQuery(variable, system, environment, existingVariables);
+            const processedQuery = this.processVariableQuery(
+              variable, system, environment, existingVariables,
+              (dashboard.templating_variables ?? []).map(v => v.name),
+            );
             
             let values: string[] = [];
 
@@ -652,7 +689,7 @@ export class GrafanaDashboardsService {
                 break;
 
               default:
-                throw new UnsupportedVariableError(
+                throw new VariableLookupError(
                   `values cannot be looked up from a datasource of type "${datasource.type}" (only InfluxDB and Prometheus are supported)`,
                 );
             }
@@ -663,44 +700,60 @@ export class GrafanaDashboardsService {
             return result;
 
           } catch (datasourceError) {
-            if (datasourceError instanceof UnsupportedVariableError) throw datasourceError;
-            const msg = datasourceError && typeof datasourceError === 'object' && 'message' in datasourceError
-              ? (datasourceError as Error).message : 'unknown error';
-            throw new Error(`the Grafana query failed: ${msg}`);
+            if (datasourceError instanceof VariableLookupError) throw datasourceError;
+            this.logger.warn(`Grafana query for variable ${variableName} failed: ${
+              datasourceError instanceof Error ? datasourceError.message : datasourceError}`);
+            throw new VariableLookupError(describeGrafanaFailure(datasourceError));
           }
         }
 
         default:
-          throw new UnsupportedVariableError(`variables of type "${variable.type}" have no values to look up`);
+          throw new VariableLookupError(`variables of type "${variable.type}" have no values to look up`);
       }
 
     } catch (error) {
-      this.logger.warn(`Cannot get values for variable ${variableName}: ${
-        error && typeof error === 'object' && 'message' in error ? (error as Error).message : error}`);
-      throw error;
+      if (error instanceof VariableLookupError) {
+        this.logger.warn(`Cannot get values for variable ${variableName}: ${error.message}`);
+        throw error;
+      }
+      this.logger.error(`Error getting variable values for ${variableName}:`, error);
+      throw new VariableLookupError('an unexpected error occurred (details are in the API log)');
     }
   }
 
+  /**
+   * Substitutes the dashboard's variables into a variable query. A variable with no value
+   * yet (the dialogs ask for every variable before anything is picked) or set to All
+   * becomes `.*`, which is what Grafana sends for an All multi-value variable — left as a
+   * literal `$namespace`, a chained query like `label_values(m{namespace=~"$namespace"}, job)`
+   * matches nothing. Handles `$var`, `${var}`, `${var:format}` and `[[var]]`.
+   */
   private processVariableQuery(
-    variable: TemplatingVariableDto, 
-    system: string, 
-    environment: string, 
-    existingVariables: Record<string, string[]>
+    variable: TemplatingVariableDto,
+    system: string,
+    environment: string,
+    existingVariables: Record<string, string[]>,
+    dashboardVariableNames: string[] = [],
   ): string {
     let query = typeof variable.query === 'string' ? variable.query : variable.query?.query || '';
 
-    // Replace system and environment placeholders
-    query = query
-      .replace(/\$system_under_test/g, system)
-      .replace(/\$test_environment/g, environment);
+    const known: Record<string, string[]> = {
+      ...existingVariables,
+      system_under_test: [system],
+      test_environment: [environment],
+    };
+    // Longest first, so `$job` is never replaced inside `$jobs`.
+    const names = [...new Set([...Object.keys(known), ...dashboardVariableNames])]
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
 
-    // Replace other variable placeholders
-    Object.entries(existingVariables).forEach(([varName, values]) => {
-      if (varName !== 'system_under_test' && varName !== 'test_environment') {
-        const replaceValue = values.length > 0 ? values.join('|') : '';
-        query = query.replace(new RegExp(`\\$${varName}`, 'g'), replaceValue);
-      }
-    });
+    for (const name of names) {
+      const values = (known[name] ?? []).filter(v => v && v !== 'All' && v !== '$__all');
+      const replacement = values.length > 0 ? values.join('|') : '.*';
+      const n = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const ref = new RegExp(`\\$\\{${n}(?::[^}]*)?\\}|\\[\\[${n}\\]\\]|\\$${n}(?![A-Za-z0-9_])`, 'g');
+      query = query.replace(ref, () => replacement);
+    }
 
     return query;
   }
