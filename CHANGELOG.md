@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.70] - 2026-11-11
+
+### Fixed
+- **Live metrics collection no longer stops dead on a dashboard whose panels have no legend format.** A Grafana panel that gives its queries no `legendFormat` is named by Grafana after the query's whole label set, which on an ordinary Kubernetes scrape runs past the 255-character limit Perfana stores a series name in. The live collector rejected the whole batch for that source and retried it every scheduler cycle for the rest of the run, collecting nothing — while the same dashboard collected fine during an analysis, because only that path shortened the name. Both now shorten it the same way, from one definition, so a run keeps collecting.
+- **Perfana now tells you which panel to fix.** Shortening a series name can merge two series into one, because the name is part of what identifies a data point — so the worker log names the panel and the column instead of truncating in silence: `Give these a legendFormat in Grafana: metric_name on panel 26 "Configured Maximum Heap Size" of "Open Liberty - acc"`. It lists up to ten panels and says how many more it did not list.
+- **A panel whose series only differ past that limit no longer fails an analysis.** Shortening such names makes them identical, and two identical data points in one write are rejected outright by the database. The writers now keep one of each — the last value wins — instead of losing the whole batch. This is reachable on a `topk()` panel whose distinguishing label is a long method signature or URL.
+- A series name containing an emoji or other astral character is no longer stored mangled when it has to be shortened; the character is dropped whole rather than cut in half.
+
+### Changed
+- Documented the legend-format requirement where you set a Grafana integration up, with the log line to look for when a name was shortened. Series grouping gained the same note, because a rule can only group a pod out of a name that contains one.
+
 ## [0.2.97.69] - 2026-11-11
 
 ### Fixed
@@ -14,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **The dashboard dialogs say why a variable has no values to pick from.** When Perfana cannot look values up in Grafana, the field now shows the reason under it (for example "Grafana refused the request (HTTP 401); check the instance's credentials", "Grafana could not be reached", "the variable has no datasource configured in Grafana", or "values cannot be looked up from a datasource of type \"elasticsearch\"") instead of the same "No options found" text for every case. A variable that Grafana answered with no values says that instead. `POST /api/grafana/dashboards/variable-values` now answers 400 with the reason in `message` for these cases, where it used to answer 200 with an empty list. The message carries only Perfana's own wording: Grafana's response body is logged, never returned, and a dashboard you cannot access is reported the same as one that does not exist. A picked value that could break out of the variable's query (a quote, backslash, `;`, `|`, brace or control character) is refused with a message instead of being sent to Grafana; it was pasted in raw before, with Perfana's Grafana credentials.
+
 
 ## [0.2.97.68] - 2026-11-11
 

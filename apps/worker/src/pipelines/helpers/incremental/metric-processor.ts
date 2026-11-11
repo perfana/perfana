@@ -17,6 +17,13 @@ import type { Logger } from 'pino';
 import type { EntityManager } from 'typeorm';
 import { WorkerDatabaseService } from '../../../common/database.service.js';
 import { maxRowsPerStatement } from '../../../utils/bind-params.js';
+import {
+  clampToDsMetricsWidths,
+  collapsedKeyNote,
+  dedupeByDsMetricsKey,
+  newTruncationReport,
+  truncationWarning,
+} from '../ds-metrics-columns.js';
 
 interface GrafanaMetricRecord {
   metric_name: string;
@@ -285,20 +292,25 @@ export class MetricProcessor {
       return;
     }
 
-    // One row per conflict key, last wins. A multi-row INSERT ... ON CONFLICT DO UPDATE
-    // whose VALUES carry the same key twice is rejected outright by Postgres
-    // ("cannot affect row a second time", 21000) and would fail the whole
-    // collection. Two Dynatrace queries on one panel with the same metric name and no
-    // group-by produce exactly that; the per-row loop this replaced simply updated the
-    // row twice.
-    const byKey = new Map<string, FlattenedMetricRecord>();
-    for (const r of records) {
-      byKey.set(
-        `${r.test_run_id}|${r.application_dashboard_id}|${r.panel_id}|${r.metric_name}|${new Date(r.time).getTime()}`,
-        r
-      );
+    // Clamp, then collapse to one row per conflict key — in that order, over the whole set.
+    // `ds-metrics-columns.ts` owns the reasoning for both; what matters here is that this
+    // writer deduplicates UNCONDITIONALLY, because its collisions predate the clamp (two
+    // Dynatrace queries on one panel with the same metric name and no group-by).
+    const report = newTruncationReport();
+    const clamped = records.map(raw => clampToDsMetricsWidths(raw, report));
+    const unique = dedupeByDsMetricsKey(clamped);
+
+    // Worth warning even though collection now survives it: `metric_name` is part of the
+    // primary key, so two series agreeing on their first 255 characters merged above and one
+    // of them is lost. The usual cause is a Grafana panel with no `legendFormat`.
+    const warning = truncationWarning(report);
+    if (warning) {
+      this.logger.warn(warning);
     }
-    const unique = [...byKey.values()];
+    const collapsed = collapsedKeyNote(clamped.length, unique.length);
+    if (collapsed) {
+      this.logger.debug(collapsed);
+    }
 
     await this.db.transaction(async (manager: EntityManager) => {
       // Derived from the column list, not hand-tuned: the insert binds

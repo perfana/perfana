@@ -16,22 +16,43 @@ The primary time-series table, converted to a TimescaleDB hypertable for automat
 
 ```sql
 CREATE TABLE ds_metrics (
-  id UUID PRIMARY KEY,
-  test_run_id UUID NOT NULL,
-  application_dashboard_id UUID,
-  panel_id TEXT,
-  metric_name TEXT NOT NULL,
-  timestamp TIMESTAMPTZ NOT NULL,
-  value DOUBLE PRECISION NOT NULL,
-  source TEXT, -- 'grafana', 'dynatrace', 'performance_test'
-  organization_id UUID NOT NULL
+  test_run_id character varying(255) NOT NULL,
+  application_dashboard_id uuid NOT NULL,
+  dashboard_uid character varying(255) NOT NULL,
+  panel_id integer NOT NULL,
+  "time" timestamptz NOT NULL,
+  metric_name character varying(255) NOT NULL,
+  panel_title character varying(500),
+  dashboard_label character varying(255),
+  unit character varying(50),
+  ramp_up boolean,
+  value double precision,
+  timestep double precision,
+  benchmark_ids text[],
+  errors jsonb,
+  metrics_source_id uuid,
+  organization_id uuid,
+  team_id uuid
+  -- plus created_at / updated_at / created_by / updated_by
 );
 
--- Convert to hypertable (partitioned by timestamp)
-SELECT create_hypertable('ds_metrics', 'timestamp');
+-- Convert to hypertable (partitioned by time)
+SELECT create_hypertable('ds_metrics', 'time');
+
+-- The upsert key every writer declares in its ON CONFLICT
+CREATE UNIQUE INDEX uniq_ds_metrics_upsert
+  ON ds_metrics (test_run_id, application_dashboard_id, panel_id, metric_name, "time");
 ```
 
 **Scale**: Millions of rows per test run — each metric/timestamp combination is a row.
+
+**The varchar widths are load-bearing.** `metric_name` is `varchar(255)` *and* part of the
+conflict key above, so an over-long series name cannot simply be stored: the worker clamps it,
+and two names agreeing on their first 255 characters merge into one row. The widths, the clamp
+and the dedup that has to follow it live in one place,
+`apps/worker/src/pipelines/helpers/ds-metrics-columns.ts` — see "Every `ds_metrics` writer clamps
+to the column widths, from one definition" in `apps/worker/CLAUDE.md`. The usual cause of an
+over-long name is a Grafana panel whose query carries no `legendFormat`; see [[Integrations]].
 
 ## Why TimescaleDB?
 
@@ -45,11 +66,11 @@ SELECT create_hypertable('ds_metrics', 'timestamp');
 
 ### Time-range queries (optimized by hypertable chunking)
 ```sql
-SELECT metric_name, timestamp, value
+SELECT metric_name, "time", value
 FROM ds_metrics
 WHERE test_run_id = $1
-  AND timestamp BETWEEN $2 AND $3
-ORDER BY timestamp;
+  AND "time" BETWEEN $2 AND $3
+ORDER BY "time";
 ```
 
 ### Aggregations (used by StatisticsPipeline)
