@@ -7,6 +7,7 @@ import {
 } from './types';
 import { batchPanelQueries, processBatchedResponses, type RequestBatch, type TimeRangeOverride } from './batching';
 import { transformGrafanaResponseToMetrics } from './formatter';
+import { requireGrafanaAuthHeader } from './auth';
 import { validateUrl, type UrlValidationOptions } from '../../security/url-validator';
 
 /**
@@ -28,7 +29,16 @@ import { validateUrl, type UrlValidationOptions } from '../../security/url-valid
  */
 export interface GrafanaConfig {
   url: string;
-  apiKey: string;
+  /**
+   * Service-account token. Optional since v0.2.97.48: an instance may authenticate
+   * with `username`/`password` instead. One of the two must be present — the
+   * request builders go through requireGrafanaAuthHeader, which throws otherwise.
+   */
+  apiKey?: string;
+  /** Basic-auth user, used only when `apiKey` is absent. */
+  username?: string;
+  /** Basic-auth password, used only when `apiKey` is absent. */
+  password?: string;
   orgId?: string;
   timeout?: number;
   concurrency?: number;
@@ -95,6 +105,16 @@ export class GrafanaClient {
     // Explicit `{ proxy }` when configured, else `{}` so axios reads env
     // HTTP(S)_PROXY and honors NO_PROXY on its own (internal hosts bypass).
     this.proxyOpts = grafanaConfig.proxy ? { proxy: grafanaConfig.proxy } : {};
+  }
+
+  /**
+   * Authorization header for every request: `Bearer <token>` when an API key is
+   * configured, else `Basic <base64>` from username/password. Built per request
+   * rather than in the constructor so a credential-less config fails at the call
+   * that needs it, with the instance url in the message, instead of at wiring time.
+   */
+  private authHeader(): string {
+    return requireGrafanaAuthHeader(this.grafanaConfig, this.grafanaConfig.url);
   }
 
   /** Per-request timeout (ms); axios connect+response bound. */
@@ -257,6 +277,12 @@ export class GrafanaClient {
     const maxRetries = 3;
     let lastError: Error | null = null;
 
+    // Built once, before the loop: a config with no credentials is not something a
+    // retry can fix, and inside the loop it would cost 1s+2s+4s of backoff per batch
+    // before surfacing. executeBatchedRequests awaits these with Promise.allSettled,
+    // so throwing here fails this batch alone.
+    const authorization = this.authHeader();
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         this.logger.debug('🔍 Grafana request:', {
@@ -272,7 +298,7 @@ export class GrafanaClient {
           requestBatch.request.request_body,
           {
             headers: {
-              'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,
+              'Authorization': authorization,
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
@@ -331,7 +357,7 @@ export class GrafanaClient {
     try {
       const response = await axios.get(`${this.originUrl}/api/datasources/uid/${encodeURIComponent(uid)}`, {
         headers: {
-          'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,
+          'Authorization': this.authHeader(),
           'Accept': 'application/json',
         },
         timeout: this.requestTimeout,

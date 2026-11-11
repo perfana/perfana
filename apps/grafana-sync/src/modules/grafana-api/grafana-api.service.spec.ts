@@ -100,6 +100,60 @@ describe('GrafanaApiService', () => {
       );
     });
 
+    it('sends basic auth for an instance with a username/password and no API key', async () => {
+      // grafana_instances has carried these two columns all along; until v0.2.97.48
+      // every call site hard-coded `Bearer ${apiKey}` and such a row got
+      // `Bearer undefined`, which Grafana answers as an opaque 401.
+      const basicInstance: Partial<GrafanaInstance> = {
+        ...mockInstance,
+        apiKey: undefined,
+        username: 'admin',
+        password: 's3cret',
+      };
+      jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(basicInstance as any);
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({}) });
+
+      await service.getDashboardByUid('test-id', 'test-uid');
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://grafana.test/api/dashboards/uid/test-uid',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: `Basic ${Buffer.from('admin:s3cret').toString('base64')}`,
+          }),
+        }),
+      );
+    });
+
+    it('still prefers the API key when both are configured', async () => {
+      const bothInstance: Partial<GrafanaInstance> = {
+        ...mockInstance,
+        username: 'admin',
+        password: 's3cret',
+      };
+      jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(bothInstance as any);
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({}) });
+
+      await service.getDashboardByUid('test-id', 'test-uid');
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer test-api-key' }),
+        }),
+      );
+    });
+
+    it('refuses an instance with no credentials at all instead of calling Grafana', async () => {
+      const noCreds: Partial<GrafanaInstance> = { ...mockInstance, apiKey: undefined };
+      jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(noCreds as any);
+
+      await expect(service.getDashboardByUid('test-id', 'test-uid')).rejects.toThrow(
+        /has no credentials configured/,
+      );
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
     it('should throw error if instance not found', async () => {
       jest.spyOn(grafanaInstanceRepo, 'findOne').mockResolvedValue(null);
 

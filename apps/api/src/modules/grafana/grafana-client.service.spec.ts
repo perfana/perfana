@@ -4,7 +4,7 @@
  * Comprehensive tests covering:
  * - getGrafanaInstance: repository lookup, missing instance error
  * - grafanaCall: URL building (server_url preference), Bearer auth headers, HTTP error handling,
- *   SSRF-blocked URLs, re-throw of non-BadRequestException errors
+ *   SSRF-blocked URLs, re-throw of non-BadRequestException errors, Basic auth fallback
  * - deleteDashboard: DELETE method, 404 graceful handling, non-404 errors
  * - createAnnotation: POST body construction, optional field inclusion, HTTP errors
  * - deleteAnnotation: DELETE with 404 tolerance, error propagation
@@ -40,6 +40,14 @@ const VALID_GRAFANA_INSTANCE = {
 const INSTANCE_NO_SERVER_URL = {
   ...VALID_GRAFANA_INSTANCE,
   server_url: undefined,
+};
+
+/** An instance behind HTTP basic auth: no service-account token, username + password set. */
+const BASIC_AUTH_INSTANCE = {
+  ...VALID_GRAFANA_INSTANCE,
+  api_key: '',
+  username: 'admin',
+  password: 's3cret',
 };
 
 const INFLUX_DATASOURCE = {
@@ -213,6 +221,41 @@ describe('GrafanaClientService', () => {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       });
+    });
+
+    it('should set a Basic header when the instance has username/password and no api_key', async () => {
+      // The columns were persisted and masked all along; nothing ever sent them, so
+      // such an instance received `Bearer ` and read back as an auth failure.
+      fetchMock.mockResolvedValue(makeOkResponse({}));
+
+      await service.grafanaCall(BASIC_AUTH_INSTANCE, '/api/health');
+
+      const [, options] = fetchMock.mock.calls[0];
+      expect((options as RequestInit).headers).toMatchObject({
+        Authorization: `Basic ${Buffer.from('admin:s3cret').toString('base64')}`,
+      });
+    });
+
+    it('should prefer the api_key when the instance also has username/password', async () => {
+      fetchMock.mockResolvedValue(makeOkResponse({}));
+
+      await service.grafanaCall(
+        { ...BASIC_AUTH_INSTANCE, api_key: 'test-api-key-abc' },
+        '/api/health',
+      );
+
+      const [, options] = fetchMock.mock.calls[0];
+      expect((options as RequestInit).headers).toMatchObject({
+        Authorization: 'Bearer test-api-key-abc',
+      });
+    });
+
+    it('should refuse an instance with no credentials rather than calling Grafana', async () => {
+      await expect(
+        service.grafanaCall({ ...VALID_GRAFANA_INSTANCE, api_key: '' }, '/api/health'),
+      ).rejects.toThrow(/has no credentials configured/);
+
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('should return the parsed JSON body on a successful response', async () => {

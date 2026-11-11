@@ -7,6 +7,7 @@ import { Repository } from 'typeorm';
 import { GrafanaInstance, ProxyServer } from '@perfana/shared/entities';
 import { validateUrl, sanitizeUrl } from '@perfana/shared/security';
 import { buildProxyAgent } from '@perfana/shared/services/proxy';
+import { grafanaAuthHeader, requireGrafanaAuthHeader } from '@perfana/shared/services/grafana/auth';
 
 /**
  * Provides Grafana HTTP API access for dashboard management operations.
@@ -84,9 +85,7 @@ export class GrafanaApiService {
       throw new Error(`Grafana instance ${instanceId} not found`);
     }
 
-    if (!instance.apiKey) {
-      throw new Error(`Grafana instance ${instance.label} has no API key configured`);
-    }
+    this.assertUsable(instance);
 
     return instance;
   }
@@ -108,7 +107,7 @@ export class GrafanaApiService {
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      Authorization: `Bearer ${instance.apiKey}`,
+      Authorization: this.authHeader(instance),
     };
 
     this.logger.debug(`GET ${sanitizeUrl(url) || url}`);
@@ -138,7 +137,7 @@ export class GrafanaApiService {
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      Authorization: `Bearer ${instance.apiKey}`,
+      Authorization: this.authHeader(instance),
     };
 
     this.logger.debug(`POST ${sanitizeUrl(url) || url}`);
@@ -173,7 +172,7 @@ export class GrafanaApiService {
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      Authorization: `Bearer ${instance.apiKey}`,
+      Authorization: this.authHeader(instance),
     };
 
     this.logger.debug(`DELETE ${sanitizeUrl(url) || url}`);
@@ -339,8 +338,8 @@ export class GrafanaApiService {
 
   /**
    * The one check the deleted label path did that `get`/`post` do not: a row with no
-   * API key would otherwise send `Authorization: Bearer undefined` and fail as a 401
-   * from Grafana rather than as a configuration error.
+   * credentials at all would otherwise be sent without an Authorization header and
+   * fail as a 401 from Grafana rather than as a configuration error.
    */
   /**
    * Datasource lookups against an instance the caller already holds. These replace
@@ -365,10 +364,20 @@ export class GrafanaApiService {
   }
 
   private assertUsable(instance: GrafanaInstance): void {
-    if (!instance?.apiKey) {
+    if (!grafanaAuthHeader(instance)) {
       throw new Error(
-        `Grafana instance ${instance?.label ?? '(unknown)'} has no API key configured`,
+        `Grafana instance ${instance?.label ?? '(unknown)'} has no credentials configured — ` +
+          'set an API key, or a username and password for basic auth',
       );
     }
+  }
+
+  /**
+   * `Bearer <api_key>`, or `Basic <base64>` when the instance is configured with a
+   * username and password instead. Throws for a row with neither, which is the one
+   * thing `get`/`post`/`delete` cannot do anything useful with.
+   */
+  private authHeader(instance: GrafanaInstance): string {
+    return requireGrafanaAuthHeader(instance, instance?.label);
   }
 }

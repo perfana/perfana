@@ -78,6 +78,29 @@ describe('grafana-config-cache', () => {
       await expect(tryGetGrafanaConfig()).rejects.toThrow(/invalid/i);
     });
 
+    test('accepts a row with a username/password and no apiKey (basic auth)', async () => {
+      // grafana_instances may authenticate with basic auth instead of a service-account
+      // token. Before v0.2.97.48 this row was classified 'invalid' and every
+      // Grafana-dependent job in the deployment was skipped for it.
+      findMock.mockResolvedValue([
+        {
+          id: 'inst-1',
+          server_url: 'https://grafana.example',
+          apiKey: '',
+          username: 'admin',
+          password: 's3cret',
+          orgId: '1',
+        },
+      ]);
+
+      const config = await tryGetGrafanaConfig();
+      expect(config).toMatchObject({
+        url: 'https://grafana.example',
+        username: 'admin',
+        password: 's3cret',
+      });
+    });
+
     test('throws when the database query fails', async () => {
       findMock.mockRejectedValue(new Error('connection refused'));
 
@@ -186,6 +209,32 @@ describe('grafana-config-cache', () => {
 
     test('returns null when the row is missing required fields', async () => {
       findOneMock.mockResolvedValue({ id: 'inst-2', server_url: '', apiKey: '', orgId: '1' });
+
+      expect(await getGrafanaConfigById('inst-2')).toBeNull();
+    });
+
+    test('resolves a basic-auth instance and carries its credentials into the config', async () => {
+      findOneMock.mockResolvedValue({
+        id: 'inst-2',
+        server_url: 'https://g2',
+        apiKey: null,
+        username: 'admin',
+        password: 's3cret',
+        orgId: '1',
+      });
+
+      const resolved = await getGrafanaConfigById('inst-2');
+      expect(resolved?.config).toMatchObject({
+        url: 'https://g2',
+        username: 'admin',
+        password: 's3cret',
+      });
+    });
+
+    test('returns null for a row with a username but no password', async () => {
+      findOneMock.mockResolvedValue({
+        id: 'inst-2', server_url: 'https://g2', apiKey: '', username: 'admin', password: '', orgId: '1',
+      });
 
       expect(await getGrafanaConfigById('inst-2')).toBeNull();
     });

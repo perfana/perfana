@@ -212,6 +212,20 @@ v0.2.89.0 fixed three symptoms of this: the grafana-sync restore sweep re-pushin
 
 ### The Grafana service account needs Viewer, and Editor only for the write features
 
+**Basic auth is a supported alternative to the token** (v0.2.97.48). `grafana_instances`
+carries `username` and `password` beside `api_key`, and
+`grafanaAuthHeader()` (`@perfana/shared/services/grafana/auth`) is the single place that
+picks between them: a non-blank `api_key` always wins, otherwise a username **and**
+password become `Basic <base64>`, and a row with neither produces no header and a
+configuration error naming the instance. All ten Grafana call sites go through it —
+apps/api's `GrafanaClientService`, apps/grafana-sync's `GrafanaApiService` and the shared
+`GrafanaClient` the worker queries panels with. A new call site that writes
+`Bearer ${apiKey}` by hand loses basic auth for that one endpoint silently, which is how
+the columns came to be stored, encrypted and masked for years without ever being sent.
+The same rule governs *usability*: the worker's `grafana-config-cache.ts` gates an
+instance on `server_url` plus `grafanaAuthHeader()`, not on `api_key`, or a basic-auth
+instance is classified `invalid` and every Grafana stage is skipped for it.
+
 Perfana's Grafana token runs on **Viewer** for collection and dashboard discovery, **Editor**
 for dashboard push, folder creation and annotations. Nothing needs org **Admin** any more
 (v0.2.97.47) — and the one call that used to is the trap worth knowing about:
@@ -427,7 +441,7 @@ Symptom index. Each entry names the cause and points at the file that explains i
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **perfana** (23961 symbols, 66747 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **perfana** (24092 symbols, 67004 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
