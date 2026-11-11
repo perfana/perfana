@@ -1361,8 +1361,88 @@ describe('GrafanaDashboardsService', () => {
       });
     });
 
+    describe('Chained and value-less variables', () => {
+      const libertyDashboard = {
+        ...mockDashboardEntity,
+        templating_variables: [
+          { name: 'namespace', type: 'query', datasource: { uid: 'bcm-prom', type: 'prometheus' },
+            query: { qryType: 1, query: 'label_values(jvm_uptime_seconds, namespace)' } },
+          { name: 'job', type: 'query', datasource: { uid: 'bcm-prom', type: 'prometheus' },
+            query: { qryType: 1, query: 'label_values(jvm_uptime_seconds{namespace=~"$namespace"},job)' } },
+          { name: 'jobs_total', type: 'query', datasource: { uid: 'bcm-prom', type: 'prometheus' },
+            query: 'label_values(x{a=~"${namespace:regex}", b=~"[[job]]", c=~"$jobs_total_x"}, y)' },
+          { name: 'maxHeapUsageProjection', type: 'constant', query: '1' },
+          { name: 'every', type: 'interval', query: '1m, 5m,10m' },
+        ],
+      };
+
+      beforeEach(() => {
+        jest.spyOn(service, 'findOne').mockResolvedValue(libertyDashboard as any);
+        grafanaClientService.getGrafanaInstance.mockResolvedValue(mockGrafanaInstance as any);
+        grafanaClientService.getPrometheusVariableValues.mockResolvedValue(['orders']);
+      });
+
+      const sentQuery = () => grafanaClientService.getPrometheusVariableValues.mock.calls[0]![2];
+
+      it('matches anything for a parent variable nothing has been picked for', async () => {
+        await service.getVariableValues(mockDashboardEntity.id, 'job', 's', 'acc', {}, mockUserId, mockRoles);
+        expect(sentQuery()).toBe('label_values(jvm_uptime_seconds{namespace=~".*"},job)');
+      });
+
+      it('uses the picked values, and treats All as anything', async () => {
+        await service.getVariableValues(mockDashboardEntity.id, 'job', 's', 'acc',
+          { namespace: ['liberty-acc', 'liberty-prod'] }, mockUserId, mockRoles);
+        expect(sentQuery()).toBe('label_values(jvm_uptime_seconds{namespace=~"liberty-acc|liberty-prod"},job)');
+
+        grafanaClientService.getPrometheusVariableValues.mockClear();
+        await service.getVariableValues(mockDashboardEntity.id, 'job', 's', 'acc',
+          { namespace: ['All'] }, mockUserId, mockRoles);
+        expect(sentQuery()).toBe('label_values(jvm_uptime_seconds{namespace=~".*"},job)');
+      });
+
+      it('handles ${var:format} and [[var]], and leaves an unknown longer name alone', async () => {
+        await service.getVariableValues(mockDashboardEntity.id, 'jobs_total', 's', 'acc',
+          { job: ['orders'] }, mockUserId, mockRoles);
+        expect(sentQuery()).toBe('label_values(x{a=~".*", b=~"orders", c=~"$jobs_total_x"}, y)');
+      });
+
+      it('refuses a picked value that could break out of the query, and sends nothing', async () => {
+        await expect(service.getVariableValues(mockDashboardEntity.id, 'job', 's', 'acc',
+          { namespace: ['x"}) or vector(1) #'] }, mockUserId, mockRoles))
+          .rejects.toThrow('the value picked for "namespace" contains characters that cannot be used in a query');
+        expect(grafanaClientService.getPrometheusVariableValues).not.toHaveBeenCalled();
+      });
+
+      it('refuses a system name that could break out of the query', async () => {
+        await expect(service.getVariableValues(mockDashboardEntity.id, 'job', "a'; DROP", 'acc', {}, mockUserId, mockRoles))
+          .rejects.toThrow('"system_under_test" contains characters');
+      });
+
+      it('keeps an empty system or environment literal instead of widening it to .*', async () => {
+        (libertyDashboard.templating_variables[1]!.query as { query: string }).query =
+          'label_values(m{s="$system_under_test", e="${test_environment}"}, job)';
+        try {
+          await service.getVariableValues(mockDashboardEntity.id, 'job', '', '', {}, mockUserId, mockRoles);
+          expect(sentQuery()).toBe('label_values(m{s="", e=""}, job)');
+        } finally {
+          (libertyDashboard.templating_variables[1]!.query as { query: string }).query =
+            'label_values(jvm_uptime_seconds{namespace=~"$namespace"},job)';
+        }
+      });
+
+      it('returns a constant from its query when no options were stored', async () => {
+        await expect(service.getVariableValues(mockDashboardEntity.id, 'maxHeapUsageProjection', 's', 'acc', {}, mockUserId, mockRoles))
+          .resolves.toEqual([{ label: '1', value: '1' }]);
+      });
+
+      it('returns an interval list from its query when no options were stored', async () => {
+        await expect(service.getVariableValues(mockDashboardEntity.id, 'every', 's', 'acc', {}, mockUserId, mockRoles))
+          .resolves.toEqual(['1m', '5m', '10m'].map(v => ({ label: v, value: v })));
+      });
+    });
+
     describe('Edge Cases', () => {
-      it('should return empty array when dashboard has no templating variables', async () => {
+      it('throws when dashboard has no templating variables', async () => {
         // Arrange
         const dashboardWithoutVars = {
           ...mockDashboardEntity,
@@ -1372,7 +1452,7 @@ describe('GrafanaDashboardsService', () => {
         jest.spyOn(service, 'findOne').mockResolvedValue(dashboardWithoutVars as any);
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'any_variable',
           'system1',
@@ -1380,18 +1460,15 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow(/not in the stored dashboard/);
       });
 
-      it('should return empty array when variable is not found', async () => {
+      it('throws when variable is not found', async () => {
         // Arrange
         jest.spyOn(service, 'findOne').mockResolvedValue(mockDashboardEntity as any);
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'non_existent_variable',
           'system1',
@@ -1399,10 +1476,7 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow(/variable "non_existent_variable" is not in the stored dashboard/);
       });
 
       it('should return empty array for custom variable with empty query', async () => {
@@ -1464,7 +1538,7 @@ describe('GrafanaDashboardsService', () => {
         expect(result).toEqual([]);
       });
 
-      it('should return empty array for unsupported variable type', async () => {
+      it('throws for unsupported variable type', async () => {
         // Arrange
         const dashboardWithUnsupportedType = {
           ...mockDashboardEntity,
@@ -1479,7 +1553,7 @@ describe('GrafanaDashboardsService', () => {
         jest.spyOn(service, 'findOne').mockResolvedValue(dashboardWithUnsupportedType as any);
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'unsupported',
           'system1',
@@ -1487,10 +1561,7 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow(/type "adhoc" have no values/);
       });
 
       it('should handle query as object with nested query property', async () => {
@@ -1534,12 +1605,12 @@ describe('GrafanaDashboardsService', () => {
     });
 
     describe('Error Scenarios', () => {
-      it('should return empty array when dashboard does not exist', async () => {
+      it('answers "not found" when the dashboard does not exist', async () => {
         // Arrange
         jest.spyOn(service, 'findOne').mockRejectedValue(new NotFoundException('Not found'));
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           'non-existent-id',
           'variable',
           'system1',
@@ -1547,13 +1618,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow('the dashboard was not found');
       });
 
-      it('should return empty array when variable has no datasource defined', async () => {
+      it('throws when variable has no datasource defined', async () => {
         // Arrange
         const dashboardWithNoDatasource = {
           ...mockDashboardEntity,
@@ -1569,7 +1637,7 @@ describe('GrafanaDashboardsService', () => {
         jest.spyOn(service, 'findOne').mockResolvedValue(dashboardWithNoDatasource as any);
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'var',
           'system1',
@@ -1577,13 +1645,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow(/no datasource configured/);
       });
 
-      it('should return empty array when datasource has no UID', async () => {
+      it('throws when datasource has no UID', async () => {
         // Arrange
         const dashboardWithNoDatasourceUid = {
           ...mockDashboardEntity,
@@ -1600,7 +1665,7 @@ describe('GrafanaDashboardsService', () => {
         jest.spyOn(service, 'findOne').mockResolvedValue(dashboardWithNoDatasourceUid as any);
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'var',
           'system1',
@@ -1608,13 +1673,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow(/has no uid/);
       });
 
-      it('should return empty array when datasource query fails', async () => {
+      it('reports an unreachable Grafana when the datasource query times out', async () => {
         // Arrange
         const dashboardWithQueryVar = {
           ...mockDashboardEntity,
@@ -1633,7 +1695,7 @@ describe('GrafanaDashboardsService', () => {
         grafanaClientService.getDatasource.mockRejectedValue(new Error('Connection timeout'));
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'system_under_test',
           'TestSystem',
@@ -1641,13 +1703,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert - no longer returns demo fallback values
-        expect(result).toEqual([]);
+        )).rejects.toThrow('Grafana could not be reached');
       });
 
-      it('should return empty array for environment variable on datasource error', async () => {
+      it('throws for environment variable on datasource error', async () => {
         // Arrange
         const dashboardWithEnvVar = {
           ...mockDashboardEntity,
@@ -1666,7 +1725,7 @@ describe('GrafanaDashboardsService', () => {
         grafanaClientService.getDatasource.mockRejectedValue(new Error('Query failed'));
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'test_environment',
           'system1',
@@ -1674,13 +1733,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert - no longer returns demo fallback values
-        expect(result).toEqual([]);
+        )).rejects.toThrow('the Grafana query failed (details are in the API log)');
       });
 
-      it('should return empty array for service variable on datasource error', async () => {
+      it('throws for service variable on datasource error', async () => {
         // Arrange
         const dashboardWithServiceVar = {
           ...mockDashboardEntity,
@@ -1699,7 +1755,7 @@ describe('GrafanaDashboardsService', () => {
         grafanaClientService.getDatasource.mockRejectedValue(new Error('Query failed'));
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'service',
           'system1',
@@ -1707,13 +1763,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert - no longer returns demo fallback values
-        expect(result).toEqual([]);
+        )).rejects.toThrow('the Grafana query failed (details are in the API log)');
       });
 
-      it('should return empty array for unknown variable on datasource error', async () => {
+      it('throws for unknown variable on datasource error', async () => {
         // Arrange
         const dashboardWithUnknownVar = {
           ...mockDashboardEntity,
@@ -1732,7 +1785,7 @@ describe('GrafanaDashboardsService', () => {
         grafanaClientService.getDatasource.mockRejectedValue(new Error('Query failed'));
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'custom_metric',
           'system1',
@@ -1740,13 +1793,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert - no longer returns demo fallback values
-        expect(result).toEqual([]);
+        )).rejects.toThrow('the Grafana query failed (details are in the API log)');
       });
 
-      it('should return empty array for unsupported datasource type', async () => {
+      it('throws for unsupported datasource type', async () => {
         // Arrange
         const unsupportedDatasource = { ...mockDatasource, type: 'elasticsearch' };
         const dashboardWithQueryVar = {
@@ -1766,7 +1816,7 @@ describe('GrafanaDashboardsService', () => {
         grafanaClientService.getDatasource.mockResolvedValue(unsupportedDatasource);
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'field',
           'system1',
@@ -1774,18 +1824,15 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow(/datasource of type "elasticsearch"/);
       });
 
-      it('should return empty array when general error occurs', async () => {
+      it('answers "not found" when the dashboard lookup fails for any other reason', async () => {
         // Arrange
         jest.spyOn(service, 'findOne').mockRejectedValue(new Error('Unexpected error'));
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'variable',
           'system1',
@@ -1793,13 +1840,10 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
-        );
-
-        // Assert
-        expect(result).toEqual([]);
+        )).rejects.toThrow('the dashboard was not found');
       });
 
-      it('should return empty array on datasource error (no demo fallback)', async () => {
+      it('throws on datasource error (no demo fallback)', async () => {
         // Arrange
         const dashboardWithSystemVar = {
           ...mockDashboardEntity,
@@ -1818,7 +1862,7 @@ describe('GrafanaDashboardsService', () => {
         grafanaClientService.getDatasource.mockRejectedValue(new Error('Query failed'));
 
         // Act
-        const result = await service.getVariableValues(
+        await expect(service.getVariableValues(
           mockDashboardEntity.id,
           'application',
           'MyAfterburner',
@@ -1826,10 +1870,25 @@ describe('GrafanaDashboardsService', () => {
           {},
           mockUserId,
           mockRoles
+        )).rejects.toThrow('the Grafana query failed (details are in the API log)');
+      });
+
+      it('reports a Grafana auth refusal by status, never its response body', async () => {
+        const dashboardWithQueryVar = {
+          ...mockDashboardEntity,
+          templating_variables: [
+            { name: 'app', type: 'query', datasource: { uid: 'ds-1', type: 'influxdb' }, query: 'SHOW TAG VALUES' },
+          ],
+        };
+        jest.spyOn(service, 'findOne').mockResolvedValue(dashboardWithQueryVar as any);
+        grafanaClientService.getGrafanaInstance.mockResolvedValue(mockGrafanaInstance as any);
+        grafanaClientService.getInfluxVariableValues.mockRejectedValue(
+          new Error('HTTP error! status: 401, message: {"message":"invalid key","host":"grafana.internal:3000"}'),
         );
 
-        // Assert - no longer returns demo fallback values
-        expect(result).toEqual([]);
+        const lookup = service.getVariableValues(mockDashboardEntity.id, 'app', 's', 'acc', {}, mockUserId, mockRoles);
+        await expect(lookup).rejects.toThrow(/HTTP 401.*credentials/);
+        await expect(lookup).rejects.not.toThrow(/grafana\.internal/);
       });
     });
   });
