@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.68] - 2026-11-11
+
+### Added
+- **Perfana can connect to Grafana with a username and password.** The Grafana integration dialog has always offered Username and Password beside API Key, and has always stored them (encrypted, and masked when read back) — but nothing ever sent them, so an instance configured that way could not be reached at all and its panels collected nothing. They work now, everywhere Perfana calls Grafana: metrics collection and the worker's panel queries, dashboard discovery and push, folder creation, variable values, datasource lookups and event annotations. An API key still wins whenever one is set, so nothing changes for an existing instance; a username and password are used only when no key is configured. Prefer a service-account token where you can: basic auth puts a reusable account password on every request, where a token is scoped and can be revoked on its own, so use it over `https` only.
+- **An instance with no credentials now says so.** Such a row used to be sent without usable authentication and came back as an unexplained 401 from Grafana. It now fails as a configuration error naming the instance and telling you to set an API key, or a username and password. On the worker it is also reported per instance, so one misconfigured Grafana no longer decides anything for the others.
+
+### Fixed
+- **A username/password instance is no longer treated as misconfigured by the worker.** It was classified invalid on `api_key` alone, which skipped every Grafana stage for any run whose dashboards live on it.
+
+### Known limitations
+- **Test Connection does not contact Grafana.** It checks that the URL, organization and one credential are present and then reports success, which it has always done. It cannot tell you that a username and password actually authenticate — configure the instance and let a run collect, or check the worker log.
+- Clearing a credential needs the API: leaving a field blank in the dialog means "keep the stored value", so blanking the API key on an instance that also has a username and password does not retire the key.
+
 ## [0.2.97.67] - 2026-11-10
 
 ### Added
