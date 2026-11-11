@@ -57,6 +57,9 @@ export interface GrafanaDashboard {
  *   owned resource since RBAC Phase 4.
  * - Global admins bypass all authorization checks
  */
+/** A variable or datasource kind the value lookup does not handle; not a Grafana fault. */
+class UnsupportedVariableError extends Error {}
+
 @Injectable()
 export class GrafanaDashboardsService {
   private readonly logger = new Logger(GrafanaDashboardsService.name);
@@ -560,17 +563,16 @@ export class GrafanaDashboardsService {
   ): Promise<Array<{ label: string; value: string }>> {
     this.logger.debug(`getVariableValues: dashboardId=${grafanaDashboardId}, variable=${variableName}, userId=${userId}`);
 
+    // Every case that cannot produce values throws with the reason, which the controller
+    // returns as the 400 message and the add/edit dashboard dialogs show under the field.
+    // An empty array means Grafana answered and the variable genuinely has no values.
     try {
       // Get the dashboard and its templating variables (access check happens in findOne)
       const dashboard = await this.findOne(grafanaDashboardId, userId, roles);
-      
-      if (!dashboard.templating_variables) {
-        return [];
-      }
 
-      const variable = dashboard.templating_variables.find(v => v.name === variableName);
+      const variable = dashboard.templating_variables?.find(v => v.name === variableName);
       if (!variable) {
-        return [];
+        throw new Error(`variable "${variableName}" is not in the stored dashboard; re-sync the dashboard from Grafana`);
       }
 
       // Get the Grafana instance
@@ -596,8 +598,7 @@ export class GrafanaDashboardsService {
         case 'query': {
           // Get the datasource and execute the query
           if (!variable.datasource) {
-            this.logger.warn(`No datasource defined for variable ${variableName}`);
-            return [];
+            throw new Error('the variable has no datasource configured in Grafana');
           }
 
           const datasourceUid = typeof variable.datasource === 'string'
@@ -605,8 +606,7 @@ export class GrafanaDashboardsService {
             : (variable.datasource.uid as string | undefined);
 
           if (!datasourceUid) {
-            this.logger.warn(`No datasource UID found for variable ${variableName}`);
-            return [];
+            throw new Error('the variable\'s datasource has no uid');
           }
 
           // Grafana embeds the concrete type beside the uid on every query variable it
@@ -652,8 +652,9 @@ export class GrafanaDashboardsService {
                 break;
 
               default:
-                this.logger.warn(`Datasource type ${datasource.type} not yet supported for variable ${variableName}`);
-                return [];
+                throw new UnsupportedVariableError(
+                  `values cannot be looked up from a datasource of type "${datasource.type}" (only InfluxDB and Prometheus are supported)`,
+                );
             }
 
             // Convert to the expected format
@@ -662,19 +663,21 @@ export class GrafanaDashboardsService {
             return result;
 
           } catch (datasourceError) {
-            this.logger.error(`Error querying datasource for variable ${variableName}:`, datasourceError);
-            return [];
+            if (datasourceError instanceof UnsupportedVariableError) throw datasourceError;
+            const msg = datasourceError && typeof datasourceError === 'object' && 'message' in datasourceError
+              ? (datasourceError as Error).message : 'unknown error';
+            throw new Error(`the Grafana query failed: ${msg}`);
           }
         }
 
         default:
-          this.logger.warn(`Variable type ${variable.type} not supported for variable ${variableName}`);
-          return [];
+          throw new UnsupportedVariableError(`variables of type "${variable.type}" have no values to look up`);
       }
 
     } catch (error) {
-      this.logger.error(`Error getting variable values for ${variableName}:`, error);
-      return [];
+      this.logger.warn(`Cannot get values for variable ${variableName}: ${
+        error && typeof error === 'object' && 'message' in error ? (error as Error).message : error}`);
+      throw error;
     }
   }
 

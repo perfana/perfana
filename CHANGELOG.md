@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.69] - 2026-11-11
+
+### Fixed
+- **A variable value typed in the Add or Edit dashboard dialog is no longer lost when you don't press Enter.** Text left in a templating variable's field was dropped, so clicking **Add Dashboard** or **Update Configuration** straight after typing stored the variable empty. The value is now kept as soon as you leave the field.
+
+### Changed
+- **The dashboard dialogs say why a variable has no values to pick from.** When Perfana cannot look values up in Grafana, the field now shows the reason under it (for example "the Grafana query failed: 401 Unauthorized", "the variable has no datasource configured in Grafana", or "values cannot be looked up from a datasource of type \"elasticsearch\"") instead of the same "No options found" text for every case. A variable that Grafana answered with no values says that instead. `POST /api/grafana/dashboards/variable-values` now answers 400 with the reason in `message` for these cases, where it used to answer 200 with an empty list.
+
 ## [0.2.97.68] - 2026-11-11
 
 ### Added
