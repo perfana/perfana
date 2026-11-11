@@ -1406,6 +1406,30 @@ describe('GrafanaDashboardsService', () => {
         expect(sentQuery()).toBe('label_values(x{a=~".*", b=~"orders", c=~"$jobs_total_x"}, y)');
       });
 
+      it('refuses a picked value that could break out of the query, and sends nothing', async () => {
+        await expect(service.getVariableValues(mockDashboardEntity.id, 'job', 's', 'acc',
+          { namespace: ['x"}) or vector(1) #'] }, mockUserId, mockRoles))
+          .rejects.toThrow('the value picked for "namespace" contains characters that cannot be used in a query');
+        expect(grafanaClientService.getPrometheusVariableValues).not.toHaveBeenCalled();
+      });
+
+      it('refuses a system name that could break out of the query', async () => {
+        await expect(service.getVariableValues(mockDashboardEntity.id, 'job', "a'; DROP", 'acc', {}, mockUserId, mockRoles))
+          .rejects.toThrow('"system_under_test" contains characters');
+      });
+
+      it('keeps an empty system or environment literal instead of widening it to .*', async () => {
+        (libertyDashboard.templating_variables[1]!.query as { query: string }).query =
+          'label_values(m{s="$system_under_test", e="${test_environment}"}, job)';
+        try {
+          await service.getVariableValues(mockDashboardEntity.id, 'job', '', '', {}, mockUserId, mockRoles);
+          expect(sentQuery()).toBe('label_values(m{s="", e=""}, job)');
+        } finally {
+          (libertyDashboard.templating_variables[1]!.query as { query: string }).query =
+            'label_values(jvm_uptime_seconds{namespace=~"$namespace"},job)';
+        }
+      });
+
       it('returns a constant from its query when no options were stored', async () => {
         await expect(service.getVariableValues(mockDashboardEntity.id, 'maxHeapUsageProjection', 's', 'acc', {}, mockUserId, mockRoles))
           .resolves.toEqual([{ label: '1', value: '1' }]);

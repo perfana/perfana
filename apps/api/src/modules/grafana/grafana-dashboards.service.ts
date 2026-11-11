@@ -65,6 +65,13 @@ export interface GrafanaDashboard {
  */
 class VariableLookupError extends Error {}
 
+/**
+ * What a variable value substituted into a datasource query may contain: names, hosts,
+ * paths, versions and `[2m]`-style durations. Empty is allowed (an unset system or
+ * environment). Deliberately an allowlist rather than per-language escaping.
+ */
+const SAFE_VARIABLE_VALUE = /^[A-Za-z0-9 _.:\-/@+=,[\]]*$/;
+
 /** A Grafana client failure reduced to its status or connection class. */
 function describeGrafanaFailure(error: unknown): string {
   const e = (error && typeof error === 'object' ? error : {}) as {
@@ -748,8 +755,17 @@ export class GrafanaDashboardsService {
       .sort((a, b) => b.length - a.length);
 
     for (const name of names) {
-      const values = (known[name] ?? []).filter(v => v && v !== 'All' && v !== '$__all');
-      const replacement = values.length > 0 ? values.join('|') : '.*';
+      const fixed = name === 'system_under_test' || name === 'test_environment';
+      const values = (known[name] ?? []).filter(v => fixed || (v && v !== 'All' && v !== '$__all'));
+      // These values come from the caller and are pasted into PromQL/InfluxQL that runs
+      // with Perfana's Grafana credentials: refuse anything that could leave a string
+      // literal or a regex (quotes, backslash, `;`, `|`, braces, control characters).
+      const unsafe = values.find(v => !SAFE_VARIABLE_VALUE.test(v));
+      if (unsafe !== undefined) {
+        throw new VariableLookupError(`the value picked for "${name}" contains characters that cannot be used in a query`);
+      }
+      // system and environment are always literal; an empty one must not widen to `.*`.
+      const replacement = fixed ? (values[0] ?? '') : values.length > 0 ? values.join('|') : '.*';
       const n = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const ref = new RegExp(`\\$\\{${n}(?::[^}]*)?\\}|\\[\\[${n}\\]\\]|\\$${n}(?![A-Za-z0-9_])`, 'g');
       query = query.replace(ref, () => replacement);
