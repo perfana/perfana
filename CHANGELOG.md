@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.71] - 2026-11-12
+
+### Added
+- **A profile's description and tags can now be edited.** Every profile that is not provisioned has an edit action on the Profiles settings page, so changing what a profile provisions no longer means deleting it and creating it again. The tags field suggests tags your other profiles already use. The three tags the profiles page has always hidden (`perfana`, `perfana-template`, `no-anomaly-detection`) stay hidden and are kept on save, so an edit cannot drop a tag the dialog never showed you — and every tag is kept exactly as stored, because Perfana matches a run's tags against a profile's character for character, so `WERKNL` and `werknl` are two different tags. Only a tag you type yourself is tidied up.
+- **A new profile can be given tags as it is created**, in the same dialog. Until now a profile could only be tagged through the API.
+- **A profile's name is read-only when editing, and says why.** Its dashboards and deep links reference a profile by name with no database link between them, so a rename would leave both behind with nothing pointing at them and no error at all. Renaming needs server-side work and is tracked as follow-up.
+
 ## [0.2.97.70] - 2026-11-11
 
 ### Fixed
