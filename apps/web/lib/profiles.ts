@@ -246,6 +246,34 @@ export async function createProfile(data: CreateProfileData): Promise<Profile> {
 }
 
 /**
+ * Updates a profile's name, description or tags.
+ *
+ * `tags` REPLACES the stored array, so a caller editing them must send the complete set it wants
+ * kept — including any tag the UI hides from the user. The profiles page filters `perfana`,
+ * `perfana-template` and `no-anomaly-detection` out of what it displays, so sending back only the
+ * visible chips would silently drop them.
+ *
+ * The API answers 400 for a read-only profile OR a name already taken by another profile (names
+ * are unique install-wide), 403 when the caller is not an org-admin in the profile's own
+ * organization, and 404 for a profile outside the caller's organizations. Each 400 carries the
+ * reason in `message`, which the caller is expected to show.
+ */
+export async function updateProfile(id: string, data: UpdateProfileData): Promise<Profile> {
+  const response = await authenticatedFetch(`/profiles/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || 'Failed to update profile');
+  }
+
+  return response.json();
+}
+
+/**
  * Deletes a profile
  */
 export async function deleteProfile(id: string): Promise<void> {

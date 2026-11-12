@@ -8,6 +8,7 @@
  * - createProfileDashboard: Add dashboard to profile
  * - updateProfileDashboard: Update profile dashboard configuration
  * - deleteProfileDashboard: Remove dashboard from profile
+ * - createProfile / updateProfile: Create and edit a profile
  */
 
 import {
@@ -18,6 +19,7 @@ import {
   updateProfileDashboard,
   deleteProfileDashboard,
   createProfile,
+  updateProfile,
   type Profile,
   type ProfileDashboard,
   type CreateProfileDashboardData,
@@ -244,6 +246,65 @@ describe('Profiles API Client', () => {
 
       const body = JSON.parse(mockAuthenticatedFetch.mock.calls[0]![1]!.body as string);
       expect(body).not.toHaveProperty('organizationId');
+    });
+  });
+
+  describe('updateProfile()', () => {
+    const saved: Profile = {
+      id: 'p-1',
+      name: 'checkout',
+      dashboardCount: 0,
+      sloCount: 0,
+      deepLinksCount: 0,
+      createdAt: '2025-01-11T00:00:00Z',
+      updatedAt: '2025-01-11T00:00:00Z',
+    };
+
+    it('PUTs the complete payload to the profile', async () => {
+      mockAuthenticatedFetch.mockResolvedValue({ ok: true, json: async () => saved } as Response);
+
+      await updateProfile('p-1', {
+        name: 'checkout',
+        description: '',
+        tags: ['frontend', 'perfana'],
+      });
+
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
+        '/profiles/p-1',
+        expect.objectContaining({
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+      const body = JSON.parse(mockAuthenticatedFetch.mock.calls[0]![1]!.body as string);
+      // The empty description has to survive serialization: it is how clearing the field persists.
+      expect(body).toEqual({ name: 'checkout', description: '', tags: ['frontend', 'perfana'] });
+    });
+
+    // The reason the dialog can name a cause: 400 read-only, 400 duplicate name, 403, 404 all
+    // carry `message`, and it is shown verbatim.
+    it('rethrows the API message on a rejection', async () => {
+      mockAuthenticatedFetch.mockResolvedValue({
+        ok: false,
+        json: async () => ({ message: 'Cannot update a read-only profile' }),
+      } as Response);
+
+      await expect(updateProfile('p-1', { name: 'x' })).rejects.toThrow(
+        'Cannot update a read-only profile'
+      );
+    });
+
+    // A 502 from a proxy answers HTML, not JSON. `createProfile` beside this throws the parse
+    // error; this path deliberately falls back to a sentence a user can read.
+    it('falls back to a generic message when the error body is not JSON', async () => {
+      mockAuthenticatedFetch.mockResolvedValue({
+        ok: false,
+        json: async () => {
+          throw new Error('Unexpected token < in JSON');
+        },
+      } as unknown as Response);
+
+      await expect(updateProfile('p-1', { name: 'x' })).rejects.toThrow('Failed to update profile');
     });
   });
 
