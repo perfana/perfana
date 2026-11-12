@@ -1,5 +1,6 @@
 import { Box, Typography, Chip } from '@mui/material';
 import { Lock } from '@mui/icons-material';
+import { visibleProfileTags } from '../../profile-tags';
 
 interface ProfileTagChipsProps {
   tags?: string[];
@@ -28,18 +29,12 @@ const TAG_CHIP_SX = {
 };
 
 /**
- * Filters out system tags that should not be displayed to users
- */
-function filterSystemTags(tags: string[] | undefined): string[] {
-  if (!tags) return [];
-  return tags.filter(tag => tag !== 'perfana' && tag !== 'perfana-template' && tag !== 'no-anomaly-detection');
-}
-
-/**
  * Component for displaying profile tags with styling
  */
 export function ProfileTagChips({ tags, readOnly }: ProfileTagChipsProps) {
-  const filteredTags = filterSystemTags(tags);
+  // Shared with the profiles list and the edit dialog, so all three pages hide the same set.
+  // This used to be a private copy of the same three literals.
+  const filteredTags = visibleProfileTags(tags);
 
   return (
     <Box display="flex" gap={0.5} flexWrap="wrap">

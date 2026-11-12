@@ -474,6 +474,238 @@ comments in 1799 and in "The consolidated schema's policy loops…" below that a
 
 ---
 
+## Profiles
+
+### Renaming a profile from the UI
+
+**Priority:** P2
+**Origin:** /ship review of PR for v0.2.97.71 (profile edit dialog), maintainability specialist
+
+The edit dialog's name field is `disabled` because a rename is not safe today. Two tables
+reference a profile by its NAME as a plain `varchar` with no foreign key:
+
+- `profile_grafana_dashboards.profile` (`packages/shared/src/entities/profile-grafana-dashboard.entity.ts`,
+  indexed, no relation)
+- `generic_deep_links.profile`
+
+`ProfilesService.updateProfile` (`apps/api/src/modules/profiles/profiles.service.ts:1521`) writes
+`profile.name` and touches neither, so a rename orphans both. Two measured consequences: `findAll`
+keys its dashboard and deep-link counts on the name (`:321`, `:302`), so both columns drop to 0;
+and grafana-sync's auto-config filters `profileNames.includes(d.profile)`
+(`apps/grafana-sync/src/modules/auto-config/auto-config.service.ts:162`), so the profile stops
+provisioning any dashboard. Nothing errors and nothing is logged.
+
+`profile_benchmarks` is NOT affected — it uses `profile_id`, a real foreign key.
+
+To enable renaming: in `updateProfile`, when `dto.name !== profile.name`, update both tables from
+the old name to the new one inside the same transaction as the profile save, with service tests
+covering each. Then drop `disabled={isEdit}` from the name field in `ProfileFormDialog` and revert
+its helper text and the row tooltip wording.
+
+### `PUT /profiles/:id` has no optimistic concurrency
+
+**Priority:** P3
+**Origin:** /ship review of PR for v0.2.97.71, security specialist
+
+The edit dialog builds its outgoing tags array from the `Profile` object the list fetched at page
+load, and `updateProfile` does `if (dto.tags !== undefined) profile.tags = dto.tags` with no
+`updatedAt` or If-Match guard. A tag added by another org-admin, or by a provisioning script,
+between the page load and the save is silently deleted — the same loss `profile-tags.ts` exists to
+prevent, reached through staleness rather than through filtering. The window is the whole lifetime
+of an open settings tab. Not cross-tenant: the server scopes by `requireScopedProfile` +
+`requireOrgAdmin`.
+
+Either re-fetch the profile in `openEdit` (or immediately before the PUT) and merge against that
+fresh copy, or send `updatedAt` and have `updateProfile` answer 409 when it no longer matches, so
+a concurrent edit surfaces instead of being overwritten.
+
+### Profile tags have no size bounds
+
+**Priority:** P3
+**Origin:** /ship review of PR for v0.2.97.71, security specialist (advisory)
+
+`CreateProfileDto.tags` and `UpdateProfileDto.tags`
+(`apps/api/src/modules/profiles/dto/profile.dto.ts:34`, `:56`) are validated as `@IsArray()` +
+`@IsString({ each: true })` with no `@ArrayMaxSize` and no per-element `@MaxLength`, while `name`
+on the same DTO is capped at 255. The edit dialog is the first UI that lets a user type tags
+freely and applies no limit either, so the only bound on what reaches `profiles.tags` (`text[]`,
+unbounded) is `API_BODY_LIMIT` (2mb). Impact is storage and response bloat on an endpoint any
+org-admin can call, not a trust-boundary crossing — profile tags are only read as comparison
+material by `profileMatchesRun`, never copied into a narrower column.
+
+Add `@ArrayMaxSize(50)` and `@MaxLength(255, { each: true })` to both DTOs and mirror the per-tag
+cap in the dialog so the refusal is visible before the request. Flagged because this repo was
+bitten once already (v0.2.97.70) by an unbounded string reaching a width-constrained writer.
+
+### The tags field drops a chip without saying so
+
+**Priority:** P3
+**Origin:** /ship review of PR for v0.2.97.71, maintainability specialist
+
+`mergeSystemProfileTags` discards three classes of chip the user can see in the Autocomplete
+before submitting: a hand-typed system tag, an exact duplicate, and a blank. The dropping is
+deliberate and correct; the gap is that the dialog never says so, so the chip is accepted, Save
+succeeds, and the tag is simply absent when the list reloads. Either filter in the Autocomplete's
+`onChange` so the chip is never added, or compare the merged array against the typed set in
+`handleSubmit` and name the dropped tags in the Tags helper text.
+
+Related, same file: text typed into the tags field but not committed with Enter is dropped on
+Save, because `handleSubmit` reads the `tags` state and freeSolo input text lives in the field.
+The helper text documents the Enter requirement, so this is a known MUI pattern rather than a
+defect, but it matters more here than usual because tags decide what the profile provisions.
+Tracking the Autocomplete's `inputValue` and committing a non-blank residue in `handleSubmit`
+would close it; `mergeSystemProfileTags` already trims, dedupes and drops blanks.
+
+### The dialog never says three tags are hidden but kept
+
+**Priority:** P3
+**Origin:** /ship review of PR for v0.2.97.71, design specialist
+
+`visibleProfileTags` strips `perfana`, `perfana-template` and `no-anomaly-detection` from the
+field and `mergeSystemProfileTags` puts them back on submit — the data handling is right, but a
+user editing a profile that carries `perfana-template` sees a tag list that contradicts what the
+profile does, with no indication that the missing tags are preserved or that typing one has no
+effect. When `visibleProfileTags(profile?.tags).length < (profile?.tags?.length ?? 0)`, append one
+sentence to the helper text naming the count, or render them as non-deletable outlined chips so
+there is nothing to contradict.
+
+### Profile edit dialog polish
+
+**Priority:** P4
+**Origin:** /ship review of PR for v0.2.97.71, design + maintainability specialists
+
+Each of these is cosmetic and was deferred to keep the PR to the defects:
+
+- **Field rhythm.** The three fields rely on `margin="dense"` alone (~12px apart) where every
+  sibling dialog in this directory gives each field `sx={{ mb: 2 }}`. It compounds at the bottom:
+  the Tags helper text is the last element in `DialogContent` with no bottom spacing, so it runs
+  into `DialogActions` and reads as a caption on the buttons.
+- **Chip parity.** The editor's tag chips are default MUI chips (grey, 24px) while the same tag
+  strings render in the table one click away as 28px bordered blue gradient chips. The editor
+  reads as a different object rather than the same row in edit mode. Preferably settle on one
+  restrained token-based chip for both surfaces — see the pre-existing styling item below.
+- **Title flip during the fade-out.** `setFormOpen(false)` and `setEditingProfile(null)` land in
+  the same commit, but MUI's Dialog stays mounted through its exit transition, so `isEdit` flips
+  immediately and the title reads "Create New Profile" and the button "Create" for ~200ms after
+  every edit and every cancel. Clear the profile in `TransitionProps={{ onExited }}` instead.
+- **Touch target.** The row's `<IconButton size="small">` with a 20px icon computes to ~30px
+  square, under the 44px guideline. Consistent with the rest of this app's dense settings tables,
+  so a house-pattern note rather than a defect.
+
+### Pre-existing off-token chip styling on the profiles page
+
+**Priority:** P4
+**Origin:** /ship review of PR for v0.2.97.71, design specialist (advisory; NOT introduced by that PR)
+
+`apps/web/app/settings/profiles/page.tsx` lines ~361-432 break four rules this project states for
+itself in `apps/web/CODING_RULES.md`: hardcoded `rgba(...)`/hex colours and `linear-gradient` fills
+instead of palette tokens; `theme.palette.primary.dark` as chip text, which `readable.primary` /
+`readableShade` exists to replace; `transition: 'all 0.2s ease'`; and `backdropFilter: 'blur(8px)'`
+on both chip types. The row hover at ~line 328 is the same class — a hardcoded
+`rgba(25, 118, 210, 0.04)` where the pinned rows above it correctly use `action.hover`.
+
+Both chip blocks pre-date merge-base 8d82fc98. Replacing them with
+`<Chip variant="outlined" color="primary" size="small" />` (and `color="warning"` for the
+provisioned one), `color: 'readable.primary'`, `backgroundColor: 'action.hover'` and a
+`background-color`-only transition would also resolve the chip-parity item above.
+
+### Profile edit: remaining test gaps
+
+**Priority:** P3
+**Origin:** /ship coverage audit for v0.2.97.71
+
+Covered paths reached 83% value-weighted. Still untested:
+
+- `ProfileFormDialog`: whitespace-only description → `undefined` (same expression as the
+  already-asserted empty-string case, so low value), and `Cancel → onClose` (a one-line MUI
+  prop pass-through whose consequence is already covered by the reopen test).
+- `page.tsx`: the row's tag chips use `visibleProfileTags` and the "No tags" caption is suppressed
+  for provisioned profiles. The integration test displays tags but never asserts the hiding, so
+  the list row is the one unverified consumer of that helper.
+- Two paths want a real browser rather than jsdom: that the dialog's error Alert is actually
+  *visible* (jsdom cannot judge occlusion — the test asserts reachability instead), and the
+  7-column table layout with its pinned and empty-row `colSpan`s.
+
+### The three hidden profile tags may not be Perfana's at all
+
+**Priority:** P3
+**Origin:** /ship review of PR for v0.2.97.71, red team + adversarial passes (both grepped independently)
+
+`apps/web/app/settings/profiles/profile-tags.ts` hides `perfana`, `perfana-template` and
+`no-anomaly-detection` from the profiles list, the detail page and the edit dialog. **Nothing in
+this repository writes any of those three onto `profiles.tags`.** The only writers of that column
+are `ProfilesService.createProfile` and `updateProfile`; the similarly-named constants
+(`PERFANA_TEMPLATE_TAG` in grafana-sync, `NO_ANOMALY_DETECTION_MARKER` in the worker, `isSystemTag`
+in `@perfana/shared/utils` with its broader `/^perfana/i` rule) all tag GRAFANA DASHBOARDS. No
+profile in `provisioning/profiles.yaml` carries one.
+
+So the list is a display convention inherited from the pre-existing filter, not a system-set
+invariant. Two consequences: the preserve half of `mergeSystemProfileTags` currently defends a loss
+that cannot occur, and a profile stored with one of those tags (by hand, through the API) has an
+ordinary tag that drives `profileMatchesRun` yet is invisible on every surface and re-appended on
+every save — so it cannot be removed through the UI.
+
+Decide it deliberately: either show stored ones as locked chips with a delete affordance, or keep
+hiding them and accept the unremovable case. The module's doc comment now states what is actually
+true; do not let it drift back.
+
+### Removing a profile tag does not retract what it already provisioned
+
+**Priority:** P2
+**Origin:** /ship review of PR for v0.2.97.71, red team
+
+This PR makes a profile's tags editable from the UI for the first time, and tag-driven
+provisioning is one-way. `updateProfile` saves the row and writes an audit entry — no
+re-provision, no disable (unlike `deleteBenchmark`, which calls `disableProvisioned`).
+grafana-sync's auto-config is purely additive: it filters to `matchProfilesForRun(...)` and
+processes the matched profiles, and `benchmark-processor.service.ts` has no disable or delete path
+at all. The API's golden-path compare-config applier matches the same way.
+
+So an operator who removes a tag to stop a profile reaching a workload leaves that workload's
+provisioned application dashboards, SLOs (which decide whether a run turns red) and
+`ds_compare_config` template rows in place and enabled, indefinitely, with nothing logged.
+
+Cheap mitigation available first: the page already holds `dashboardCount`, `sloCount` and
+`adaptTemplateCount`, so the dialog can warn when a tag is being removed from a profile that has
+provisioned artifacts. The real fix is giving `PUT /profiles/:id` the de-provisioning half, and
+deciding explicitly what happens to profile dashboards and compare-config templates. Either way
+say so in `docs/reference/Features/Templates.md`.
+
+### The Edit button is offered to users the API will refuse
+
+**Priority:** P3
+**Origin:** /ship review of PR for v0.2.97.71, adversarial pass
+
+`/settings/profiles` sits in `sidebar.tsx` with no `isGlobalAdmin` gate, while `PUT /profiles/:id`
+calls `requireOrgAdmin(userId, profile.organizationId, …)`. A non-admin gets an enabled Edit button
+on every non-provisioned profile, fills the form, saves, and now sees the raw `ForbiddenException`
+message in the dialog. The API enforces correctly, so this is not a hole — but the button
+advertises an action the caller cannot perform, and the disabled-reason tooltip that exists for
+`readOnly` was not extended to it. `Add Profile` had the same shape before this PR, so this doubles
+it rather than introducing it. Gate both on the caller's capabilities.
+
+### Saving a profile replaces the page with a spinner
+
+**Priority:** P4
+**Origin:** /ship review of PR for v0.2.97.71, adversarial pass (pre-existing, now more visible)
+
+`loadProfiles()` sets `loading = true`, and `page.tsx` early-returns a bare `<CircularProgress/>`
+when `loading`. `handleSubmitProfile` closes the dialog and then awaits `loadProfiles()`, so every
+create and every edit flashes the whole page to a centred spinner and tears `ProfileFormDialog` out
+of the tree with no close transition. Use a separate `refreshing` flag, or skip `setLoading(true)`
+when `profiles.length > 0`.
+
+### Profile tests live in two places
+
+**Priority:** P4
+**Origin:** /ship review of PR for v0.2.97.71, adversarial pass
+
+`apps/web/app/settings/profiles/__tests__/` (dialog, tag helpers) and
+`apps/web/__tests__/app/settings/profiles/` (page-level). Both run — `testMatch` includes
+`<rootDir>/**/__tests__/**/*`, verified — so there is no silent coverage hole. But the in-`app/`
+ones land inside `collectCoverageFrom: ['app/**/*.tsx']`, so test files are counted as covered
+source, and inside knip's documented `app/**` blindspot. Pick one location for the whole repo.
+
 ## Profile SLOs
 
 ### A retargeted profile SLO goes unevaluated until the next sweep (P3)

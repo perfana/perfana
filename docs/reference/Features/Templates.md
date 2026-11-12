@@ -43,7 +43,10 @@ Grafana dashboard templates that can be propagated across multiple systems:
 
 Accessible at `/settings/profiles`:
 
-- **Profile list** — View all performance profiles
+- **Profile list** — View all performance profiles, create one, and edit a profile's description and tags in place (v0.2.97.71). One `ProfileFormDialog` (`apps/web/app/settings/profiles/components/ProfileFormDialog.tsx`) serves create and edit, with name, description and a freeSolo tags field; create accepts tags too, which before this only the API did. Three facts travel with it:
+  - The **name is read-only on edit**, and the dialog says why. `profile_grafana_dashboards.profile` and `generic_deep_links.profile` are plain `varchar(255)` names with no foreign key, and `ProfilesService.updateProfile` rewrites neither, so a rename would orphan the profile's dashboards and deep links with no error. The page never sends a `name` key for an edit. Renaming needs server-side work (TODOS.md, "Renaming a profile from the UI")
+  - **`PUT /profiles/:id` REPLACES `tags`.** The UI hides `perfana`, `perfana-template` and `no-anomaly-detection` from what it shows, so the dialog merges them back before the save (`apps/web/app/settings/profiles/profile-tags.ts`, the one definition the list, the detail page's chips and the dialog all share). Tags are compared and preserved byte for byte, because `profileMatchesRun` is a case-sensitive `includes()`: normalising one would change which runs the profile provisions. Only a tag the user just typed is trimmed
+  - A **provisioned (`read_only`) profile offers no edit action**, with a tooltip saying so, matching the API's 400 for the same case. Org-admin in the profile's own organization is still the API's gate, which the button does not know about (TODOS.md, "The Edit button is offered to users the API will refuse")
 - **Profile editor** (`/settings/profiles/[id]`):
   - Dashboard configuration tab
   - SLO/benchmark configuration tab
