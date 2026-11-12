@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box,
@@ -18,22 +18,22 @@ import {
   Paper,
   Chip,
   Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   Tune,
   Lock,
   Add,
   Rule,
+  Edit,
 } from '@mui/icons-material';
-import { fetchProfiles, createProfile, Profile } from '@/lib/profiles';
+import { fetchProfiles, createProfile, updateProfile, Profile } from '@/lib/profiles';
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
 import { fetchCompareTemplates, templatesPageHref, type CompareTemplateScope } from '@/lib/compare-templates';
 import { ScopeBadge } from './adapt-templates/components/ScopeBadge';
+import { ProfileFormDialog, type ProfileFormValues } from './components/ProfileFormDialog';
+import { visibleProfileTags } from './profile-tags';
 
 /** How many templates a pinned entry holds, or `null` while unknown. */
 type TemplateCount = { total: number; provisioned: number } | null;
@@ -54,14 +54,6 @@ async function countTemplates(scope: CompareTemplateScope): Promise<TemplateCoun
   }
 }
 
-/**
- * Filters out system tags that should not be displayed to users
- */
-function filterSystemTags(tags: string[] | undefined): string[] {
-  if (!tags) return [];
-  return tags.filter(tag => tag !== 'perfana' && tag !== 'perfana-template' && tag !== 'no-anomaly-detection');
-}
-
 export default function ProfilesPage() {
   const router = useRouter();
   const { currentOrganizationId, currentOrganization } = useOrganizationContext();
@@ -69,11 +61,18 @@ export default function ProfilesPage() {
   const [orgTemplates, setOrgTemplates] = useState<TemplateCount>(null);
   const [installTemplates, setInstallTemplates] = useState<TemplateCount>(null);
   const [loading, setLoading] = useState(true);
+  // `error` is the page's own: loading the list failed. A failed SAVE goes to `formError`, which
+  // renders inside the dialog — see ProfileFormDialog's `error` prop.
   const [error, setError] = useState<string>('');
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [newProfileName, setNewProfileName] = useState('');
-  const [newProfileDescription, setNewProfileDescription] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState<string>('');
+  const [formOpen, setFormOpen] = useState(false);
+  // null while creating; the profile being edited otherwise.
+  const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Memoized so the dialog's `options` memo can actually hold: the page re-renders on dialog
+  // state, saving and errors, none of which change `profiles`.
+  const tagSuggestions = useMemo(() => profiles.flatMap((p) => p.tags ?? []), [profiles]);
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -135,29 +134,74 @@ export default function ProfilesPage() {
     },
   ];
 
-  const handleCreateProfile = async () => {
-    if (!newProfileName.trim()) return;
+  const openCreate = () => {
+    setEditingProfile(null);
+    setFormError('');
+    setFormOpen(true);
+  };
+
+  const openEdit = (profile: Profile) => {
+    setEditingProfile(profile);
+    setFormError('');
+    setFormOpen(true);
+  };
+
+  const handleSubmitProfile = async (values: ProfileFormValues) => {
     try {
-      setCreating(true);
-      // Create in the organization the list above is showing, so the new profile appears in it and
-      // its ADAPT templates reach that organization's runs. With none selected the API picks one.
-      await createProfile({
-        name: newProfileName.trim(),
-        description: newProfileDescription.trim() || undefined,
-        organizationId: currentOrganizationId || undefined,
-      });
-      setCreateDialogOpen(false);
-      setNewProfileName('');
-      setNewProfileDescription('');
+      setSaving(true);
+      setFormError('');
+      if (editingProfile) {
+        // NO `name` key, ever. The field is read-only, but the dialog still trims what it holds,
+        // and a profile stored with a padded name (`POST /profiles` does not trim, and it is a
+        // CI/CD provisioning endpoint) would have the trimmed form sent back — which the API
+        // reads as a rename, orphaning the dashboards and deep links that key on the old name.
+        // `updateProfile` applies `if (dto.name !== undefined)`, so omitting it is a no-op.
+        const storedDescription = editingProfile.description ?? '';
+        await updateProfile(editingProfile.id, {
+          // Sent only when it actually changed. `''` is what clears it — `undefined` would be
+          // dropped by `JSON.stringify` and the API's `!== undefined` guard would keep the old
+          // text — but sending it unchanged rewrites a description nobody edited and puts a
+          // spurious diff in `audit_logs` on every tags-only edit.
+          //
+          // Compared and sent TRIMMED, matching the create branch. Raw, typing only spaces into
+          // an empty description stored `'   '`, which is truthy, so the list cell rendered blank
+          // instead of its `-` placeholder — and it stuck, because the next open compared `'   '`
+          // against `'   '` and never resent it.
+          ...(values.description.trim() !== storedDescription.trim()
+            ? { description: values.description.trim() }
+            : {}),
+          // Always send the array, even empty: that is how clearing every tag persists.
+          tags: values.tags,
+        });
+      } else {
+        // Create in the organization the list above is showing, so the new profile appears in it
+        // and its ADAPT templates reach that organization's runs. With none selected the API
+        // picks one.
+        await createProfile({
+          name: values.name,
+          // Trimmed and omitted when blank, so a new profile stores NULL rather than `''`.
+          description: values.description.trim() || undefined,
+          // Omitted when empty, so a profile created without tags stores NULL rather than an
+          // empty array — the shape every profile created before this field had.
+          tags: values.tags.length > 0 ? values.tags : undefined,
+          organizationId: currentOrganizationId || undefined,
+        });
+      }
+      setFormOpen(false);
+      setEditingProfile(null);
       await loadProfiles();
     } catch (err) {
-      setError(
+      // Into the DIALOG, not the page: the dialog stays open holding the edit, and the page
+      // behind it is covered by the backdrop and `aria-hidden` while it does.
+      setFormError(
         err && typeof err === 'object' && 'message' in err
           ? (err as Error).message
-          : 'Failed to create profile'
+          : editingProfile
+            ? 'Failed to update profile'
+            : 'Failed to create profile'
       );
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   };
 
@@ -185,51 +229,25 @@ export default function ProfilesPage() {
         <Button
           variant="contained"
           startIcon={<Add />}
-          onClick={() => setCreateDialogOpen(true)}
+          onClick={openCreate}
         >
           Add Profile
         </Button>
       </Box>
 
-      <Dialog
-        open={createDialogOpen}
-        onClose={() => setCreateDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Create New Profile</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Profile Name"
-            fullWidth
-            required
-            value={newProfileName}
-            onChange={(e) => setNewProfileName(e.target.value)}
-            sx={{ mt: 1 }}
-          />
-          <TextField
-            margin="dense"
-            label="Description"
-            fullWidth
-            multiline
-            rows={3}
-            value={newProfileDescription}
-            onChange={(e) => setNewProfileDescription(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleCreateProfile}
-            variant="contained"
-            disabled={!newProfileName.trim() || creating}
-          >
-            {creating ? 'Creating...' : 'Create'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ProfileFormDialog
+        open={formOpen}
+        profile={editingProfile}
+        tagSuggestions={tagSuggestions}
+        saving={saving}
+        error={formError}
+        onClose={() => {
+          setFormOpen(false);
+          setEditingProfile(null);
+          setFormError('');
+        }}
+        onSubmit={handleSubmitProfile}
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -273,6 +291,11 @@ export default function ProfilesPage() {
                       Deep Links
                     </Typography>
                   </TableCell>
+                  <TableCell align="right">
+                    <Typography variant="subtitle2" fontWeight={600}>
+                      Actions
+                    </Typography>
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -300,7 +323,7 @@ export default function ProfilesPage() {
                         </Typography>
                       </Box>
                     </TableCell>
-                    <TableCell colSpan={3} align="center">
+                    <TableCell colSpan={4} align="center">
                       <Typography variant="body2" fontWeight={500}>
                         {templateCountText(entry.count)}
                       </Typography>
@@ -309,7 +332,7 @@ export default function ProfilesPage() {
                 ))}
                 {profiles.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={7}>
                       <Box textAlign="center" py={4}>
                         <Tune sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
                         <Typography variant="h6" color="text.secondary" gutterBottom>
@@ -401,7 +424,7 @@ export default function ProfilesPage() {
                           />
                         )}
                         {(() => {
-                          const filteredTags = filterSystemTags(profile.tags);
+                          const filteredTags = visibleProfileTags(profile.tags);
                           return filteredTags.length > 0 ? (
                             filteredTags.map((tag, index) => (
                               <Chip
@@ -461,6 +484,46 @@ export default function ProfilesPage() {
                       <Typography variant="body2" fontWeight={500}>
                         {profile.deepLinksCount}
                       </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Tooltip
+                        title={
+                          profile.readOnly
+                            ? 'Provisioned profiles cannot be edited'
+                            : 'Edit description and tags'
+                        }
+                      >
+                        {/* Focusable ONLY when the button is disabled: a disabled button cannot
+                            take focus, so without this the reason would be pointer-only. On an
+                            enabled row the button takes focus itself, and a focusable wrapper
+                            there is just a dead tab stop per profile. The click guard is for the
+                            disabled case too — MUI sets `pointer-events: none` on a disabled
+                            button, so the click lands here and would bubble to the row's
+                            navigation, silently taking the user elsewhere. */}
+                        <span
+                          tabIndex={profile.readOnly ? 0 : -1}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ display: 'inline-flex' }}
+                        >
+                          <IconButton
+                            size="small"
+                            disabled={profile.readOnly}
+                            data-testid={`edit-profile-${profile.id}`}
+                            aria-label={
+                              profile.readOnly
+                                ? `${profile.name} is provisioned and cannot be edited`
+                                : `Edit ${profile.name}`
+                            }
+                            onClick={(e) => {
+                              // The row navigates to the profile; the button must not.
+                              e.stopPropagation();
+                              openEdit(profile);
+                            }}
+                          >
+                            <Edit fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}

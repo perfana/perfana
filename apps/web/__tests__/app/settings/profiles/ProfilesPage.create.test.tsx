@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -53,6 +53,9 @@ describe('ProfilesPage create', () => {
     jest.clearAllMocks();
     mockFetchProfiles.mockResolvedValue([]);
     mockCreateProfile.mockResolvedValue({ id: 'new' });
+    // Explicit, so a test that forgets to set it cannot inherit the previous test's organization
+    // and become order-dependent.
+    mockCurrentOrganizationId = null;
   });
 
   it('creates the profile in the organization the page is showing', async () => {
@@ -72,5 +75,54 @@ describe('ProfilesPage create', () => {
     await createThroughDialog('jvm');
 
     expect(mockCreateProfile.mock.calls[0]![0]).toEqual({ name: 'jvm', description: undefined, organizationId: undefined });
+  });
+
+  /**
+   * Value: protects=a created profile carries the tags typed in the dialog, and no tags key at all when none were; fails_when=the create branch drops values.tags or sends [] for an untagged profile; why_new=the two tests above assert the organization only, and toEqual cannot see an absent key; seam=none; no_claim=does not cover system tags, which create cannot carry
+   */
+  it('sends the tags typed in the dialog', async () => {
+    mockCurrentOrganizationId = 'org-b-uuid';
+    const user = userEvent.setup();
+    render(<ProfilesPage />);
+    await user.click(await screen.findByRole('button', { name: /add profile/i }));
+    await user.type(screen.getByLabelText(/profile name/i), 'jvm');
+    await user.type(screen.getByTestId('profile-tags-input'), 'frontend{Enter}api{Enter}');
+    await user.click(screen.getByRole('button', { name: /^create$/i }));
+    await waitFor(() => expect(mockCreateProfile).toHaveBeenCalledTimes(1));
+
+    expect(mockCreateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ tags: ['frontend', 'api'] }),
+    );
+  });
+
+  it('omits the tags key entirely when the user typed none', async () => {
+    // An untagged profile stores NULL rather than an empty array, the shape every profile
+    // created before this field had, so the key must be absent and not `[]`.
+    await createThroughDialog('legacy');
+
+    expect(mockCreateProfile.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({ name: 'legacy', tags: undefined }),
+    );
+  });
+
+  /**
+   * The create half of the shared failure branch: the wording ternary and the non-Error fallback
+   * arm. A duplicate profile name is a 400, so this is the rejection a user actually meets.
+   */
+  it('keeps the dialog and shows the create wording when the create fails', async () => {
+    mockCurrentOrganizationId = 'org-b-uuid';
+    mockCreateProfile.mockRejectedValue('boom'); // non-Error: exercises the fallback arm
+    const user = userEvent.setup();
+    render(<ProfilesPage />);
+    await user.click(await screen.findByRole('button', { name: /add profile/i }));
+    await user.type(screen.getByLabelText(/profile name/i), 'jvm');
+    await user.click(screen.getByRole('button', { name: /^create$/i }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Failed to create profile');
+    expect(screen.queryByText('Failed to update profile')).not.toBeInTheDocument();
+    // The typed name survives, so the user can fix the cause and retry rather than retyping.
+    expect(screen.getByLabelText(/profile name/i)).toHaveValue('jvm');
+    expect(mockFetchProfiles).toHaveBeenCalledTimes(1);
   });
 });
