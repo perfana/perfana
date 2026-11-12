@@ -1185,3 +1185,57 @@ is queued. Four things fail silently when undone:
 4. **jsdom queues `history.back()` in two stages**, so in tests it lands in whichever test is
    running by then. The tests dispatch `popstate` themselves and spy on `history.back`.
 
+### A profile edit has to put back the tags it never showed
+
+`PUT /profiles/:id` **replaces** `profiles.tags` (`ProfilesService.updateProfile` is
+`if (dto.tags !== undefined) profile.tags = dto.tags`), and the profiles UI has hidden three tag
+names since long before it could edit anything. So an editor that shows the filtered list and saves
+it deletes whatever it filtered out — and a profile's tags are not decoration: `profileMatchesRun`
+(`@perfana/shared/utils/profile-match`) is what decides which dashboards and SLOs a run inherits
+from a profile. `apps/web/app/settings/profiles/profile-tags.ts` (v0.2.97.71) is the one
+definition: `visibleProfileTags` is what an editor may show, `mergeSystemProfileTags` puts
+`perfana`, `perfana-template` and `no-anomaly-detection` back before the save. The list page, the
+detail page's `ProfileTagChips` and `ProfileFormDialog` all read it; each used to hold its own copy
+of the three literals. Whether a profile should hide them at all is open — nothing in this repo
+writes them onto `profiles.tags`, and the similarly named constants elsewhere tag Grafana
+dashboards (TODOS.md, "The three hidden profile tags may not be Perfana's at all").
+
+One `ProfileFormDialog` (`settings/profiles/components/`) serves create and edit, because a second
+copy is the drift that left `tags` out of create in the first place. Five rules, each failing
+silently:
+
+1. **Tags are compared and preserved byte for byte.** `profileMatchesRun` is a plain
+   case-sensitive `includes()`, so `WERKNL` and `werknl` are two different tags and `my app ` is
+   not `my app`. An editor that lowercased or trimmed a *stored* tag would change what the profile
+   provisions with no visible field changing — the same loss the merge exists to prevent, reached
+   by rewriting instead of by dropping. Only a tag the user just typed is trimmed, which is why
+   `mergeSystemProfileTags` takes the stored array beside the edited one.
+2. **An edit never sends a `name` key.** `profile_grafana_dashboards.profile` and
+   `generic_deep_links.profile` are plain `varchar(255)` names with no foreign key, and
+   `updateProfile` rewrites neither, so a rename orphans the profile's dashboards and deep links
+   with nothing logged. The field is `disabled` in edit mode and says why, but the dialog still
+   trims what it holds, and `POST /profiles` neither trims nor transforms the name — it is a CI/CD
+   provisioning endpoint — so a profile stored with a padded name would have the trimmed form sent
+   back and read as a rename. For the same reason `canSubmit` skips the name check on an edit: the
+   one field that could fix a blank stored name is read-only.
+3. **`description` is sent only when it changed, and compared trimmed.** `undefined` is dropped by
+   `JSON.stringify` and the API's `!== undefined` guard then keeps the old text, so `''` is what
+   clears it; resending an unchanged one writes a spurious diff to `audit_logs` on every tags-only
+   edit. Comparing raw let `'   '` stick — truthy, so the list cell rendered blank instead of its
+   `-` placeholder, and the next open compared `'   '` with itself and never resent it. `tags` is
+   the opposite: always sent, empty array included, because that is how clearing every tag
+   persists.
+4. **A failed save renders inside the dialog.** MUI puts the app root under `aria-hidden` behind a
+   backdrop while a dialog is open, so the page's own Alert is both covered and invisible to a
+   screen reader. `formError` is therefore separate state from the page's list-load `error`, and
+   the dialog stays open holding the edit.
+5. **The read-only row's tooltip hangs on a `<span>` that is focusable only while disabled.** A
+   disabled MUI button cannot take focus, so the reason would be pointer-only; on an enabled row
+   the button takes focus itself and a focusable wrapper is one dead tab stop per profile. That
+   span also `stopPropagation`s the click, because MUI sets `pointer-events: none` on a disabled
+   button and the click would otherwise bubble to the row's navigation and move the user elsewhere.
+
+The action is gated on `profile.readOnly` alone, which matches the API's 400 for a provisioned
+profile but not its org-admin check, so it is still offered to a caller the API answers 403
+(TODOS.md, "The Edit button is offered to users the API will refuse").
+
