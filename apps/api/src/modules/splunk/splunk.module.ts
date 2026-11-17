@@ -1,6 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { MetricsSource, SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest } from '../../entities';
+import { MetricsSource, SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest, TestRun } from '../../entities';
 import { CommonModule } from '../../common/common.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuditResourceRegistry } from '../audit/audit-resource-registry';
@@ -10,7 +10,7 @@ import { SplunkService } from './splunk.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest, MetricsSource]),
+    TypeOrmModule.forFeature([SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest, MetricsSource, TestRun]),
     CommonModule,
     AuditModule,
     ProxyModule,

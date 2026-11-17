@@ -32,14 +32,16 @@ function build(opts: { canModify?: boolean; canAccess?: boolean; caps?: string[]
   };
   const audit = { logCreate: jest.fn(), logUpdate: jest.fn(), logDelete: jest.fn() };
   const proxy = { resolve: jest.fn(async () => null) };
+  const testRunRepo = repo();
+  const dataSource = { manager: { query: jest.fn(async () => [] as unknown[]) } };
   const service = new SplunkService(
     configRepo as never, mappingRepo as never, queryRepo as never, sutRepo as never,
-    repo() as never, { manager: { query: jest.fn(async () => []) } } as never,
+    repo() as never, testRunRepo as never, dataSource as never,
     authz as never, audit as never, proxy as never,
   );
   sutRepo.findOne.mockResolvedValue({ id: SUT, organization_id: ORG_A, team_id: null });
   configRepo.findOne.mockResolvedValue({ id: CFG, organizationId: ORG_A, host: 'https://splunk.example.com:8089', apiToken: 't' });
-  return { service, configRepo, mappingRepo, queryRepo, sutRepo, authz, audit };
+  return { service, configRepo, mappingRepo, queryRepo, sutRepo, testRunRepo, dataSource, authz, audit };
 }
 
 const baseConfig = { label: 'prod', host: 'https://splunk.example.com:8089', apiToken: 'secret' };
@@ -144,5 +146,59 @@ describe('SplunkService mappings and queries', () => {
     await expect(
       service.createQuery({ splunkConfigId: CFG, systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load', panelTitle: 'p', panelId: 1, spl }, 'u', []),
     ).rejects.toThrow(word);
+  });
+});
+
+describe('SplunkService runSummary', () => {
+  const run = {
+    testRunId: 'run-1', systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load',
+    startTime: new Date('2026-11-17T10:00:00Z'), endTime: new Date('2026-11-17T10:10:00Z'),
+  };
+  const query = {
+    id: 'q1', splunkConfigId: CFG, applicationDashboardId: 'ad-1', panelId: 1, panelTitle: 'Log events by level',
+    spl: '$entities', splitBy: 'log_level', aggregation: 'count', metricUnit: 'short', maxSeries: 20, enabled: true,
+  };
+
+  function withMappings(ctx: ReturnType<typeof build>) {
+    ctx.mappingRepo.createQueryBuilder.mockReturnValue({
+      where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn(async () => [{ splunkConfigId: CFG, level: 'environment', indexName: 'app', hostPattern: 'be-*', labels: [] }]),
+    });
+  }
+
+  it('reports not configured when the workload has no enabled panel, so the card hides', async () => {
+    const ctx = build();
+    ctx.testRunRepo.findOne.mockResolvedValue(run);
+    ctx.queryRepo.find.mockResolvedValue([{ ...query, enabled: false }]);
+    await expect(ctx.service.runSummary('run-1', 'u', [])).resolves.toEqual({ configured: false });
+  });
+
+  it('is a 404 for a run whose system the caller cannot see', async () => {
+    const ctx = build({ canAccess: false });
+    ctx.testRunRepo.findOne.mockResolvedValue(run);
+    await expect(ctx.service.runSummary('run-1', 'u', [])).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('turns per-bucket means into event totals and links to the run window in Splunk Web', async () => {
+    const ctx = build();
+    withMappings(ctx);
+    ctx.testRunRepo.findOne.mockResolvedValue(run);
+    ctx.queryRepo.find.mockResolvedValue([query]);
+    ctx.configRepo.find.mockResolvedValue([{ id: CFG, label: 'prod', host: 'https://s:8089', clientUrl: 'https://splunk.web', splunkApp: 'search' }]);
+    ctx.dataSource.manager.query.mockResolvedValue([
+      { application_dashboard_id: 'ad-1', panel_id: 1, metric_name: 'ERROR', mean: 1.5, max_value: 7, count: 100 },
+      { application_dashboard_id: 'ad-1', panel_id: 1, metric_name: 'INFO', mean: 32, max_value: 77, count: 100 },
+    ]);
+    const summary = await ctx.service.runSummary('run-1', 'u', []);
+    if (!summary.configured) throw new Error('expected configured');
+    expect(summary.panels[0]!.series).toEqual([
+      { name: 'INFO', mean: 32, peak: 77, total: 3200 },
+      { name: 'ERROR', mean: 1.5, peak: 7, total: 150 },
+    ]);
+    const url = new URL(summary.openInSplunk!);
+    expect(url.origin + url.pathname).toBe('https://splunk.web/en-US/app/search/search');
+    expect(url.searchParams.get('earliest')).toBe(String(run.startTime.getTime() / 1000));
+    expect(url.searchParams.get('q')).toBe('search (index="app" host="be-*")');
+    expect(new URL(summary.panels[0]!.link!).searchParams.get('q')).toContain('| timechart span=60s count by log_level');
   });
 });

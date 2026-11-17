@@ -210,3 +210,30 @@ export function describeMapping(m: Pick<SplunkEntityMapping, 'indexName' | 'sour
     .filter(Boolean)
     .join(' ');
 }
+
+// --- test run card -------------------------------------------------------------
+
+export interface SplunkRunPanel {
+  panelId: number;
+  title: string;
+  aggregation: string;
+  splitBy: string | null;
+  unit: string;
+  series: Array<{ name: string; mean: number | null; peak: number | null; total: number | null }>;
+  /** This panel's search as a Splunk Web timechart over the run, or null when it cannot be built. */
+  link: string | null;
+}
+
+export type SplunkRunSummary =
+  | { configured: false }
+  | {
+      configured: true;
+      connection: { id: string; label: string } | null;
+      sources: Array<Pick<SplunkEntityMapping, 'id' | 'level' | 'indexName' | 'sourcetype' | 'hostPattern' | 'labels'>>;
+      openInSplunk: string | null;
+      window: { from: string; to: string } | null;
+      panels: SplunkRunPanel[];
+    };
+
+export const fetchSplunkRunSummary = (testRunId: string) =>
+  call<SplunkRunSummary>(`/splunk/runs/${encodeURIComponent(testRunId)}/summary`, 'Failed to load the Splunk summary');

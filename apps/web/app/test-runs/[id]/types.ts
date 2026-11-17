@@ -33,6 +33,7 @@ export interface ExpansionState {
   dynatraceExpanded: boolean;
   distributedTracingExpanded: boolean;
   pyroscopeExpanded: boolean;
+  splunkExpanded: boolean;
   compareExpanded: boolean;
   performanceExpanded: boolean;
   graphsExpanded: boolean;

@@ -122,6 +122,14 @@ export class SplunkController {
     return this.splunk.entitiesFilter({ systemUnderTestId, testEnvironment, workload }, ctx.userId, ctx.roles);
   }
 
+  // --- test run --------------------------------------------------------------
+
+  @Get('runs/:testRunId/summary')
+  @ApiOperation({ summary: 'What the test run page Splunk card shows: sources, per-panel totals and Open in Splunk links' })
+  runSummary(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
+    return this.splunk.runSummary(testRunId, ctx.userId, ctx.roles);
+  }
+
   // --- queries ---------------------------------------------------------------
 
   @Get('queries')

@@ -53,7 +53,7 @@ export type TabIndex = (typeof TAB)[keyof typeof TAB];
  */
 export const TAB_CARDS: Record<TabIndex, (keyof ExpansionState)[]> = {
   [TAB.results]: ['expanded', 'configExpanded', 'dashboardsExpanded', 'anomalyExpanded', 'performanceExpanded', 'sloExpanded', 'deepLinksExpanded', 'eventsExpanded'],
-  [TAB.rca]: ['dynatraceExpanded', 'distributedTracingExpanded', 'pyroscopeExpanded', 'awrExpanded'],
+  [TAB.rca]: ['dynatraceExpanded', 'distributedTracingExpanded', 'pyroscopeExpanded', 'splunkExpanded', 'awrExpanded'],
   [TAB.reporting]: ['reportExpanded', 'trendsExpanded', 'compareExpanded', 'graphsExpanded'],
 };
 
@@ -72,6 +72,7 @@ const ALL_COLLAPSED: ExpansionState = {
   dynatraceExpanded: false,
   distributedTracingExpanded: false,
   pyroscopeExpanded: false,
+  splunkExpanded: false,
   compareExpanded: false,
   performanceExpanded: false,
   graphsExpanded: false,

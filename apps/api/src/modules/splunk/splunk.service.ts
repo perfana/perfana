@@ -5,6 +5,7 @@ import { OwnedResource } from '@perfana/shared';
 import {
   buildEntitiesClause,
   scopeSplFilter,
+  buildTimechartSearch,
   validateSplFilter,
   splunkDiscoverSources,
   splunkFieldSummary,
@@ -15,7 +16,7 @@ import {
   SplunkError,
   SplunkRequestOptions,
 } from '@perfana/shared/services/splunk/client';
-import { MetricsSource, SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest } from '../../entities';
+import { MetricsSource, SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest, TestRun } from '../../entities';
 import { withRequestQuery } from '../../common/db/request-em';
 import { generateDeterministicUuid } from '../../utils/uuid-generator';
 import { withRequestEm } from '../../common/db/request-em';
@@ -81,6 +82,7 @@ export class SplunkService {
     @InjectRepository(SplunkQuery) private readonly queryRepo: Repository<SplunkQuery>,
     @InjectRepository(SystemUnderTest) private readonly sutRepo: Repository<SystemUnderTest>,
     @InjectRepository(MetricsSource) private readonly metricsSourceRepo: Repository<MetricsSource>,
+    @InjectRepository(TestRun) private readonly testRunRepo: Repository<TestRun>,
     private readonly dataSource: DataSource,
     private readonly authzService: AuthorizationService,
     private readonly auditService: AuditService,
@@ -454,6 +456,92 @@ export class SplunkService {
     await this.loadSut(scope.systemUnderTestId, userId, roles, 'read');
     const mappings = await this.mappingsInScope(scope.systemUnderTestId, scope.testEnvironment, scope.workload);
     return { filter: buildEntitiesClause(mappings) };
+  }
+
+  /**
+   * Everything the test run page's Splunk card shows, in one request: the sources in effect for
+   * the run, each panel's series with total events and peak bucket (from the statistics the
+   * analysis computed, so nothing is asked of Splunk), and "Open in Splunk" links for the run
+   * window. `configured` is false when the run's workload has no Splunk panel, so the card hides.
+   */
+  async runSummary(testRunId: string, userId: string, roles: string[]) {
+    const run = await withRequestEm(this.testRunRepo).findOne({ where: { testRunId } });
+    if (!run) throw new NotFoundException('Test run not found');
+    // The run is reached through its system, the same authority as every other Splunk route.
+    await this.loadSut(run.systemUnderTestId, userId, roles, 'read', 'Test run not found');
+
+    const scope = { systemUnderTestId: run.systemUnderTestId, testEnvironment: run.testEnvironment, workload: run.workload };
+    const queries = (await withRequestEm(this.queryRepo).find({ where: scope, order: { panelId: 'ASC' } })).filter((q) => q.enabled);
+    if (queries.length === 0) return { configured: false as const };
+
+    const mappings = await this.mappingsInScope(scope.systemUnderTestId, scope.testEnvironment, scope.workload);
+    const configIds = [...new Set(queries.map((q) => q.splunkConfigId))];
+    const configs = await withRequestEm(this.configRepo).find({ where: configIds.map((id) => ({ id })) });
+    const configById = new Map(configs.map((c) => [c.id, c]));
+
+    const dashboardIds = [...new Set(queries.map((q) => q.applicationDashboardId).filter((id): id is string => !!id))];
+    const stats = dashboardIds.length === 0
+      ? []
+      : await withRequestQuery(this.dataSource).query<Array<{
+          application_dashboard_id: string; panel_id: number; metric_name: string; mean: number | null; max_value: number | null; count: number | null;
+        }>>(
+          `SELECT application_dashboard_id, panel_id, metric_name, mean, max_value, count
+             FROM ds_metric_statistics
+            WHERE test_run_id = $1 AND application_dashboard_id = ANY($2::uuid[])`,
+          [run.testRunId, dashboardIds],
+        );
+
+    const start = run.startTime ? new Date(run.startTime) : null;
+    const end = run.endTime ? new Date(run.endTime) : new Date();
+    const webLink = (config: SplunkConfig | undefined, search: string): string | null => {
+      if (!config || !start) return null;
+      const base = (config.clientUrl || config.host).replace(/\/+$/, '');
+      const params = new URLSearchParams({
+        q: search,
+        earliest: String(Math.floor(start.getTime() / 1000)),
+        latest: String(Math.ceil(end.getTime() / 1000)),
+      });
+      return `${base}/en-US/app/${encodeURIComponent(config.splunkApp || 'search')}/search?${params}`;
+    };
+
+    const panels = queries.map((q) => {
+      const config = configById.get(q.splunkConfigId);
+      const configMappings = mappings.filter((m) => m.splunkConfigId === q.splunkConfigId);
+      const filter = scopeSplFilter(q.spl, configMappings, run.testRunId);
+      let link: string | null = null;
+      if (filter && start) {
+        try {
+          // The same search the collector ran, as a Splunk Web timechart over the run.
+          link = webLink(config, buildTimechartSearch({
+            filter, from: start, to: end, bucketSeconds: 60, aggregation: q.aggregation, splitBy: q.splitBy, maxSeries: q.maxSeries,
+          }).replace(/ earliest=\d+ latest=\d+/, ''));
+        } catch {
+          link = null;
+        }
+      }
+      const series = stats
+        .filter((st) => st.application_dashboard_id === q.applicationDashboardId && st.panel_id === q.panelId)
+        .map((st) => ({
+          name: st.metric_name,
+          mean: st.mean,
+          peak: st.max_value,
+          // For a count panel the mean per bucket times the buckets is the events in the window.
+          total: q.aggregation === 'count' && st.mean !== null && st.count !== null ? Math.round(st.mean * st.count) : null,
+        }))
+        .sort((a, b) => (b.total ?? b.mean ?? 0) - (a.total ?? a.mean ?? 0));
+      return { panelId: q.panelId, title: q.panelTitle, aggregation: q.aggregation, splitBy: q.splitBy, unit: q.metricUnit, series, link };
+    });
+
+    const firstConfig = configById.get(queries[0]!.splunkConfigId);
+    const allClause = buildEntitiesClause(mappings.filter((m) => m.splunkConfigId === firstConfig?.id));
+    return {
+      configured: true as const,
+      connection: firstConfig ? { id: firstConfig.id, label: firstConfig.label } : null,
+      sources: mappings.map((m) => ({ id: m.id, level: m.level, indexName: m.indexName, sourcetype: m.sourcetype, hostPattern: m.hostPattern, labels: m.labels })),
+      openInSplunk: allClause ? webLink(firstConfig, `search ${allClause}`) : null,
+      window: start ? { from: start.toISOString(), to: end.toISOString() } : null,
+      panels,
+    };
   }
 
   // ---------------------------------------------------------------------------

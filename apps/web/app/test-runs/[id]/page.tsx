@@ -27,6 +27,7 @@ import DeepLinksCard from './components/deep-links/DeepLinksCard';
 import DynatraceCard from './components/dynatrace/DynatraceCard';
 import DistributedTracingCard from './components/distributed-tracing/DistributedTracingCard';
 import PyroscopeCard from './components/pyroscope/PyroscopeCard';
+import SplunkCard from './components/splunk/SplunkCard';
 import TestRunHeader from './components/header/TestRunHeader';
 import TestRunDetailsCard from './components/test-run-details/TestRunDetailsCard';
 import ConfigurationComparisonSection from './components/configuration-comparison/ConfigurationComparisonSection';
@@ -421,6 +422,7 @@ export default function TestRunDetailsPage() {
               {(testRun.systems_under_test?.pyroscope_instance_id || testRun.system_under_test?.pyroscope_instance_id) && (
                 <PyroscopeCard testRun={testRun as unknown as Parameters<typeof PyroscopeCard>[0]['testRun']} expanded={expansionState.pyroscopeExpanded} onExpand={() => { const wasCollapsed = !expansionState.pyroscopeExpanded; toggleExpansion('pyroscopeExpanded'); if (wasCollapsed) scrollToCard('pyroscope-card-expanded'); }} />
               )}
+              <SplunkCard testRun={testRun} expanded={expansionState.splunkExpanded} onExpand={() => { const wasCollapsed = !expansionState.splunkExpanded; toggleExpansion('splunkExpanded'); if (wasCollapsed) scrollToCard('splunk-card-expanded'); }} />
               <Box sx={cardBoxStyle(expansionState.awrExpanded)}>
                 <AwrReportCard testRun={testRun} expanded={expansionState.awrExpanded} onExpand={() => { const wasCollapsed = !expansionState.awrExpanded; toggleExpansion('awrExpanded'); if (wasCollapsed) scrollToCard('awr-report-card-expanded'); }} />
               </Box>
