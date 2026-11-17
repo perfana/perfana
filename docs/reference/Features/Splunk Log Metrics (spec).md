@@ -315,6 +315,29 @@ or ADAPT will flag every run.
   The check runs again on the expanded search before it is sent. It is a convenience, not the
   boundary; the Splunk role is.
 - No SPL reaches a URL; it goes in the POST body.
+- A failed connection answers with the network error code and a fixed hint only
+  (`describeFetchError`). The raw cause carries the resolved IP and port, so it goes to the
+  server log alone (`SplunkError.detail`, built from structured fields, never message text), or
+  test connection becomes a map of the internal network. Logged hosts go through `hostForLog`,
+  which drops `user:password@`.
+
+## Troubleshooting the connection
+
+The management URL is splunkd's REST port, `https://<search-head>:8089` on-prem and
+`https://<stack>.splunkcloud.com:8089` on Splunk Cloud — not Splunk Web (8000) and not HEC (8088).
+A failed test logs `WARN [SplunkService] Splunk connection test to <host> failed: … | cause: …` in
+perfana-api, and the dialog shows the code:
+
+| Code | Meaning |
+|---|---|
+| `ENOTFOUND` / `EAI_AGAIN` | The API container cannot resolve the hostname. Usually an internal name tested from outside that network. |
+| `ECONNREFUSED` | The host is up but nothing listens on that port. |
+| `ETIMEDOUT` / `UND_ERR_CONNECT_TIMEOUT` | Dropped by a firewall or allow list, or a proxy is needed (**Use proxy**). On Splunk Cloud, 8089 opens through a support case and the `search-api` IP allow list starts closed. |
+| a certificate code | 8089 usually serves Splunk's self-signed certificate. Add the issuing CA through `NODE_EXTRA_CA_CERTS` on api and worker; `verify_tls` is not enforced yet. |
+| `ERR_SSL_WRONG_VERSION_NUMBER` | The port does not speak TLS; check http vs https. |
+
+"has neither a token nor a username and password" is raised before any network call, so a typo in
+the host only shows up once credentials are filled in.
 
 ## Docs
 
