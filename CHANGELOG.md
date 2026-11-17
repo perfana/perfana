@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.74] - 2026-11-17
+
+### Fixed
+- **A failed Splunk connection test now says why.** It used to answer with Node's bare `fetch failed` plus a Splunk Cloud hint, even for an on-prem host. It now names the network error code with a hint for it: a hostname that does not resolve, a refused port, a timeout behind a firewall or a missing proxy, an untrusted certificate (Splunk ships a self-signed one on 8089; add the CA through `NODE_EXTRA_CA_CERTS`), or plain http against a TLS port. The Splunk Cloud hint appears only for `splunkcloud.com` and `cloud.splunk.com` hosts.
+- **A failed connection test is now logged.** perfana-api writes a WARN naming the host and the cause, and the worker logs the cause per failing Splunk panel. The full cause, including the resolved address, goes to the server log only. The response carries just the error code and hint, so testing a connection cannot be used to map internal addresses. Logged hosts drop any `user:password@`, and the cause is built from structured error fields, never message text.
+
 ## [0.2.97.73] - 2026-11-17
 
 ### Changed
