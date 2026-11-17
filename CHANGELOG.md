@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.73] - 2026-11-17
+
+### Changed
+- **Auto-config no longer adds a template dashboard whose datasource has never heard of the run's system or environment.** A template that only uses `$system_under_test` and `$test_environment` used to be added to every system its profile's tags matched, even when its panels could never return data for it. Before adding a template, grafana-sync now runs the template's own `system_under_test` / `test_environment` query variables and skips the template, with a warning naming it, when the datasource answers and the run's value is not in the answer. The comparison ignores case.
+- **The check only ever skips on a clean answer.** It lets the template through, as before, whenever it cannot trust what it got back: a Grafana error, a datasource it cannot query, a Prometheus variable that is not `label_values(<metric>, <label>)`, a query that still references another variable such as `$namespace`, a variable with a Grafana regex, a hardcoded override with several values, `All` or pattern characters, or a variable that is not a query at all. Templates whose system and environment variables are constants, or absent, are unaffected.
+- An application dashboard that already exists for a skipped system/environment is left alone: it is not removed, it just stops receiving variable updates while its template is skipped.
+
+### Fixed
+- A Prometheus template variable written with spaces around its label, such as `label_values(up, system )`, now gets its values in auto-config. The padded label name matched no series, so the variable came back empty.
+
 ## [0.2.97.72] - 2026-11-17
 
 ### Added
