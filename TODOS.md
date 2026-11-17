@@ -243,6 +243,62 @@ the renamed `parseFluxVariableFrames`, not new code — and nothing bounds the v
 since `maxDataPoints` is a time-series downsampling hint and does not cap a metadata
 query's rows. A `Set` plus hoisting the compile out of the loop is the whole fix.
 
+## Splunk integration
+
+Filed from the PR #742 review (v0.2.97.72). The review's real bugs were fixed on the branch; these
+are the items it deferred.
+
+### The Splunk host SSRF guard matches hostnames, not resolved addresses (P2)
+
+`SplunkService.checkHost` uses `validateExternalUrl`, which blocks private IPs and `localhost` by
+literal pattern only. A single-label compose hostname (`http://postgres:5432`), a public name that
+resolves to a private address, and an IPv4-mapped IPv6 literal (`http://[::ffff:7f00:1]:8089`) all
+pass, and `POST /splunk/configs/test-connection` returns the raw fetch or parse error, which makes
+it a reachability oracle for anyone holding `integration:splunk:create`. The worker connects to the
+stored host on every tick with no check, so DNS rebinding works too. Same gap as the Dynatrace and
+Grafana clients. Fix: resolve all addresses and reject private/loopback/link-local/mapped ranges
+(allowlist for operator-named internal hosts), pin the checked IP in the undici dispatcher, and
+return a generic message from test-connection.
+
+### `eval`/`where` allow functions that read outside the mapped sources (P3)
+
+`ALLOWED_SPL_COMMANDS` includes `eval` and `where`. Recent Splunk versions add eval functions such
+as `lookup()` that read lookup-table contents, so a member who can save a query could pull lookup
+data the org's token can see into stored series names. Not verified against a live Splunk; the
+token's Splunk role is the documented boundary. Fix: refuse a list of IO-capable eval functions
+inside eval/where segments, or document that the role must not read lookups.
+
+### A connection whose only queries use an unmatched `$entities[label]` stays registered (P3)
+
+`COLLECTABLE_SPLUNK_CONFIGS_SQL` registers a connection with an enabled query and ANY mapping in
+scope; it ignores labels. A panel whose `$entities[label]` matches no mapping is skipped with 0
+points, the tick records a zero-width range, and the source sits in coverage at 0% (root CLAUDE.md
+#21 shape). Fix: give the predicate the label filter, or have the collector report "not applicable".
+
+### Splunk counts are per bucket, not per second (P3)
+
+`splunkBucketSeconds` is now the perf-test tick size from `planned_duration` (stable within a run),
+but a `count`/`dc`/`sum` is stored per bucket. Runs of one workload with different planned
+durations compare counts over different spans in ADAPT. Fix: divide by the bucket for those
+aggregations (and adjust the run summary's totals), or pin the span per workload.
+
+### Splunk review polish (P4)
+
+- `verifyTls` is stored and returned but never read by the client or the worker; wire it into the
+  undici dispatcher or drop it from the DTO and UI type.
+- `GET /splunk/entities/filter` (`entitiesFilter`) and `POST /splunk/entities/mappings/copy`
+  (`copyMappings`) have no caller in web, MCP or the worker.
+- `SplunkCard` hides itself on every fetch error, not only on 404/403.
+- Deleting a source mapping or a panel in the Splunk tab has no confirmation.
+- Splunk dashboards are classified by the `splunk-` uid prefix in the web pickers; return
+  `source_type` from `GET /grafana/application-dashboards` and retire the prefix checks.
+- The export stream is read whole with `res.text()`; parse line by line from the body.
+- `getCollectableSplunkConfigIds` probes `to_regclass` on every scheduler tick per active run;
+  cache a positive probe per process.
+- Untested: the force-refetch Splunk path (discovery, the no-certify-on-errors throw,
+  no-status-row guard), `collectSplunkForWholeRun`, updateQuery's SPL validation, and the
+  `mappingsInScope` predicate (mocked away in the service spec).
+
 ## Series grouping
 
 Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.43

@@ -7,7 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.2.97.72] - 2026-11-17
 
 ### Added
-- **Draft spec for a Splunk integration** (`docs/reference/Features/Splunk Log Metrics (spec).md`). It proposes turning Splunk log events into metrics through the same collection path as Dynatrace, so ADAPT, SLOs, graphs and reports cover them unchanged, and describes how Splunk sources are mapped to a system. Proposal only: nothing is implemented.
+- **Splunk log metrics.** Splunk log events now become per-run metrics in `ds_metrics`, so ADAPT, SLOs, Graphs, Trends, Compare and reports cover them like any other source. Add a connection on Integrations (token or basic auth). On a system's new Splunk tab, map indexes, sourcetypes and hosts to the system, an environment or a workload, then add panels with a one-hour preview. Collection runs on the live ticks, in gap retries, as a full-path analyze stage and in force-refetch / missing-data re-evaluates. A Splunk Logs card on the Root Cause Analysis tab shows error events, per-panel totals, the peak per bucket and Open in Splunk links. It reads stored statistics only and never queries Splunk. Every search runs the mapped sources first and your filter after `| search`, so a filter can only narrow it. Filters go through a quote-aware command allowlist. Migration 1825 adds `splunk_configs`, `splunk_entity_mappings` and `splunk_queries`, all with RLS. Spec: `docs/reference/Features/Splunk Log Metrics (spec).md`.
+- **Splunk in Re-fetch Missing Data.** The dialog has a Splunk checkbox, and `POST /data/refresh/available-sources` returns `splunk`.
+
+### Fixed (found in review, before release)
+- A panel that uses a labelled `$entities[backend]` reference can be saved. The filter check used to read its brackets as a subsearch.
+- A single-quoted field name can no longer hide a pipe from the command allowlist.
+- One failing Splunk panel no longer fails the whole live tick. Failing it re-searched the whole run every minute and left the source at 0% coverage. The force refetch still refuses to mark the source complete while any panel errors.
+- A Splunk failure no longer aborts the whole analysis. The full-path stage no longer creates the first collection-status row, which would have made later re-analyses skip Grafana and Dynatrace collection.
+- The Splunk bucket size comes from `planned_duration`. It used to come from `end_time`, which moves during a live run and left rows on mixed time grids.
+- Renaming a Splunk query's dashboard is no longer accepted. The rename used to detach the panel from its dashboard.
+- Changing or deleting a connection clears its cached source discovery.
+- Copying another organization's mapping answers 404 instead of a skip count.
+- Splunk placeholder dashboards no longer count as Grafana in the refresh dialog.
+- The Splunk tab shows an error instead of spinning forever when loading connections fails.
+- SUT export and import include the Splunk tables.
 
 ## [0.2.97.71] - 2026-11-12
 

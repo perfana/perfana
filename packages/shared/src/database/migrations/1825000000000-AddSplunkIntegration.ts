@@ -109,6 +109,10 @@ const UP_DDL = `
   ${policies('splunk_queries')}
 `;
 
+// Drops the three tables only. Rows Splunk collection wrote elsewhere stay on purpose: the
+// metrics_sources rows with source_type 'splunk', their artificial application_dashboards and
+// grafana_dashboards placeholders, and the ds_metrics / ds_compare_config rows under them. They are
+// run history; nothing reads source_type 'splunk' once the integration is gone.
 const DOWN_DDL = `
   DROP TABLE IF EXISTS public.splunk_queries;
   DROP TABLE IF EXISTS public.splunk_entity_mappings;

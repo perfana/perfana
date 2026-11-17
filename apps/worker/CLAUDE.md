@@ -1370,6 +1370,10 @@ sources exist" independently — the scheduler, `PipelineOrchestrator.removeOrph
 (which runs FIRST, before any stage, and had neither filter) and the identically-named method in
 `DataSanityCheckPipeline` (which runs last). A row the sanity check would have swept survived the
 orchestrator's sweep, got gap-filled, and could flip `isCollectionComplete()` to true.
+Splunk (v0.2.97.72) uses the same predicate, `COLLECTABLE_SPLUNK_CONFIGS_SQL`, everywhere: the
+scheduler and the force-refetch discovery call `getCollectableSplunkConfigIds` (never throws), and
+the orphan sweep calls `loadCollectableSplunkConfigIds`, which throws on a query error so the sweep
+keeps the row instead of reading the error as "no Splunk sources".
 
 Four rules for anything in this path:
 

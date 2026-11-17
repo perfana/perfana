@@ -1,6 +1,8 @@
 # Splunk log metrics — spec (step 2)
 
-Status: **proposal**, not implemented. Nothing here has been run against a live Splunk.
+Status: **implemented** in v0.2.97.72 (PR #742), tested against a Splunk mock only, never a live
+Splunk. Written as a proposal; the sections below are updated where the implementation differs.
+Deferred items are under "Splunk integration" in `TODOS.md`.
 
 ## Goal
 
@@ -44,7 +46,7 @@ api_token text                      -- Splunk authentication token -> "Authoriza
 username varchar(255)               -- basic auth when api_token is blank (same rule as grafanaAuthHeader)
 password text
 splunk_app varchar(100) default 'search'   -- namespace: /servicesNS/-/<app>/search/v2/jobs/export
-verify_tls boolean default true     -- on-prem Splunk often runs a self-signed 8089 cert
+verify_tls boolean default true     -- stored but not enforced yet (TODOS.md, Splunk review polish)
 use_proxy boolean default false
 max_concurrent_searches int default 2
 organization_id uuid not null, team_id uuid, created_by, updated_by, created_at, updated_at
@@ -81,10 +83,13 @@ Users write the filter. Perfana owns the time bounds and the bucketing, so a que
 accidentally read outside the run or at the wrong resolution. Perfana sends:
 
 ```
-search <spl>
-  earliest=<from epoch> latest=<to epoch>
-| timechart span=<bucket>s limit=<max_series> useother=t <aggregation> by <split_by>
+search earliest=<from epoch> latest=<to epoch> <mapped sources> | search <spl, expanded>
+| timechart span=<bucket>s <aggregation> by <split_by> limit=<max_series> useother=t
 ```
+
+The mapped sources run first as their own search and the user's filter is piped after it, so a
+filter can only narrow the search (`$entities OR index=_audit` still reads only mapped sources).
+The time bounds go first because after a piped command they would be read as its arguments.
 
 `limit` + `useother=t` caps the number of series (log levels and hosts are free text, the same
 problem as `requests_error.response_code` / `MAX_CODE_SERIES`). The `OTHER` series is kept, so
@@ -108,8 +113,10 @@ labels text[] default '{}'         -- e.g. {frontend}, {db}; queries can target 
 organization_id uuid not null, team_id uuid, ...
 ```
 
-All tables need: entity, migration (next number after head), RLS policy, ownership columns,
-and an entry in the SUT export/import table list.
+All tables have an entity, RLS policy and ownership columns (migration 1825), and all three are in
+the SUT export/import (`sut-resource-graph.ts`): `splunk_configs` by reference (the configs the
+SUT's mappings or queries point at, credentials still encrypted, as `dynatrace_configs`),
+`splunk_entity_mappings` and `splunk_queries` by SUT.
 
 ## Selecting Splunk entities
 
@@ -138,7 +145,8 @@ System config page → **Splunk** tab, next to the Dynatrace one:
    host picked from the discovery list is wrong by the next test.
 4. **Choose the level:** this system, this environment or this workload. Default: environment,
    because test environments usually have their own hosts and workloads share them.
-5. **Label it (optional):** `frontend`, `backend`, `db`. A query can then target `$entities[backend]`.
+5. **Label it (optional):** `frontend`, `backend`, `db`. A query can then target `$entities[backend]`
+   (outside quotes; the validator does not read its brackets as a subsearch).
 6. **Preview.** Shows the starter panels over the last hour (or over a chosen past test run's
    window) for the selection, so the user sees "ERROR 12, WARN 340, INFO 51k" before saving.
    An empty preview with a non-empty discovery count means the level field is named differently.
@@ -180,7 +188,8 @@ with `search=...` and `output_mode=json`. It streams one JSON object per line; a
 one row per bucket: `{"result":{"_time":"…","ERROR":"12","WARN":"3","OTHER":"0"}}`.
 
 - Parse line by line; a `{"messages":[{"type":"FATAL"|"ERROR",...}]}` line is a failed search
-  and fails the range (do not record it as collected with 0 points).
+  and fails that panel (see "Live (incremental) ticks" for what that does to the tick). A row with
+  `"preview": true` is an interim result set and is skipped; counting it doubles the totals.
 - `_time` is the bucket start. Each non-`_`-prefixed key is a series; `metric_name` = the key,
   clamped through `DS_METRICS_VARCHAR_LIMITS` like every other writer.
 - An empty bucket comes back as `0` from timechart, so zero-filling is free. Do not convert
@@ -195,9 +204,12 @@ answers 503 / "maximum number of concurrent searches", which reads like an outag
 enough to start with; ticks for one run already serialise). Treat that error as retryable, not as
 a failed range.
 
-**Bucket size.** Use the bucket size `ds_metrics` already gets for that run (the size the
-Dynatrace collector picks from the run length), so Splunk series line up with the other panels on
-the Graphs card. Minimum 5 s; Splunk's timechart enforces nothing smaller than 1 s anyway.
+**Bucket size.** The perf-test tick size from `planned_duration` (`perfTestBucketSizes().tick`,
+60 s when the run has none), on every path: live tick, gap fill, full path and force refetch. Never
+derive it from `end_time`: the keep-alive moves that during a live run, the size would step up, and
+because `time` is in the `ds_metrics` conflict key the old buckets would stay beside the new ones.
+Values are per bucket, not per second, so runs of one workload with different planned durations
+compare counts over different spans (TODOS.md).
 
 ## Collection
 
@@ -207,13 +219,21 @@ the Graphs card. Minimum 5 s; Splunk's timechart enforces nothing smaller than 1
 - `SplunkCollector` mirrors `DynatraceCollector`: load enabled `splunk_queries` for the run's
   SUT / env / workload, run each over `[fromTime - SPLUNK_INGEST_LOOKBACK_MS, toTime]`,
   hand rows to `BatchProcessor`.
+- A panel whose search errors keeps its error in the result and the rest of the tick stands, as
+  `GrafanaCollector` does; failing the range on one broken panel would re-search the whole run
+  every minute. Only a connection-level failure fails the tick: the config row is missing, it
+  belongs to another organization, the run has no organization (fail closed), or loading or
+  writing threw.
 - `SPLUNK_INGEST_LOOKBACK_MS` default **5 min**: Splunk indexing lag is routinely tens of seconds
   and minutes under load, more than Dynatrace's. Re-querying overlapping buckets is safe because
   the `ds_metrics` write is an upsert on the conflict key.
-- Collection status: one `ds_metric_collection_status` row per `('splunk', splunk_config_id)`;
-  `getConfiguredSourceKeys` in `collectable-sources.ts` adds the Splunk configs that have an
-  enabled query for the run's scope. **A disabled query must not register** (otherwise coverage
-  reads 0 %, Common Issue #21).
+- Collection status: one `ds_metric_collection_status` row per `('splunk', splunk_config_id)`.
+  One predicate, `COLLECTABLE_SPLUNK_CONFIGS_SQL` in `collectable-sources.ts`, decides which
+  configs collect: an enabled query and a mapping in the run's scope. The scheduler and
+  force-refetch discovery use `getCollectableSplunkConfigIds` (never throws); the orphan sweep in
+  `getConfiguredSourceKeys` uses `loadCollectableSplunkConfigIds`, which throws on a query error so
+  a transient error does not delete a live row. **A disabled query must not register** (otherwise
+  coverage reads 0 %, Common Issue #21).
 
 ### Analyze
 
@@ -222,6 +242,12 @@ the Graphs card. Minimum 5 s; Splunk's timechart enforces nothing smaller than 1
   only the failed ranges (`retryCollectionForRange` gets a `'splunk'` arm); never fall back to a
   full re-collection for a run that had ticks (Common Issue #25).
 - A run without ticks (SUT import, Splunk added afterwards) runs one export over the whole run.
+  The stage is soft-failed: a Splunk error is logged and the analysis continues, because analyze
+  runs with `errorHandling: 'abort'`. It records a collected range only when the run already has
+  status rows; writing the first row would make the next analyze treat the run as incrementally
+  collected and skip its Grafana and Dynatrace stages.
+- Force refetch (re-evaluate) uses the same no-first-row guard, and refuses to mark the source
+  complete if any panel errored, because "complete" is sticky and suppresses re-collection.
 - Delete-before-write on that path uses `DELETE FROM ds_metrics WHERE test_run_id = $1 AND
   metrics_source_id = $2` **only if** that shape is proven segment-friendly; otherwise follow
   whatever `DynatracePipeline` does today (Common Issue #23 explains why a non-`test_run_id`
@@ -244,6 +270,10 @@ uuid namespace rather than copying it; rules that carry over unchanged:
 
 - `apps/api/src/modules/splunk/`: CRUD for configs and queries (copy the Dynatrace controller
   shape and its org scoping: 404 outside the caller's orgs, `withOrgFilter`, system-call arm).
+  A query's `dashboard_label` is fixed at create: it is hashed into the artificial dashboard's id,
+  so PATCH does not accept it (a rename would collect under the new label against the old one).
+- Re-fetch Missing Data: the refresh dialog has a Splunk checkbox, and
+  `POST /data/refresh/available-sources` returns `splunk`.
 - `POST /splunk/configs/:id/test-connection` — `GET /services/server/info` with the auth header.
   Report 401 vs connection refused vs TLS error separately; the 8089-not-opened case on Splunk
   Cloud surfaces as a connect timeout, so say so in the message.
@@ -277,9 +307,13 @@ or ADAPT will flag every run.
 - SPL is user-authored and runs with the token's Splunk permissions. Document that the token
   should belong to a dedicated Splunk role with `search` on the relevant indexes only, and a
   `srchJobsQuota` sized for `max_concurrent_searches`.
-- Reject `spl` containing `| sendemail`, `| outputlookup`, `| collect`, `| delete`, `| script`,
-  `| run` — the commands that write or execute. A denylist is a convenience, not the boundary;
-  the Splunk role is.
+- `validateSplFilter` allowlists the commands a filter may pipe through (`ALLOWED_SPL_COMMANDS`:
+  search, where, rex, eval, fields, rename, regex, spath, fillnull) and refuses subsearches and
+  macros. It is quote-aware: inside double quotes `|`, `[` and backticks are literal; a
+  single-quoted field name may not contain quotes, pipes, brackets, backticks, `$` or backslashes,
+  so it cannot desynchronise the tokenizer and hide a pipe. Placeholders belong outside quotes.
+  The check runs again on the expanded search before it is sent. It is a convenience, not the
+  boundary; the Splunk role is.
 - No SPL reaches a URL; it goes in the POST body.
 
 ## Docs
