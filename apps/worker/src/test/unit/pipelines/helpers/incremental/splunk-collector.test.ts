@@ -67,7 +67,7 @@ describe('SplunkCollector', () => {
     expect(result).toMatchObject({ success: true, dataPoints: 2 });
     const [conn, query] = splunkTimechart.mock.calls[0];
     expect(conn).toMatchObject({ host: 'https://s:8089', apiToken: 'plain-token' });
-    expect(query.filter).toBe('(index="web" host="app-*")');
+    expect(query.filter).toBe('(index="web" host="app-*") | search (index="web" host="app-*")');
     expect(query.from.getTime()).toBe(from.getTime() - SPLUNK_INGEST_LOOKBACK_MS);
     const [docs] = batchProcessor.processSplunkDocuments.mock.calls[0];
     expect(docs[0]).toMatchObject({ applicationDashboardId: 'ad1', dashboardUid: 'splunk-splunk-logs', panelId: 1 });

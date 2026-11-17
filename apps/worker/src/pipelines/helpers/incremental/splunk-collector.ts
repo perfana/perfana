@@ -10,7 +10,7 @@
 
 import type { Logger } from 'pino';
 import {
-  expandSplTemplate,
+  scopeSplFilter,
   splunkTimechart,
   SplunkError,
   type SplunkConnection,
@@ -203,7 +203,7 @@ export class SplunkCollector {
           errors.push(`Splunk panel "${q.panel_title}" has no dashboard; re-save it in the Splunk tab`);
           continue;
         }
-        const filter = expandSplTemplate(q.spl, mappingLikes, testRunId);
+        const filter = scopeSplFilter(q.spl, mappingLikes, testRunId);
         if (filter === null) {
           // An $entities[label] with no mapping carrying that label: nothing to read, not a failure.
           this.logger.warn(`Splunk panel "${q.panel_title}": no mapped source matches its $entities, skipped`);

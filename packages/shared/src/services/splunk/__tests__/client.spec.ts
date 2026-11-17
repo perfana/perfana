@@ -2,6 +2,7 @@ import {
   buildEntitiesClause,
   buildTimechartSearch,
   expandSplTemplate,
+  scopeSplFilter,
   validateSplFilter,
   parseExportLines,
   splunkAuthHeader,
@@ -44,12 +45,33 @@ describe('$entities', () => {
   });
 });
 
+describe('scopeSplFilter', () => {
+  const mappings = [
+    { indexName: 'web', labels: ['frontend'] },
+    { indexName: 'java', labels: ['backend'] },
+  ];
+
+  it('runs the mapped sources first, so an OR in the user filter cannot widen the search', () => {
+    expect(scopeSplFilter('$entities OR index=_audit', mappings)).toBe(
+      '((index="web") OR (index="java")) | search ((index="web") OR (index="java")) OR index=_audit',
+    );
+  });
+
+  it('bounds by the labels the filter names', () => {
+    expect(scopeSplFilter('$entities[backend] level=ERROR', mappings)).toBe(
+      '(index="java") | search (index="java") level=ERROR',
+    );
+    expect(scopeSplFilter('$entities[db]', mappings)).toBeNull();
+    expect(scopeSplFilter('index=web', mappings)).toBeNull();
+  });
+});
+
 describe('buildTimechartSearch', () => {
   const base = { filter: 'index=web', from: new Date('2026-11-17T10:00:00Z'), to: new Date('2026-11-17T11:00:00.5Z'), bucketSeconds: 5 };
 
   it('adds the run window and the bucketing, capping series with OTHER', () => {
     expect(buildTimechartSearch({ ...base, splitBy: 'log_level', maxSeries: 20 })).toBe(
-      'search index=web earliest=1794909600 latest=1794913201 | timechart span=5s count by log_level limit=20 useother=t',
+      'search earliest=1794909600 latest=1794913201 index=web | timechart span=5s count by log_level limit=20 useother=t',
     );
   });
 
@@ -57,6 +79,12 @@ describe('buildTimechartSearch', () => {
     expect(() => buildTimechartSearch({ ...base, aggregation: 'count | delete' })).toThrow(SplunkError);
     expect(() => buildTimechartSearch({ ...base, splitBy: 'x | delete' })).toThrow(SplunkError);
     expect(buildTimechartSearch({ ...base, aggregation: 'p95(duration_ms)' })).toContain('timechart span=5s p95(duration_ms)');
+  });
+
+  it('puts the time bounds before a piped filter, not into its last command', () => {
+    expect(buildTimechartSearch({ ...base, filter: '(index="x") | search "Exception" | rex "(?<e>\\w+)"' })).toMatch(
+      /^search earliest=\d+ latest=\d+ \(index="x"\) \| search "Exception" \| rex/,
+    );
   });
 });
 

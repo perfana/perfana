@@ -92,6 +92,29 @@ export function expandSplTemplate(
 }
 
 /**
+ * The search a user filter actually runs as: the mapped sources FIRST, as their own search, and the
+ * user's filter piped after it as `| search <filter>`. A later search can only narrow an earlier
+ * one, so nothing a user writes — `$entities OR index=_audit` included — can read outside the
+ * mapped sources. The outer clause is the union of the mappings every `$entities[...]` reference in
+ * the filter names (all mappings for a bare `$entities`). Returns null when that is empty.
+ */
+export function scopeSplFilter(
+  spl: string,
+  mappings: SplunkEntityMappingLike[],
+  testRunId?: string,
+): string | null {
+  const labels = [...spl.matchAll(/\$entities(?:\[([^\]]+)\])?/g)].map((m) => m[1]);
+  if (labels.length === 0) return null;
+  const scoped = labels.includes(undefined)
+    ? mappings
+    : mappings.filter((m) => labels.some((l) => l && m.labels?.includes(l)));
+  const outer = buildEntitiesClause(scoped);
+  const user = expandSplTemplate(spl, mappings, testRunId);
+  if (outer === null || user === null) return null;
+  return `${outer} | search ${user}`;
+}
+
+/**
  * Commands a Perfana filter may pipe through. An allowlist, because a denylist of "dangerous"
  * commands is always one command short. Everything here is a streaming, read-only transform;
  * Perfana appends `| timechart` itself. The Splunk role behind the token is still the real
@@ -175,8 +198,9 @@ export function buildTimechartSearch(q: TimechartQuery): string {
   const latest = Math.ceil(q.to.getTime() / 1000);
   const by = q.splitBy ? ` by ${q.splitBy} limit=${limit} useother=t` : '';
   const filter = q.filter.trim().replace(/^search\s+/i, '');
-  // A filter that already pipes (| rex ...) needs its first segment to stay a search.
-  return `search ${filter} earliest=${earliest} latest=${latest} | timechart span=${span}s ${aggregation}${by}`;
+  // The bounds go FIRST: after a filter that pipes (| rex ...) they would be read as the last
+  // command's arguments instead of bounding the search.
+  return `search earliest=${earliest} latest=${latest} ${filter} | timechart span=${span}s ${aggregation}${by}`;
 }
 
 export interface TimechartPoint {
@@ -364,7 +388,7 @@ export async function splunkFieldSummary(
 ): Promise<Array<{ field: string; distinctCount: number; values: string[] }>> {
   const rows = await splunkExport(
     conn,
-    `search ${filter} earliest=-1h | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
+    `search earliest=-1h ${filter} | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
     opts,
   );
   return rows

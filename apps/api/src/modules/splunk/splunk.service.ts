@@ -4,7 +4,7 @@ import { DataSource, IsNull, Repository } from 'typeorm';
 import { OwnedResource } from '@perfana/shared';
 import {
   buildEntitiesClause,
-  expandSplTemplate,
+  scopeSplFilter,
   validateSplFilter,
   splunkDiscoverSources,
   splunkFieldSummary,
@@ -418,7 +418,7 @@ export class SplunkService {
     const config = await this.requireSameOrgConfig(dto.splunkConfigId, sut, userId, roles);
     this.checkSpl(dto.spl);
     const mappings = await this.mappingsInScope(sut.id, dto.testEnvironment, dto.workload, dto.splunkConfigId);
-    const filter = expandSplTemplate(dto.spl, mappings);
+    const filter = scopeSplFilter(dto.spl, mappings);
     if (filter === null) {
       return { search: null, series: [], fields: [], message: 'No Splunk sources are mapped for this scope, so $entities is empty.' };
     }
@@ -431,9 +431,9 @@ export class SplunkService {
     try {
       const [points, fields] = await Promise.all([
         splunkTimechart(conn, { filter, from, to, bucketSeconds, aggregation: dto.aggregation, splitBy: dto.splitBy, maxSeries: dto.maxSeries }, opts),
-        // ponytail: field summary only on the plain filter (no pipes), since fieldsummary after a
-        // rex/eval would need the whole pipeline; the starter panels' split fields are named anyway.
-        filter.includes('|') ? Promise.resolve([]) : splunkFieldSummary(conn, filter, opts),
+        // Candidate split fields come from the mapped sources themselves, not the user's filter:
+        // fields a rex/eval in the filter creates are known to whoever wrote it.
+        splunkFieldSummary(conn, buildEntitiesClause(mappings) ?? filter, opts),
       ]);
       const totals = new Map<string, number>();
       for (const p of points) totals.set(p.series, (totals.get(p.series) ?? 0) + p.value);
