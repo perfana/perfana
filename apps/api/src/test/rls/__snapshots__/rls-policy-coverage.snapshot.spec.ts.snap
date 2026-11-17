@@ -382,6 +382,36 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     "policies": [],
     "rls": false,
   },
+  "splunk_configs": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_splunk_configs_delete",
+      "INSERT:rls_splunk_configs_insert",
+      "SELECT:rls_splunk_configs_select",
+      "UPDATE:rls_splunk_configs_update",
+    ],
+    "rls": true,
+  },
+  "splunk_entity_mappings": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_splunk_entity_mappings_delete",
+      "INSERT:rls_splunk_entity_mappings_insert",
+      "SELECT:rls_splunk_entity_mappings_select",
+      "UPDATE:rls_splunk_entity_mappings_update",
+    ],
+    "rls": true,
+  },
+  "splunk_queries": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_splunk_queries_delete",
+      "INSERT:rls_splunk_queries_insert",
+      "SELECT:rls_splunk_queries_select",
+      "UPDATE:rls_splunk_queries_update",
+    ],
+    "rls": true,
+  },
   "systems_under_test": {
     "force": true,
     "policies": [
