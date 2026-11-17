@@ -714,7 +714,7 @@ export class SplunkService {
       const info = await splunkServerInfo(conn, opts);
       return { success: true, message: `Connected to ${info.serverName ?? 'Splunk'}${info.version ? ` ${info.version}` : ''}` };
     } catch (err) {
-      const hint = err instanceof SplunkError && err.status === undefined
+      const hint = err instanceof SplunkError && err.status === undefined && /splunkcloud\.com|cloud\.splunk\.com/i.test(conn.host)
         ? ' On Splunk Cloud, port 8089 is opened through a support case and the search-api IP allow list is closed by default.'
         : '';
       return { success: false, message: `${errMsg(err)}${hint}` };

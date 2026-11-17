@@ -195,3 +195,15 @@ describe('splunkExport', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe('describeFetchError', () => {
+  const { describeFetchError } = jest.requireActual('../client') as typeof import('../client');
+  it('surfaces the undici cause and a hint', () => {
+    const err = new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo ENOTFOUND x.example'), { code: 'ENOTFOUND' }) });
+    expect(describeFetchError(err)).toMatch(/^getaddrinfo ENOTFOUND x\.example\. The hostname does not resolve/);
+  });
+  it('maps certificate codes to the CA hint', () => {
+    const err = new TypeError('fetch failed', { cause: Object.assign(new Error('self-signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }) });
+    expect(describeFetchError(err)).toMatch(/\(SELF_SIGNED_CERT_IN_CHAIN\)\. .*NODE_EXTRA_CA_CERTS/);
+  });
+});

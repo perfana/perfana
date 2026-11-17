@@ -328,9 +328,7 @@ async function request(
       ...(opts.dispatcher ? { dispatcher: opts.dispatcher } : {}),
     } as RequestInit);
   } catch (err) {
-    const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
-    // On Splunk Cloud a closed 8089 shows up as a connect timeout, not a refusal.
-    throw new SplunkError(`Could not reach Splunk at ${baseUrl(conn)}: ${msg}`);
+    throw new SplunkError(`Could not reach Splunk at ${baseUrl(conn)}: ${describeFetchError(err)}`);
   }
   const text = await res.text();
   if (!res.ok) {
@@ -340,6 +338,41 @@ async function request(
   }
   return text;
 }
+
+/**
+ * undici reports every network failure as "fetch failed" and keeps the reason in `cause`
+ * (sometimes nested once more, or as an AggregateError for a dual-stack connect). Surface the code
+ * and a hint for it, because "fetch failed" alone sends the operator looking in the wrong place.
+ */
+export function describeFetchError(err: unknown): string {
+  const seen: Array<{ code?: string; message?: string }> = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i++) {
+    const e = cur as { code?: string; message?: string; cause?: unknown; errors?: unknown[] };
+    seen.push(e);
+    cur = e.cause ?? (Array.isArray(e.errors) ? e.errors[0] : undefined);
+  }
+  if (seen.length === 0) return 'Unknown error';
+  if ((seen[0] as Error).name === 'TimeoutError') return 'no answer within the time limit (timeout)';
+  const root = seen[seen.length - 1]!;
+  const code = seen.map((e) => e.code).find((c) => typeof c === 'string');
+  const detail = root.message && root.message !== 'fetch failed' ? root.message : (seen[0]!.message ?? 'fetch failed');
+  const hint = code ? FETCH_ERROR_HINTS[code] ?? (/CERT|SSL|TLS|SELF_SIGNED|UNABLE_TO_VERIFY/.test(code) ? FETCH_ERROR_HINTS.CERT : undefined) : undefined;
+  return `${detail}${code && !detail.includes(code) ? ` (${code})` : ''}${hint ? `. ${hint}` : ''}`;
+}
+
+const FETCH_ERROR_HINTS: Record<string, string> = {
+  ENOTFOUND: 'The hostname does not resolve from the Perfana server; check the name, or the DNS the API and worker containers use',
+  EAI_AGAIN: 'DNS lookup failed temporarily; check the DNS the API and worker containers use',
+  ECONNREFUSED: 'The host answered but nothing listens on that port; the management port is usually 8089',
+  ECONNRESET: 'The connection was cut; often a firewall or proxy in between, or http:// against an https port',
+  ETIMEDOUT: 'No answer: a firewall or IP allow list is likely dropping the traffic, or a proxy is needed (enable "Use proxy")',
+  UND_ERR_CONNECT_TIMEOUT: 'No answer: a firewall or IP allow list is likely dropping the traffic, or a proxy is needed (enable "Use proxy")',
+  EHOSTUNREACH: 'No route to the host from the Perfana server; a proxy may be needed (enable "Use proxy")',
+  ENETUNREACH: 'No route to the host from the Perfana server; a proxy may be needed (enable "Use proxy")',
+  CERT: 'The TLS certificate is not trusted by the Perfana server. Splunk ships a self-signed certificate on 8089; add the issuing CA through NODE_EXTRA_CA_CERTS on the API and worker',
+  ERR_SSL_WRONG_VERSION_NUMBER: 'The port does not speak TLS; try http:// or check the port',
+};
 
 function extractMessage(body: string): string | null {
   try {
