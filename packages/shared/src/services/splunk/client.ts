@@ -330,7 +330,7 @@ async function request(
       ...(opts.dispatcher ? { dispatcher: opts.dispatcher } : {}),
     } as RequestInit);
   } catch (err) {
-    throw new SplunkError(`Could not reach Splunk at ${baseUrl(conn)}: ${describeFetchError(err)}`, undefined, false, causeChain(err));
+    throw new SplunkError(`Could not reach Splunk at ${hostForLog(conn.host)}: ${describeFetchError(err)}`, undefined, false, causeChain(err));
   }
   const text = await res.text();
   if (!res.ok) {
@@ -364,12 +364,20 @@ export function describeFetchError(err: unknown): string {
   return `${code}${hint ? `. ${hint}` : ''}`;
 }
 
+/** A host for logs: scheme, hostname and port, never userinfo, path or query. */
+export function hostForLog(host: string): string {
+  try { const u = new URL(host); return `${u.protocol}//${u.host}`; } catch { return '[unparseable host]'; }
+}
+
 function causeChain(err: unknown): string {
   const parts: string[] = [];
   let cur: unknown = err;
   for (let i = 0; i < 4 && cur && typeof cur === 'object'; i++) {
-    const e = cur as { message?: string; code?: string; cause?: unknown; errors?: unknown[] };
-    parts.push(`${e.message ?? '?'}${e.code ? ` [${e.code}]` : ''}`);
+    // Structured fields only, never message text: a message is free-form and could echo a header.
+    const e = cur as { name?: string; code?: string; syscall?: string; hostname?: string; address?: string; port?: number; cause?: unknown; errors?: unknown[] };
+    const fields = [e.name, e.code, e.syscall, e.hostname, e.address && `${e.address}${e.port ? `:${e.port}` : ''}`]
+      .filter((f): f is string => typeof f === 'string' && /^[\w.:\-\[\]]{1,255}$/.test(f));
+    parts.push(fields.join(' ') || '?');
     cur = e.cause ?? (Array.isArray(e.errors) ? e.errors[0] : undefined);
   }
   return parts.join(' <- ');
