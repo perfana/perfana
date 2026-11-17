@@ -74,6 +74,9 @@ enabled boolean default true
 organization_id uuid not null, team_id uuid, ...
 ```
 
+`spl` may contain `$entities`, which expands to the scope's entity mappings (next section). The
+starter panels are just `$entities` plus a level filter, so most users never write SPL.
+
 Users write the filter. Perfana owns the time bounds and the bucketing, so a query cannot
 accidentally read outside the run or at the wrong resolution. Perfana sends:
 
@@ -87,8 +90,88 @@ search <spl>
 problem as `requests_error.response_code` / `MAX_CODE_SERIES`). The `OTHER` series is kept, so
 totals stay correct.
 
-Both tables need: entity, migration (next number after head), RLS policy, ownership columns,
+### `splunk_entity_mappings` — which log sources belong to a system
+
+Same shape and semantics as `dynatrace_entity_mappings`:
+
+```
+id uuid pk
+splunk_config_id uuid not null fk
+system_under_test_id uuid not null
+test_environment varchar(255)      -- NULL at level 'sut'
+workload varchar(255)              -- NULL at levels 'sut' and 'environment'
+level varchar(50) not null         -- 'sut' | 'environment' | 'workload'
+index_name varchar(255) not null
+sourcetype varchar(255)            -- NULL = any sourcetype in the index
+host_pattern varchar(500)          -- exact host or Splunk wildcard (app-*); NULL = any host
+labels text[] default '{}'         -- e.g. {frontend}, {db}; queries can target a label
+organization_id uuid not null, team_id uuid, ...
+```
+
+All tables need: entity, migration (next number after head), RLS policy, ownership columns,
 and an entry in the SUT export/import table list.
+
+## Selecting Splunk entities
+
+The user never picks Splunk sources per test run. As with Dynatrace, entities are mapped to the
+system under test at a **level**, and a run uses every mapping that matches its scope:
+the system's `sut` mappings, plus its environment's, plus its workload's. A new run of an existing
+workload needs no setup.
+
+### Where in the UI
+
+System config page → **Splunk** tab, next to the Dynatrace one:
+
+1. **Pick a Splunk config** (from the Integrations page).
+2. **Browse what Splunk has.** Perfana runs one discovery search over the last 24 h:
+
+   ```
+   | tstats count where index=* by index, sourcetype, host
+   ```
+
+   `tstats` reads index-time metadata only, so it answers in seconds without scanning raw events,
+   and it sees only the indexes the token's role is allowed to search. The UI shows it as a tree:
+   index → sourcetype → host, each with its event count, plus a text filter.
+3. **Select.** Ticking a node creates a mapping: a whole index, an index + sourcetype, or
+   individual hosts. A **pattern** field accepts `host_pattern` directly (`app-*`, `*-perf-*`),
+   which is what Kubernetes and autoscaled hosts need. Pod names change every deploy, so an exact
+   host picked from the discovery list is wrong by the next test.
+4. **Choose the level:** this system, this environment or this workload. Default: environment,
+   because test environments usually have their own hosts and workloads share them.
+5. **Label it (optional):** `frontend`, `backend`, `db`. A query can then target `$entities[backend]`.
+6. **Preview.** Shows the starter panels over the last hour (or over a chosen past test run's
+   window) for the selection, so the user sees "ERROR 12, WARN 340, INFO 51k" before saving.
+   An empty preview with a non-empty discovery count means the level field is named differently.
+   The preview lists the candidate fields (`level`, `log_level`, `severity`, `loglevel`) found by
+   `| fieldsummary maxvals=10` on a sample, and the user picks which one the panels split on.
+
+Copying to another workload or environment reuses the Dynatrace copy endpoint's shape
+(`POST /splunk/entities/mappings/copy`), keeping each mapping's level.
+
+### How `$entities` expands
+
+Mappings for the run's scope, grouped by index, OR-ed together:
+
+```
+(index=web sourcetype=nginx host=app-*) OR (index=java host IN ("svc-01","svc-02"))
+```
+
+`$entities[backend]` keeps only mappings with that label. Every value is escaped as an SPL string
+literal. With no mapping in scope, the query is not run and the collection-status row is not
+registered (otherwise coverage reads 0 %, Common Issue #21).
+
+### Why discovery is a search, not REST metadata
+
+`/services/data/indexes` lists indexes but not hosts or sourcetypes, and `| metadata type=hosts`
+returns one dimension at a time. `tstats … by index, sourcetype, host` gives the whole tree in one
+call. Cache the result per config for 10 minutes; discovery counts against the same
+concurrent-search limit as collection.
+
+### On the test run page
+
+The run's Splunk card lists the mappings in effect for that run (read from the run's scope, never
+from the first mapping row — Common Issue #42) and an **Open in Splunk** link with the run's
+`$entities` filter and time window.
 
 ## Querying Splunk
 
@@ -173,11 +256,12 @@ uuid namespace rather than copying it; rules that carry over unchanged:
 
 | Panel | `spl` | `split_by` | `aggregation` |
 |---|---|---|---|
-| Log events by level | `index=<idx> host IN (<hosts>)` | `log_level` | `count` |
-| Errors by host | `index=<idx> host IN (<hosts>) log_level=ERROR` | `host` | `count` |
-| Exceptions by type | `index=<idx> host IN (<hosts>) "Exception"` + `\| rex "(?<exception>\w+Exception)"` | `exception` | `count` |
+| Log events by level | `$entities` | `log_level` | `count` |
+| Errors by host | `$entities log_level=ERROR` | `host` | `count` |
+| Exceptions by type | `$entities "Exception" \| rex "(?<exception>\w+Exception)"` | `exception` | `count` |
 
-Field names (`log_level`, `level`, `severity`) differ per customer; the profile is a starting point.
+Field names (`log_level`, `level`, `severity`) differ per customer; the field picked in the
+entity preview replaces `log_level` in the seeded panels.
 If the SUT logs the `perfana-test-run-id` request header, a query may add
 `perfana_test_run_id=$testRunId` — `$testRunId` is the only template variable Perfana substitutes
 (escaped as an SPL string literal).
