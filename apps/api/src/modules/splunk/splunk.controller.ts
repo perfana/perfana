@@ -76,8 +76,9 @@ export class SplunkController {
     @Query('hours') hours?: string,
     @Query('refresh') refresh?: string,
   ) {
-    const h = Number(hours);
-    return this.splunk.discoverSources(id, ctx.userId, ctx.roles, Number.isFinite(h) && h > 0 ? h : 24, refresh === 'true');
+    // Clamped: hours is part of the per-process cache key and bounds the tstats look-back.
+    const h = Math.floor(Number(hours));
+    return this.splunk.discoverSources(id, ctx.userId, ctx.roles, Number.isFinite(h) && h > 0 ? Math.min(h, 720) : 24, refresh === 'true');
   }
 
   // --- entity mappings -------------------------------------------------------
@@ -165,6 +166,7 @@ export class SplunkController {
   }
 
   @Patch('queries/:id')
+  @ApiResponse({ status: 409, description: 'The panel id is taken on that dashboard for this workload (nothing returned)' })
   updateQuery(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSplunkQueryDto, @UserCtx() ctx: UserContext) {
     return this.splunk.updateQuery(id, dto, ctx.userId, ctx.roles);
   }

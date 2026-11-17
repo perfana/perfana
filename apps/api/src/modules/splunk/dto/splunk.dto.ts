@@ -90,8 +90,8 @@ export class CopySplunkEntityMappingsDto {
   @ApiProperty({ type: [String] }) @IsArray() @ArrayMaxSize(500) @IsUUID('all', { each: true })
   mappingIds!: string[];
 
-  @ApiProperty() @IsString() @IsNotEmpty() targetEnvironment!: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() targetWorkload?: string;
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(255) targetEnvironment!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsNotEmpty() @MaxLength(255) targetWorkload?: string;
 }
 
 export class CreateSplunkQueryDto {
@@ -129,7 +129,9 @@ export class CreateSplunkQueryDto {
 }
 
 export class UpdateSplunkQueryDto extends PartialType(
-  OmitType(CreateSplunkQueryDto, ['splunkConfigId', 'systemUnderTestId', 'testEnvironment', 'workload'] as const),
+  // dashboardLabel is fixed at create: it is hashed into the artificial dashboard's id, so a rename
+  // would leave the query collecting under the new label against the old dashboard.
+  OmitType(CreateSplunkQueryDto, ['splunkConfigId', 'systemUnderTestId', 'testEnvironment', 'workload', 'dashboardLabel'] as const),
 ) {}
 
 export class PreviewSplunkQueryDto {

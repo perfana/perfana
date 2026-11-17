@@ -202,3 +202,28 @@ describe('SplunkService runSummary', () => {
     expect(new URL(summary.panels[0]!.link!).searchParams.get('q')).toContain('| timechart span=60s count by log_level');
   });
 });
+
+describe('SplunkService review regressions', () => {
+  it('clears every cached discovery of a connection when it is updated or deleted', async () => {
+    const { service } = build();
+    const cache = (service as unknown as { discoveryCache: Map<string, unknown> }).discoveryCache;
+    cache.set(`${CFG}:24`, { at: Date.now(), sources: [] });
+    cache.set(`${CFG}:168`, { at: Date.now(), sources: [] });
+    cache.set('other:24', { at: Date.now(), sources: [] });
+    await service.updateConfig(CFG, { label: 'renamed' }, 'u', []);
+    expect([...cache.keys()]).toEqual(['other:24']);
+  });
+
+  it('answers 404, not a skip count, for a mapping the caller cannot write', async () => {
+    const { service, mappingRepo } = build({ canModify: false, canAccess: false });
+    mappingRepo.findOne.mockResolvedValue({ id: 'm1', systemUnderTestId: SUT, level: 'sut' });
+    await expect(
+      service.copyMappings({ mappingIds: ['m1'], targetEnvironment: 'prod' } as never, 'u', []),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('accepts a labelled $entities reference in a saved query', async () => {
+    const { service } = build();
+    expect(() => (service as unknown as { checkSpl(s: string): void }).checkSpl('$entities[backend] level=ERROR')).not.toThrow();
+  });
+});

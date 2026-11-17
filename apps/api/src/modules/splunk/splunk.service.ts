@@ -17,9 +17,8 @@ import {
   SplunkRequestOptions,
 } from '@perfana/shared/services/splunk/client';
 import { MetricsSource, SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest, TestRun } from '../../entities';
-import { withRequestQuery } from '../../common/db/request-em';
+import { withRequestEm, withRequestQuery } from '../../common/db/request-em';
 import { generateDeterministicUuid } from '../../utils/uuid-generator';
-import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { validateExternalUrl } from '../../common/security/url-validator';
@@ -165,7 +164,7 @@ export class SplunkService {
     entity.updatedBy = userId;
 
     const saved = await withRequestEm(this.configRepo).save(entity);
-    this.discoveryCache.delete(id);
+    this.clearDiscoveryCache(id);
     this.auditService.logUpdate(before as unknown as OwnedResource, saved as unknown as OwnedResource, {
       organizationIdOverride: saved.organizationId,
     });
@@ -177,7 +176,7 @@ export class SplunkService {
     const entity = await this.loadConfig(id, userId, roles);
     await this.requireCapability(userId, roles, entity.organizationId, Capability.IntegrationSplunkDelete);
     await withRequestEm(this.configRepo).delete({ id });
-    this.discoveryCache.delete(id);
+    this.clearDiscoveryCache(id);
     this.auditService.logDelete(entity as unknown as OwnedResource, { organizationIdOverride: entity.organizationId });
   }
 
@@ -194,6 +193,13 @@ export class SplunkService {
     const config = await this.loadConfig(id, userId, roles);
     await this.requireCapability(userId, roles, config.organizationId, Capability.IntegrationSplunkUpdate);
     return this.probe(this.connectionOf(config), await this.requestOptions(config.organizationId, config.useProxy));
+  }
+
+  /** Entries are keyed `${id}:${hours}`, so a bare delete(id) would match nothing. */
+  private clearDiscoveryCache(id: string): void {
+    for (const key of this.discoveryCache.keys()) {
+      if (key.startsWith(`${id}:`)) this.discoveryCache.delete(key);
+    }
   }
 
   async discoverSources(id: string, userId: string, roles: string[], hours = 24, refresh = false): Promise<SplunkDiscoveredSource[]> {
@@ -267,6 +273,8 @@ export class SplunkService {
     for (const id of dto.mappingIds) {
       const source = await withRequestEm(this.mappingRepo).findOne({ where: { id } });
       if (!source) throw new NotFoundException('Splunk entity mapping not found');
+      // Authorize before any skip branch, or another tenant's id answers {skipped:1} instead of a 404.
+      await this.loadSut(source.systemUnderTestId, userId, roles, 'write', 'Splunk entity mapping not found');
       if (source.level === 'sut') {
         skipped++; // already applies to every environment and workload
         continue;
@@ -387,7 +395,6 @@ export class SplunkService {
       this.checkSpl(dto.spl);
       entity.spl = dto.spl;
     }
-    if (dto.dashboardLabel !== undefined) entity.dashboardLabel = dto.dashboardLabel.trim() || 'Splunk logs';
     if (dto.panelTitle !== undefined) entity.panelTitle = dto.panelTitle;
     if (dto.panelId !== undefined) entity.panelId = dto.panelId;
     if (dto.splitBy !== undefined) entity.splitBy = dto.splitBy || null;
@@ -611,7 +618,8 @@ export class SplunkService {
       `${scope.systemUnderTestId}-${scope.testEnvironment}-${scope.workload}-splunk-${dashboardLabel}`,
     );
     const slug = dashboardLabel.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const dashboardUid = `splunk-${slug}`;
+    // A label with no [a-z0-9] characters would give every such label the uid `splunk-`.
+    const dashboardUid = `splunk-${slug || applicationDashboardId.slice(0, 8)}`;
 
     const existing = await em.query<Array<{ id: string }>>('SELECT id FROM application_dashboards WHERE id = $1', [applicationDashboardId]);
     if (existing.length === 0) {
