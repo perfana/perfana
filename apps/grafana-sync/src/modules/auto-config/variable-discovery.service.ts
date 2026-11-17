@@ -13,6 +13,22 @@ import { VariableDetectorService, TemplatingVariable } from './variable-detector
 import { datasourceVariableUid, templatingListFromGrafanaJson } from './datasource-variable.util';
 import { VariableMatcherService } from './variable-matcher.service';
 
+/** The two variables auto-config fills from the test run rather than from Grafana. */
+const SEEDED_VARIABLE_NAMES = ['system_under_test', 'test_environment'] as const;
+
+/**
+ * A value the seeded-value gate may substitute and compare literally: names, hosts, paths and
+ * versions. Anything else (quotes, regex syntax such as `.*`/`|`, `All`-style patterns from a
+ * hardcoded override) is not checked at all, so it is never compared as a literal against what
+ * is really a pattern, and cannot close a quoted string literal in the query. It does NOT make
+ * an unquoted reference safe: the template's query text decides that, exactly as it does for
+ * the same name substituted into every panel query.
+ */
+const SAFE_SEEDED_VALUE = /^[A-Za-z0-9 _.:\-/@,]+$/;
+
+/** A template variable reference left in a query after substitution. */
+const UNRESOLVED_VARIABLE_REF = /\$\w|\$\{|\[\[/;
+
 @Injectable()
 export class VariableDiscoveryService {
   private readonly logger = new Logger(VariableDiscoveryService.name);
@@ -110,6 +126,105 @@ export class VariableDiscoveryService {
       autoConfigGrafanaDashboard,
       testRun,
     );
+  }
+
+  /**
+   * The names of the template's `system_under_test` / `test_environment` query variables
+   * whose own query does not return the value this run will use — i.e. the datasource
+   * has never heard of this system or environment, so every panel filtered on it is empty.
+   *
+   * `resolvedVariables` supplies the value to look for (after hardcoded overrides), and
+   * the system name is substituted into the environment query so a chained
+   * `... WHERE system = '$system_under_test'` asks about this system only.
+   *
+   * Fails open: whenever the answer cannot be trusted, the value counts as present. That is
+   * a variable that is not a query or carries a Grafana `regex` (its values are rewritten, so
+   * the raw name would never match), a value outside SAFE_SEEDED_VALUE, a query that still
+   * references another variable after substitution (`$namespace` sent literally matches
+   * nothing), a datasource or query shape the detector cannot read faithfully, a per-query
+   * error, and a request that throws. This check may only ever stop a template whose
+   * datasource answered cleanly and left the value out.
+   */
+  async findSeededValuesMissingFromDatasource(
+    grafanaDashboard: GrafanaDashboard,
+    grafanaInstance: GrafanaInstance,
+    resolvedVariables: DashboardVariable[],
+  ): Promise<string[]> {
+    const valuesOf = (name: string) => resolvedVariables.find((v) => v.name === name)?.values ?? [];
+    const valueOf = (name: string) => valuesOf(name)[0] ?? '';
+    // Only a single plain literal per variable can be substituted and compared: several
+    // values (a hardcoded override) leave the substitution ambiguous, and `All` is a pattern.
+    const notLiteral = SEEDED_VARIABLE_NAMES.find((name) => {
+      const values = valuesOf(name);
+      return (
+        values.length > 1 ||
+        values.some((v) => v !== '' && (v === 'All' || !SAFE_SEEDED_VALUE.test(v)))
+      );
+    });
+    if (notLiteral !== undefined) {
+      this.logger.debug(
+        `Template "${grafanaDashboard.name}": "${notLiteral}" is not a single plain value, not checking the template against the datasource`,
+      );
+      return [];
+    }
+    const missing: string[] = [];
+
+    for (const name of SEEDED_VARIABLE_NAMES) {
+      const variable = (grafanaDashboard.templatingVariables || []).find(
+        (v): v is TemplatingVariable =>
+          !!v && typeof v === 'object' && (v as TemplatingVariable).name === name,
+      );
+      if (!variable || variable.type !== 'query' || variable.regex) continue;
+
+      const wanted = valueOf(name);
+      if (!wanted) continue;
+
+      const rawQuery = typeof variable.query === 'object' ? variable.query?.query : variable.query;
+      let query = typeof rawQuery === 'string' ? rawQuery : '';
+      if (!query.trim()) continue;
+      // $var, ${var}, ${var:format} and [[var]], every occurrence.
+      for (const seeded of SEEDED_VARIABLE_NAMES) {
+        const n = this.variableMatcherService.escapeRegExp(seeded);
+        const ref = new RegExp(
+          `\\$\\{${n}(?::[^}]*)?\\}|\\[\\[${n}\\]\\]|\\$${n}(?![A-Za-z0-9_])`,
+          'g',
+        );
+        const replacement = valueOf(seeded);
+        // An empty value stays a reference, so the unresolved check below skips the query
+        // rather than sending `system = ''` and reading the clean empty answer as "missing".
+        if (replacement) query = query.replace(ref, () => replacement);
+      }
+      if (UNRESOLVED_VARIABLE_REF.test(query)) {
+        this.logger.debug(
+          `Template "${grafanaDashboard.name}": its "${name}" variable query references other variables, not checking it`,
+        );
+        continue;
+      }
+
+      try {
+        const values = await this.variableDetectorService.getValuesFromDatasourceQueryOrNull(
+          grafanaInstance,
+          grafanaDashboard,
+          variable,
+          query,
+        );
+        // Case-insensitive: a case mismatch only ever loosens this check, never skips more.
+        if (values !== null && !values.some((v) => v.toLowerCase() === wanted.toLowerCase())) {
+          this.logger.warn(
+            `Template "${grafanaDashboard.name}": its "${name}" variable query returned ${values.length} value(s), none of them "${wanted}"`,
+          );
+          missing.push(name);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Template "${grafanaDashboard.name}": could not run its "${name}" variable query, not using it to decide: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
+    return missing;
   }
 
   /**
