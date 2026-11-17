@@ -71,6 +71,11 @@
       "development": "./src/services/grafana/auth.ts",
       "default": "./dist/services/grafana/auth.js"
     },
+    "./services/splunk/client": {
+      "types": "./dist/services/splunk/client.d.ts",
+      "development": "./src/services/splunk/client.ts",
+      "default": "./dist/services/splunk/client.js"
+    },
     "./services/metrics-source-upsert": {
       "types": "./dist/services/metrics-source-upsert.d.ts",
       "development": "./src/services/metrics-source-upsert.ts",
