@@ -13,6 +13,11 @@ export class RefreshSourcesDto {
   @IsBoolean()
   dynatrace?: boolean;
 
+  @ApiProperty({ description: 'Include Splunk log metrics', required: false })
+  @IsOptional()
+  @IsBoolean()
+  splunk?: boolean;
+
   @ApiProperty({ description: 'Include performance test metrics', required: false })
   @IsOptional()
   @IsBoolean()

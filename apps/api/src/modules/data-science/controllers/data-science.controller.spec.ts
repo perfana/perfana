@@ -407,7 +407,7 @@ describe('DataScienceController', () => {
         const dto: AvailableSourcesRequestDto = { scopes: [] };
         const result = await controller.getAvailableSources(dto);
 
-        expect(result).toEqual({ grafana: false, dynatrace: false });
+        expect(result).toEqual({ grafana: false, dynatrace: false, splunk: false });
       });
 
       it('should return both false when all scopes have invalid UUIDs', async () => {
@@ -418,7 +418,7 @@ describe('DataScienceController', () => {
         };
         const result = await controller.getAvailableSources(dto);
 
-        expect(result).toEqual({ grafana: false, dynatrace: false });
+        expect(result).toEqual({ grafana: false, dynatrace: false, splunk: false });
       });
 
       it('should return grafana=true when application_dashboards row exists', async () => {
@@ -427,6 +427,7 @@ describe('DataScienceController', () => {
         // dynatrace query (workload present)
         dataSource.query
           .mockResolvedValueOnce([{ has_rows: false }])   // dynatrace
+          .mockResolvedValueOnce([{ present: false }])    // splunk table probe
           .mockResolvedValueOnce([{ has_rows: true }]);   // grafana
 
         const dto: AvailableSourcesRequestDto = {
@@ -438,7 +439,22 @@ describe('DataScienceController', () => {
         };
         const result = await controller.getAvailableSources(dto);
 
-        expect(result).toEqual({ grafana: true, dynatrace: false });
+        expect(result).toEqual({ grafana: true, dynatrace: false, splunk: false });
+      });
+
+      it('should return splunk=true for an enabled Splunk query and keep splunk- placeholders out of grafana', async () => {
+        const { controller, dataSource } = await buildModule();
+        dataSource.query
+          .mockResolvedValueOnce([{ has_rows: false }])   // dynatrace
+          .mockResolvedValueOnce([{ present: true }])     // splunk table probe
+          .mockResolvedValueOnce([{ has_rows: true }])    // splunk
+          .mockResolvedValueOnce([{ has_rows: false }]);  // grafana
+        const result = await controller.getAvailableSources({
+          scopes: [{ systemUnderTestId: '550e8400-e29b-41d4-a716-446655440001', testEnvironment: 'production', workload: 'loadTest' }],
+        } as AvailableSourcesRequestDto);
+        expect(result).toEqual({ grafana: false, dynatrace: false, splunk: true });
+        expect(String(dataSource.query.mock.calls[2][0])).toContain('FROM splunk_queries WHERE enabled');
+        expect(String(dataSource.query.mock.calls[3][0])).toContain("NOT LIKE 'splunk-%'");
       });
 
       it('should return dynatrace=true when dynatrace_queries row exists', async () => {
@@ -446,6 +462,7 @@ describe('DataScienceController', () => {
 
         dataSource.query
           .mockResolvedValueOnce([{ has_rows: true }])    // dynatrace
+          .mockResolvedValueOnce([{ present: false }])    // splunk table probe
           .mockResolvedValueOnce([{ has_rows: false }]);  // grafana
 
         const dto: AvailableSourcesRequestDto = {
@@ -457,7 +474,7 @@ describe('DataScienceController', () => {
         };
         const result = await controller.getAvailableSources(dto);
 
-        expect(result).toEqual({ grafana: false, dynatrace: true });
+        expect(result).toEqual({ grafana: false, dynatrace: true, splunk: false });
       });
 
       it('should deduplicate identical scopes before querying', async () => {
@@ -465,6 +482,7 @@ describe('DataScienceController', () => {
 
         dataSource.query
           .mockResolvedValueOnce([{ has_rows: false }])
+          .mockResolvedValueOnce([{ present: false }])
           .mockResolvedValueOnce([{ has_rows: false }]);
 
         const dto: AvailableSourcesRequestDto = {
@@ -477,7 +495,7 @@ describe('DataScienceController', () => {
         await controller.getAvailableSources(dto);
 
         // Should only issue 2 DB queries (dt + grafana), not 4
-        expect(dataSource.query).toHaveBeenCalledTimes(2);
+        expect(dataSource.query).toHaveBeenCalledTimes(3);
       });
 
       it('should skip dynatrace query when no scope has a workload', async () => {
@@ -514,7 +532,7 @@ describe('DataScienceController', () => {
 
         const result = await controller.getAvailableSources(dto);
 
-        expect(result).toEqual({ grafana: true, dynatrace: true });
+        expect(result).toEqual({ grafana: true, dynatrace: true, splunk: true });
       });
     });
   });

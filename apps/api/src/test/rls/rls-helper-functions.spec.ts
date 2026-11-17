@@ -33,7 +33,8 @@ describe('RLS helper functions', () => {
   });
 
   afterAll(async () => {
-    // Don't destroy: shared with other RLS specs in the same Jest worker.
+    // Per-file module registry: this DataSource is ours alone, so close it.
+    if (ds?.isInitialized) await ds.destroy();
   });
 
   async function applyGucs(em: EntityManager, gucs: GucBag): Promise<void> {

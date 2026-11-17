@@ -18,7 +18,7 @@ import type { MetricProcessor, FlattenedMetricRecord, TestRunContext } from './m
 /**
  * Source type for metrics documents
  */
-export type MetricSource = 'Grafana' | 'Dynatrace';
+export type MetricSource = 'Grafana' | 'Dynatrace' | 'Splunk';
 
 /**
  * Configuration for batch processing
@@ -121,6 +121,16 @@ export class BatchProcessor {
     testRun: TestRunContext
   ): Promise<BatchProcessResult> {
     return this.processDocuments(documents, testRun, 'Dynatrace', (doc) =>
+      this.metricProcessor.flattenDynatraceMetricsDocument(doc, testRun)
+    );
+  }
+
+  /**
+   * Splunk documents have the Dynatrace PanelMetricsDocument shape, so they share its flattener:
+   * the timestep and the ramp-up flag are recomputed from the run, and the write is the same upsert.
+   */
+  async processSplunkDocuments(documents: unknown[], testRun: TestRunContext): Promise<BatchProcessResult> {
+    return this.processDocuments(documents, testRun, 'Splunk', (doc) =>
       this.metricProcessor.flattenDynatraceMetricsDocument(doc, testRun)
     );
   }

@@ -10,6 +10,7 @@ import {
   BatchProcessor,
   GrafanaCollector,
   DynatraceCollector,
+  SplunkCollector,
   PerformanceTestCollector,
 } from './helpers/incremental/index.js';
 
@@ -30,6 +31,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
   private validator: IncrementalValidator;
   private grafanaCollector: GrafanaCollector;
   private dynatraceCollector: DynatraceCollector;
+  private splunkCollector: SplunkCollector;
   private perfTestCollector: PerformanceTestCollector;
 
   constructor(logger: Logger) {
@@ -41,6 +43,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
 
     this.grafanaCollector = new GrafanaCollector(logger, this.db, batchProcessor);
     this.dynatraceCollector = new DynatraceCollector(logger, this.db, metricProcessor, batchProcessor);
+    this.splunkCollector = new SplunkCollector(logger, this.db, batchProcessor);
     this.perfTestCollector = new PerformanceTestCollector(logger);
   }
 
@@ -67,6 +70,8 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
       collectPerformanceTestMetrics = true,
       collectGrafanaMetrics = true,
       collectDynatraceMetrics = true,
+      collectSplunkMetrics = false,
+      splunkConfigId,
     } = validationResult.input!;
 
     try {
@@ -84,6 +89,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
         timeRange: { from: fromTime, to: toTime },
         grafana: this.validator.createDefaultCollectionResult(),
         dynatrace: this.validator.createDefaultCollectionResult(),
+        splunk: this.validator.createDefaultCollectionResult(),
         performanceTest: this.validator.createDefaultCollectionResult(),
         totalDataPoints: 0,
         totalErrors: 0,
@@ -115,6 +121,11 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
         );
       }
 
+      // Collect Splunk log metrics
+      if (collectSplunkMetrics) {
+        results.splunk = await this.splunkCollector.collect(testRunId, testRun, splunkConfigId, fromTime, toTime);
+      }
+
       // Collect performance test metrics
       if (collectPerformanceTestMetrics) {
         results.performanceTest = await this.perfTestCollector.collect(testRunId, fromTime, toTime);
@@ -122,9 +133,10 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
 
       // Calculate totals
       results.totalDataPoints =
-        results.grafana.dataPoints + results.dynatrace.dataPoints + results.performanceTest.dataPoints;
+        results.grafana.dataPoints + results.dynatrace.dataPoints + results.splunk.dataPoints + results.performanceTest.dataPoints;
       results.totalErrors =
-        results.grafana.errors.length + results.dynatrace.errors.length + results.performanceTest.errors.length;
+        results.grafana.errors.length + results.dynatrace.errors.length + results.splunk.errors.length +
+        results.performanceTest.errors.length;
 
       const duration = Date.now() - startTime;
 
@@ -142,6 +154,9 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
       }
       if (collectDynatraceMetrics && !results.dynatrace.success) {
         failedSources.push(`dynatrace (${results.dynatrace.errors.join('; ') || 'unspecified failure'})`);
+      }
+      if (collectSplunkMetrics && !results.splunk.success) {
+        failedSources.push(`splunk (${results.splunk.errors.join('; ') || 'unspecified failure'})`);
       }
       if (collectPerformanceTestMetrics && !results.performanceTest.success) {
         failedSources.push(

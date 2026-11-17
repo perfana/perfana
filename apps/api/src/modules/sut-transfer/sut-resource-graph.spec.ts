@@ -28,6 +28,7 @@ describe('SUT_RESOURCES', () => {
       'ds_metric_collection_status', 'ds_panels', 'ds_query_executions',
       'ds_tracked_differences', 'test_run_transaction_stats',
       'series_grouping_rules', 'ds_metric_series_groups',
+      'splunk_configs', 'splunk_entity_mappings', 'splunk_queries',
     ].sort();
     expect([...tables].sort()).toEqual(expected);
   });

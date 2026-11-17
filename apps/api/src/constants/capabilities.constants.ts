@@ -19,6 +19,9 @@ export const Capability = {
   IntegrationTracingCreate: 'integration:tracing:create',
   IntegrationTracingUpdate: 'integration:tracing:update',
   IntegrationTracingDelete: 'integration:tracing:delete',
+  IntegrationSplunkCreate: 'integration:splunk:create',
+  IntegrationSplunkUpdate: 'integration:splunk:update',
+  IntegrationSplunkDelete: 'integration:splunk:delete',
 
   // Test runs
   TestRunRead: 'test-run:read',
@@ -78,6 +81,9 @@ const integrationCrud: CapabilityValue[] = [
   Capability.IntegrationTracingCreate,
   Capability.IntegrationTracingUpdate,
   Capability.IntegrationTracingDelete,
+  Capability.IntegrationSplunkCreate,
+  Capability.IntegrationSplunkUpdate,
+  Capability.IntegrationSplunkDelete,
 ];
 
 const testRunCrud: CapabilityValue[] = [

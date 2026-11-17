@@ -106,6 +106,7 @@ export const OrchestrateReevaluateBatchJobSchema = z.object({
   sources: z.object({
     grafana: z.boolean().optional(),
     dynatrace: z.boolean().optional(),
+    splunk: z.boolean().optional(),
     performanceMetrics: z.boolean().optional(),
   }).optional(),
   // Recalculate ds_metric_statistics before evaluating, without collecting any data.
@@ -148,7 +149,7 @@ export interface TestRunGapAnalysis {
 
 export const IncrementalCollectionJobSchema = z.object({
   testRunId: z.string(),
-  sourceType: z.enum(['grafana', 'dynatrace', 'performance_test']),
+  sourceType: z.enum(['grafana', 'dynatrace', 'splunk', 'performance_test']),
   sourceId: z.string().nullable(),
   applicationDashboardIds: z.array(z.string()),
   fromTime: z.string(), // ISO 8601 timestamp

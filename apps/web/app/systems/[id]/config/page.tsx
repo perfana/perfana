@@ -17,6 +17,7 @@ import {
   Storage as StorageIcon,
   Timeline as TimelineIcon,
   Memory as MemoryIcon,
+  Article as ArticleIcon,
   Notifications as NotificationsIcon,
   Description as DescriptionIcon,
   TuneRounded as TuneIcon,
@@ -37,6 +38,7 @@ import DeepLinksSection from './components/DeepLinksSection';
 import DynatraceSection from './components/DynatraceSection';
 import DistributedTracingSection from './components/DistributedTracingSection';
 import PyroscopeSection from './components/PyroscopeSection';
+import SplunkSection from './components/SplunkSection';
 import NotificationsSection from './components/NotificationsSection';
 import ReportingTemplatesSection from './components/ReportingTemplatesSection';
 import AdaptSettingsSection from './components/AdaptSettingsSection';
@@ -211,6 +213,7 @@ export default function SystemConfigurationPage() {
             {systemData.hasDynatrace && <Tab value="dynatrace" icon={<StorageIcon />} label="Dynatrace" />}
             {systemData.hasTracing && <Tab value="tracing" icon={<TimelineIcon />} label="Distributed Tracing" />}
             {systemData.hasPyroscope && <Tab value="pyroscope" icon={<MemoryIcon />} label="Pyroscope" />}
+            {systemData.hasSplunk && <Tab value="splunk" icon={<ArticleIcon />} label="Splunk" />}
             <Tab value="notifications" icon={<NotificationsIcon />} label="Notifications" />
             <Tab value="templates" icon={<DescriptionIcon />} label="Reporting Templates" />
             <Tab value="adapt-settings" icon={<TuneIcon />} label="ADAPT Settings" />
@@ -306,6 +309,15 @@ export default function SystemConfigurationPage() {
               systemId={systemId}
               systemUnderTest={system}
               onUpdate={systemData.setSystem}
+            />
+          )}
+          {activeTab === 'splunk' && systemData.hasSplunk && (
+            <SplunkSection
+              systemId={systemId}
+              systemName={system.name}
+              organizationId={system.organization_id ?? undefined}
+              selectedEnvironment={selectedEnvironment}
+              selectedWorkload={selectedWorkload}
             />
           )}
           {activeTab === 'notifications' && (

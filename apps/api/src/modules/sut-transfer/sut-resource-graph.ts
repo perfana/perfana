@@ -54,6 +54,15 @@ export const SUT_RESOURCES: SutResource[] = [
                   UNION
                   SELECT dynatrace_config_id FROM dynatrace_queries WHERE system_under_test_id = $1
                 )` },
+  // Same shape for Splunk: both children FK into splunk_configs. Credentials stay encrypted,
+  // exactly as dynatrace_configs' do.
+  { table: 'splunk_configs', filter: 'byReference', group: 'shared',
+    customSql: `SELECT row_to_json(t) AS r FROM splunk_configs t
+                WHERE t.id IN (
+                  SELECT splunk_config_id FROM splunk_entity_mappings WHERE system_under_test_id = $1
+                  UNION
+                  SELECT splunk_config_id FROM splunk_queries WHERE system_under_test_id = $1
+                )` },
   // generated_reports.template_id → report_templates(id): a report that still has its
   // template needs it in the bundle or the import FK-violates (NULL once the template
   // is deleted, which IN simply never matches). Templates
@@ -91,6 +100,8 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'notification_channels', filter: 'bySut', group: 'optional' },
   { table: 'dynatrace_entity_mappings', filter: 'bySut', group: 'optional' },
   { table: 'dynatrace_queries', filter: 'bySut', group: 'optional' },
+  { table: 'splunk_entity_mappings', filter: 'bySut', group: 'optional' },
+  { table: 'splunk_queries', filter: 'bySut', group: 'optional' },
   { table: 'workload_apdex_thresholds', filter: 'bySut', group: 'optional' },
   { table: 'workload_transaction_apdex_thresholds', filter: 'bySut', group: 'optional' },
   { table: 'system_under_test_test_environments', filter: 'bySut', group: 'optional' },

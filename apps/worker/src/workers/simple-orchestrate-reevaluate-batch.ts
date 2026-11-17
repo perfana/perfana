@@ -16,6 +16,7 @@ import { getConfig } from '../config/environment.js';
 import { getDatabaseService } from '../common/database-accessor.js';
 import { getRedisPool } from '../config/redis-pool.js';
 import { JobLockService } from '../services/JobLockService.js';
+import { getCollectableSplunkConfigIds } from '../services/collectable-sources.js';
 import { ProgressReporter } from '../services/ProgressReporter.js';
 import { HEAVY_STAGE_MAX_WAIT_MS } from '../services/HeavyStageMutex.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
@@ -544,6 +545,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         const enabledSourceTypes = new Set<string>();
         if (!sources || sources.grafana !== false) { enabledSourceTypes.add('grafana'); }
         if (!sources || sources.dynatrace !== false) { enabledSourceTypes.add('dynatrace'); }
+        if (!sources || sources.splunk !== false) { enabledSourceTypes.add('splunk'); }
         if (!sources || sources.performanceMetrics !== false) { enabledSourceTypes.add('performance_test'); }
 
         const forceRefetchStart = Date.now();
@@ -624,6 +626,25 @@ export function simpleOrchestrateReevaluateBatchWorker() {
               }
             }
 
+            // Splunk is discovered on its own, not only when the run has no status row at all: the
+            // block above runs only then, so a Splunk connection mapped after the run's first
+            // analysis — the usual way Splunk gets added — would never be collected. Each
+            // collectable connection the run has no status row for is added.
+            if (enabledSourceTypes.has('splunk')) {
+              const scope = await db.testRunRepo.findOne({
+                where: { testRunId },
+                select: ['testRunId', 'systemUnderTestId', 'testEnvironment', 'workload'],
+              });
+              if (scope) {
+                const known = new Set(sourcesToRefetch.filter((s) => s.source_type === 'splunk').map((s) => s.source_id));
+                const added = (await getCollectableSplunkConfigIds(db, scope)).filter((id) => !known.has(id));
+                if (added.length > 0) {
+                  logger.info(`  ${testRunId}: discovered ${added.length} Splunk connection(s) with no collection status: ${added.join(', ')}`);
+                  sourcesToRefetch = [...sourcesToRefetch, ...added.map((id) => ({ source_type: 'splunk', source_id: id }))];
+                }
+              }
+            }
+
             if (sourcesToRefetch.length === 0) {
               logger.info(`  ${testRunId}: no collection statuses or discoverable sources for selected types, skipping`);
               continue;
@@ -698,6 +719,37 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   const result = await dynatracePipeline.execute({ testRunIds: [testRunId] });
                   const dtData = result.data as Record<string, unknown>;
                   dataPoints = (dtData?.totalMetrics ?? dtData?.totalDataPoints ?? dtData?.metricsCollected ?? 0) as number;
+                } else if (status.source_type === 'splunk') {
+                  const result = await incrementalPipeline.execute({
+                    testRunId,
+                    fromTime,
+                    toTime,
+                    collectGrafanaMetrics: false,
+                    collectDynatraceMetrics: false,
+                    collectSplunkMetrics: true,
+                    collectPerformanceTestMetrics: false,
+                    ...(status.source_id ? { splunkConfigId: status.source_id } : {}),
+                  });
+                  // Throw rather than fall through to markSourceComplete: a failed search must
+                  // never certify the source, or it is never collected again.
+                  if (!result.success) {
+                    throw new Error(result.error?.message ?? 'Splunk re-fetch failed');
+                  }
+                  // A live tick may stand with one panel's search failing; certifying the source
+                  // complete may not — "complete" is sticky and suppresses re-collection.
+                  const splunkErrors = ((result.data as { splunk?: { errors?: string[] } })?.splunk?.errors) ?? [];
+                  if (splunkErrors.length > 0) {
+                    throw new Error(`Splunk re-fetch had panel errors: ${splunkErrors.join(' | ')}`);
+                  }
+                  dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;
+                  // A Splunk connection discovered above has no status row yet, and markSourceComplete
+                  // below only updates one. Recording the range upserts it, so coverage counts it too.
+                  // Only on a run that already has status rows: creating the first one would make
+                  // the next analyze treat the run as incrementally collected and skip its Grafana
+                  // and Dynatrace stages (worker CLAUDE.md, "Gap-filling a completed run").
+                  if (status.source_id && statuses.length > 0) {
+                    await db.updateCollectedRanges(testRunId, 'splunk', status.source_id, { from: fromTime, to: toTime });
+                  }
                 } else {
                   // Grafana and performance_test use incremental pipeline with full time range
                   const result = await incrementalPipeline.execute({
@@ -817,6 +869,9 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           if (sources.dynatrace !== false) {
             enabledSourceTypes.add('dynatrace');
           }
+          if (sources.splunk !== false) {
+            enabledSourceTypes.add('splunk');
+          }
           if (sources.performanceMetrics !== false) {
             enabledSourceTypes.add('performance_test');
           }
@@ -875,9 +930,11 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     toTime: toDate,
                     collectGrafanaMetrics: g.sourceType === 'grafana',
                     collectDynatraceMetrics: g.sourceType === 'dynatrace',
+                    collectSplunkMetrics: g.sourceType === 'splunk',
                     collectPerformanceTestMetrics: g.sourceType === 'performance_test',
                     ...(g.sourceType === 'grafana' && g.sourceId ? { grafanaInstanceId: g.sourceId } : {}),
                     ...(g.sourceType === 'dynatrace' && g.sourceId ? { dynatraceConfigId: g.sourceId } : {}),
+                    ...(g.sourceType === 'splunk' && g.sourceId ? { splunkConfigId: g.sourceId } : {}),
                   });
 
                   const dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;

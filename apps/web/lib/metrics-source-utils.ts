@@ -1,4 +1,4 @@
-export type SourceType = 'grafana' | 'dynatrace' | 'performance_test' | 'prometheus' | 'influxdb' | 'unknown';
+export type SourceType = 'grafana' | 'dynatrace' | 'performance_test' | 'splunk' | 'prometheus' | 'influxdb' | 'unknown';
 
 /**
  * Get the source type for a dashboard. Uses source_type from the linked MetricsSource
@@ -18,6 +18,10 @@ export function getSourceType(dashboard: {
   const uid = dashboard.dashboard_uid || '';
   if (uid.startsWith('dynatrace-')) return 'dynatrace';
   if (uid.startsWith('performance-test-metrics-')) return 'performance_test';
+  // ponytail: GET /grafana/application-dashboards returns no source_type for any row, so this
+  // prefix is what classifies a Splunk placeholder today. Returning the metrics source's
+  // source_type from that endpoint would retire every arm of this fallback.
+  if (uid.startsWith('splunk-')) return 'splunk';
   return 'grafana';
 }
 
@@ -29,13 +33,17 @@ export function isPerformanceTest(dashboard: Parameters<typeof getSourceType>[0]
   return getSourceType(dashboard) === 'performance_test';
 }
 
+export function isSplunk(dashboard: Parameters<typeof getSourceType>[0]): boolean {
+  return getSourceType(dashboard) === 'splunk';
+}
+
 export function isGrafana(dashboard: Parameters<typeof getSourceType>[0]): boolean {
   return getSourceType(dashboard) === 'grafana';
 }
 
 export function isArtificialDashboard(dashboard: Parameters<typeof getSourceType>[0]): boolean {
   const type = getSourceType(dashboard);
-  return type === 'dynatrace' || type === 'performance_test';
+  return type === 'dynatrace' || type === 'performance_test' || type === 'splunk';
 }
 
 /**
@@ -46,6 +54,7 @@ export const SOURCE_DISPLAY: Record<SourceType, { label: string; color: string; 
   grafana:          { label: 'Grafana',          color: '#FF6600', groupLabel: 'Grafana Dashboards' },
   dynatrace:        { label: 'Dynatrace',        color: '#6F2DA8', groupLabel: 'Dynatrace Metrics' },
   performance_test: { label: 'Performance Test',  color: '#1976D2', groupLabel: 'Performance Test Metrics' },
+  splunk:           { label: 'Splunk',           color: '#65A637', groupLabel: 'Splunk Logs' },
   prometheus:       { label: 'Prometheus',         color: '#E6522C', groupLabel: 'Prometheus Metrics' },
   influxdb:         { label: 'InfluxDB',           color: '#22ADF6', groupLabel: 'InfluxDB Metrics' },
   unknown:          { label: 'Unknown',            color: '#9E9E9E', groupLabel: 'Other' },

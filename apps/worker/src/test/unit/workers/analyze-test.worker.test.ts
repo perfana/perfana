@@ -178,7 +178,7 @@ describe('analyzeTestWorker', () => {
       expect(result.message).toContain('completed for test run test-run-123');
       expect(result.data).toMatchObject({
         testRunId: 'test-run-123',
-        stages: 11, // 9 base stages (incl. transaction-stats-rollup) + ADAPT + data-sanity-check
+        stages: 12, // 10 base stages (incl. transaction-stats-rollup, splunk-collection) + ADAPT + data-sanity-check
         adapt: true,
         benchmarksOnly: false,
       });
@@ -241,7 +241,7 @@ describe('analyzeTestWorker', () => {
         }),
         expect.any(Object) // ProgressReporter
       );
-      expect(result.data.stages).toBe(10); // 9 base stages (incl. transaction-stats-rollup) + data-sanity-check, without ADAPT
+      expect(result.data.stages).toBe(11); // 10 base stages (incl. transaction-stats-rollup, splunk-collection) + data-sanity-check, without ADAPT
     });
 
     it('should execute with default options when not provided', async () => {
@@ -504,7 +504,7 @@ describe('analyzeTestWorker', () => {
   });
 
   describe('Stage Configuration', () => {
-    it('should include all 10 stages when ADAPT is enabled', async () => {
+    it('should include all 11 stages when ADAPT is enabled', async () => {
       // Arrange
       const jobData = {
         testRunId: 'test-run-1',
@@ -527,6 +527,7 @@ describe('analyzeTestWorker', () => {
       // as 'partial'. It stays in the ProgressReporter's list — see the progress test below.
       expect(callArgs[1].stages).toEqual([
         'dynatrace-collection',
+        'splunk-collection',
         'panels-processing',
         'performance-test-metrics',
         'transaction-stats-rollup',
@@ -559,6 +560,7 @@ describe('analyzeTestWorker', () => {
       const callArgs = mockOrchestrator.executeSequentialPipeline.mock.calls[0];
       expect(callArgs[1].stages).toEqual([
         'dynatrace-collection',
+        'splunk-collection',
         'panels-processing',
         'performance-test-metrics',
         'transaction-stats-rollup',

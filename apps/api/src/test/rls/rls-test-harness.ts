@@ -95,7 +95,9 @@ export class RlsTestHarness {
   }
 
   async destroy(): Promise<void> {
-    // Don't tear down the shared DataSource; later suites may need it.
+    // Jest gives each spec file its own module registry, so this AppDataSource
+    // belongs to this file alone; leaving it open leaks a pg socket per suite.
+    if (this.ds?.isInitialized) await this.ds.destroy();
   }
 
   /** Direct DataSource for fixture seeding / cleanup that bypasses RLS. */

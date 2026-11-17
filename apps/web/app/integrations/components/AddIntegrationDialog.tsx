@@ -17,6 +17,7 @@ import {
   Timeline,
   LocalFireDepartment,
   Speed,
+  Article,
 } from '@mui/icons-material';
 import { IntegrationType, IntegrationTypeDefinition } from '../types';
 
@@ -59,6 +60,15 @@ export const INTEGRATION_TYPES: IntegrationTypeDefinition[] = [
     icon: <Timeline />,
     color: '#9C27B0',
     features: ['Request Flow Analysis', 'Service Dependencies', 'Latency Breakdown', 'Error Tracking'],
+  },
+  {
+    id: 'splunk',
+    name: 'Splunk',
+    description: 'Turn Splunk log events into metrics per test run: error and warning counts, exceptions by type, or any value your logs carry. They take part in ADAPT, SLOs, graphs and reports like any other metric.',
+    category: 'Logs',
+    icon: <Article />,
+    color: '#65A637',
+    features: ['Log levels over time', 'Errors by host', 'Exceptions by type', 'SPL filters'],
   },
 ];
 

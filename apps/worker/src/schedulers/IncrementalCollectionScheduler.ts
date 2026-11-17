@@ -11,7 +11,7 @@ import { getConfig } from '../config/environment.js';
 import { JOB_NAMES } from '../types/jobs.js';
 import { TestRun, ApplicationDashboard } from '@perfana/shared/entities';
 import { LessThan as _LessThan, MoreThan } from 'typeorm';
-import { filterCollectableGrafanaDashboards } from '../services/collectable-sources.js';
+import { filterCollectableGrafanaDashboards, getCollectableSplunkConfigIds } from '../services/collectable-sources.js';
 
 /**
  * Incremental Collection Scheduler
@@ -556,6 +556,43 @@ export class IncrementalCollectionScheduler {
         );
       }
 
+      // 2b. Splunk connections that can collect for this run (an enabled query AND a mapping in
+      // scope — see COLLECTABLE_SPLUNK_CONFIGS_SQL). Same backoff, dedup and job shape as Dynatrace.
+      const splunkConfigIds = await getCollectableSplunkConfigIds(this.databaseService, testRun);
+      for (const splunkConfigId of splunkConfigIds) {
+        const splunkFailureKey = this.buildSourceKey(testRun.testRunId, 'splunk', splunkConfigId);
+        if (this.shouldSkipDueToBackoff(splunkFailureKey) || this.inFlightJobs.has(splunkFailureKey)) {
+          continue;
+        }
+        const lastCollectedTime = await this.databaseService.getLastCollectedTime(testRun.testRunId, 'splunk', splunkConfigId);
+        const fromTime = lastCollectedTime || testStartTime;
+        const job = await queue.add(
+          JOB_NAMES.INCREMENTAL_COLLECTION,
+          {
+            testRunId: testRun.testRunId,
+            sourceType: 'splunk',
+            sourceId: splunkConfigId,
+            applicationDashboardIds: [],
+            fromTime: fromTime.toISOString(),
+            toTime: toTime.toISOString(),
+            attempt: 1,
+            maxAttempts,
+          },
+          {
+            jobId: this.buildDedupJobId(testRun.testRunId, 'splunk', splunkConfigId),
+            attempts: maxAttempts,
+            backoff: { type: 'exponential', delay: 2000 },
+            removeOnComplete: 100,
+            removeOnFail: 25,
+          },
+        );
+        if (job.id) {
+          this.jobIdToSourceKey.set(job.id, splunkFailureKey);
+          this.inFlightJobs.add(splunkFailureKey);
+        }
+        jobsEnqueued++;
+      }
+
       // 3. Enqueue a performance test metrics job (with backoff check)
       const perfTestFailureKey = this.buildSourceKey(testRun.testRunId, 'performance_test', null);
 
@@ -602,7 +639,7 @@ export class IncrementalCollectionScheduler {
 
       this.logger.log(
         `Enqueued ${jobsEnqueued} incremental collection job(s) for test run ${testRun.testRunId} ` +
-        `(Grafana: ${grafanaGroups.size}, Dynatrace: ${dynatraceConfigs.length}, PerfTest: 1)`
+        `(Grafana: ${grafanaGroups.size}, Dynatrace: ${dynatraceConfigs.length}, Splunk: ${splunkConfigIds.length}, PerfTest: 1)`
       );
     } catch (error) {
       this.logger.error(

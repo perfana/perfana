@@ -19,7 +19,7 @@ export interface CompareSeriesConfig {
   panelId: number;
   panelTitle: string;
   metricName: string;
-  source: 'grafana' | 'dynatrace' | 'performance-metrics';
+  source: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
   metricsSourceId?: string;
   isAggregated?: boolean;
   yAxesFormat?: string;

@@ -2,11 +2,12 @@ import { GrafanaInstance } from '@/lib/grafana-instances';
 import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
 import { TracingInstance } from '@/lib/distributed-tracing';
+import { SplunkConfig } from '@/lib/splunk';
 
 /**
  * Integration type identifiers
  */
-export type IntegrationType = 'grafana' | 'dynatrace' | 'pyroscope' | 'tracing';
+export type IntegrationType = 'grafana' | 'dynatrace' | 'pyroscope' | 'tracing' | 'splunk';
 
 /**
  * Connection status for integration cards
@@ -36,7 +37,7 @@ export interface IntegrationCard {
   /** Brand color */
   color: string;
   /** Instance data (if connected) */
-  instanceData?: GrafanaInstance | DynatraceConfig | PyroscopeInstance | TracingInstance;
+  instanceData?: GrafanaInstance | DynatraceConfig | PyroscopeInstance | TracingInstance | SplunkConfig;
 }
 
 /**
@@ -69,6 +70,7 @@ export const INTEGRATION_COLORS = {
   dynatrace: '#1496FF',
   pyroscope: '#FF6B35',
   tracing: '#9C27B0',
+  splunk: '#65A637',
 } as const;
 
 /**
@@ -79,4 +81,5 @@ export const INTEGRATION_CATEGORIES = {
   dynatrace: 'APM',
   pyroscope: 'Profiling',
   tracing: 'Distributed Tracing',
+  splunk: 'Logs',
 } as const;

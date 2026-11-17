@@ -24,4 +24,5 @@ export { BatchProcessor } from './batch-processor.js';
 // Collectors
 export { GrafanaCollector } from './grafana-collector.js';
 export { DynatraceCollector } from './dynatrace-collector.js';
+export { SplunkCollector } from './splunk-collector.js';
 export { PerformanceTestCollector } from './perf-test-collector.js';

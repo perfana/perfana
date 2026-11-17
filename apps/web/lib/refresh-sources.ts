@@ -10,6 +10,8 @@ export interface TestRunScope {
 export interface AvailableSources {
   grafana: boolean;
   dynatrace: boolean;
+  /** Absent from an API older than the Splunk integration. */
+  splunk?: boolean;
 }
 
 /**
@@ -37,11 +39,11 @@ export async function fetchAvailableSources(scopes: TestRunScope[]): Promise<Ava
     });
 
     if (!response.ok) {
-      return { grafana: true, dynatrace: true };
+      return { grafana: true, dynatrace: true, splunk: true };
     }
 
     return await response.json();
   } catch {
-    return { grafana: true, dynatrace: true };
+    return { grafana: true, dynatrace: true, splunk: true };
   }
 }

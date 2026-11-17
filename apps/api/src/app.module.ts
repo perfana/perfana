@@ -18,6 +18,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { GrafanaModule } from './modules/grafana/grafana.module';
 import { PyroscopeModule } from './modules/pyroscope/pyroscope.module';
+import { SplunkModule } from './modules/splunk/splunk.module';
 import { DeepLinksModule } from './modules/deep-links/deep-links.module';
 import { ComparePresetsModule } from './modules/compare-presets/compare-presets.module';
 import { TrendsPresetsModule } from './modules/trends-presets/trends-presets.module';
@@ -105,6 +106,7 @@ import IORedis from 'ioredis';
     ApiKeysModule,
     GrafanaModule,
     PyroscopeModule,
+    SplunkModule,
     DeepLinksModule,
     ComparePresetsModule,
     TrendsPresetsModule,

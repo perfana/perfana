@@ -13,7 +13,7 @@ import {
   TIME_RANGE_OPTIONS,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
-import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest, isSplunk } from '@/lib/metrics-source-utils';
 import { nextFreeSlot } from '@/lib/charts';
 import {
   ALL_AGGREGATED_OPTION,
@@ -296,6 +296,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   const getAllDashboardsMerged = useCallback((): ApplicationDashboard[] => {
     const grafanaOnly = dashboards.filter(d => isGrafana(d));
     const perfTestOnly = dashboards.filter(d => isPerformanceTest(d));
+    const splunkOnly = dashboards.filter(d => isSplunk(d));
     const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
       id: `dynatrace-${index}`,
       dashboard_label: d.dashboardLabel,
@@ -303,7 +304,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       dashboard_uid: `dynatrace-${d.dashboardLabel}`,
       source_type: 'dynatrace',
     } as ApplicationDashboard));
-    return [...grafanaOnly, ...perfTestOnly, ...dynatraceAsDashboards];
+    return [...grafanaOnly, ...perfTestOnly, ...splunkOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
 
   // The cascade's first pick, kept as preset-save context.

@@ -40,5 +40,7 @@ export const getIntegrationTypeLabel = (type: IntegrationType): string => {
       return 'Pyroscope';
     case 'tracing':
       return 'Tracing';
+    case 'splunk':
+      return 'Splunk';
   }
 };
