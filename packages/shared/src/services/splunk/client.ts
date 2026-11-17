@@ -376,7 +376,7 @@ function causeChain(err: unknown): string {
     // Structured fields only, never message text: a message is free-form and could echo a header.
     const e = cur as { name?: string; code?: string; syscall?: string; hostname?: string; address?: string; port?: number; cause?: unknown; errors?: unknown[] };
     const fields = [e.name, e.code, e.syscall, e.hostname, e.address && `${e.address}${e.port ? `:${e.port}` : ''}`]
-      .filter((f): f is string => typeof f === 'string' && /^[\w.:\-\[\]]{1,255}$/.test(f));
+      .filter((f): f is string => typeof f === 'string' && /^[\w.:\-[\]]{1,255}$/.test(f));
     parts.push(fields.join(' ') || '?');
     cur = e.cause ?? (Array.isArray(e.errors) ? e.errors[0] : undefined);
   }
