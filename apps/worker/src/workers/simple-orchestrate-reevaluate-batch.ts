@@ -615,12 +615,6 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                 }
 
                 // Discover Splunk connections that can collect for this run (same predicate as the scheduler)
-                if (enabledSourceTypes.has('splunk') && !sourcesToRefetch.some(s => s.source_type === 'splunk')) {
-                  for (const id of await getCollectableSplunkConfigIds(db, testRunFull)) {
-                    discoveredSources.push({ source_type: 'splunk', source_id: id, is_complete: false, collected_ranges: [] });
-                  }
-                }
-
                 // Discover performance test metrics (no source_id needed)
                 if (enabledSourceTypes.has('performance_test') && !sourcesToRefetch.some(s => s.source_type === 'performance_test')) {
                   discoveredSources.push({ source_type: 'performance_test', is_complete: false, collected_ranges: [] });
@@ -629,6 +623,25 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                 if (discoveredSources.length > 0) {
                   logger.info(`  ${testRunId}: discovered ${discoveredSources.length} new sources: ${discoveredSources.map(s => `${s.source_type}/${s.source_id ?? 'null'}`).join(', ')}`);
                   sourcesToRefetch = [...sourcesToRefetch, ...discoveredSources];
+                }
+              }
+            }
+
+            // Splunk is discovered on its own, not only when the run has no status row at all: the
+            // block above runs only then, so a Splunk connection mapped after the run's first
+            // analysis — the usual way Splunk gets added — would never be collected. Each
+            // collectable connection the run has no status row for is added.
+            if (enabledSourceTypes.has('splunk')) {
+              const scope = await db.testRunRepo.findOne({
+                where: { testRunId },
+                select: ['testRunId', 'systemUnderTestId', 'testEnvironment', 'workload'],
+              });
+              if (scope) {
+                const known = new Set(sourcesToRefetch.filter((s) => s.source_type === 'splunk').map((s) => s.source_id));
+                const added = (await getCollectableSplunkConfigIds(db, scope)).filter((id) => !known.has(id));
+                if (added.length > 0) {
+                  logger.info(`  ${testRunId}: discovered ${added.length} Splunk connection(s) with no collection status: ${added.join(', ')}`);
+                  sourcesToRefetch = [...sourcesToRefetch, ...added.map((id) => ({ source_type: 'splunk', source_id: id }))];
                 }
               }
             }
@@ -724,6 +737,11 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     throw new Error(result.error?.message ?? 'Splunk re-fetch failed');
                   }
                   dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;
+                  // A Splunk connection discovered above has no status row yet, and markSourceComplete
+                  // below only updates one. Recording the range upserts it, so coverage counts it too.
+                  if (status.source_id) {
+                    await db.updateCollectedRanges(testRunId, 'splunk', status.source_id, { from: fromTime, to: toTime });
+                  }
                 } else {
                   // Grafana and performance_test use incremental pipeline with full time range
                   const result = await incrementalPipeline.execute({

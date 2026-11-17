@@ -45,6 +45,7 @@ export interface BatchOptions {
   sources?: {
     grafana?: boolean;
     dynatrace?: boolean;
+    splunk?: boolean;
     performanceMetrics?: boolean;
   };
   forceRefetch?: boolean;

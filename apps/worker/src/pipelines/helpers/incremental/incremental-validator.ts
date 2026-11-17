@@ -52,6 +52,8 @@ export class IncrementalValidator {
       collectPerformanceTestMetrics,
       collectGrafanaMetrics,
       collectDynatraceMetrics,
+      collectSplunkMetrics,
+      splunkConfigId,
     } = input as Record<string, unknown>;
 
     // Validate required fields
@@ -115,6 +117,10 @@ export class IncrementalValidator {
         collectPerformanceTestMetrics: collectPerformanceTestMetrics as boolean | undefined,
         collectGrafanaMetrics: collectGrafanaMetrics as boolean | undefined,
         collectDynatraceMetrics: collectDynatraceMetrics as boolean | undefined,
+        // Rebuilt field by field, so a field missing here is silently dropped: without these
+        // two every Splunk collection ran with collectSplunkMetrics at its default, false.
+        collectSplunkMetrics: collectSplunkMetrics as boolean | undefined,
+        splunkConfigId: splunkConfigId as string | undefined,
       },
     };
   }
