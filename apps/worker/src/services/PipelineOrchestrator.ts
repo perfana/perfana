@@ -363,6 +363,10 @@ export class PipelineOrchestrator {
       return { success: true, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { skipped: 'run has no start or end time' } };
     }
     const configIds = await getCollectableSplunkConfigIds(this.databaseService, testRun);
+    // This stage runs only for a run with no status rows. Writing the first one would make the
+    // next analyze treat the run as incrementally collected and skip its Grafana and Dynatrace
+    // stages, so the range is recorded only if some other writer created rows meanwhile.
+    const hasStatusRows = (await this.databaseService.getAllCollectionStatuses(testRunId)).length > 0;
     let total = 0;
     const errors: string[] = [];
     for (const splunkConfigId of configIds) {
@@ -381,13 +385,18 @@ export class PipelineOrchestrator {
         continue;
       }
       total += (result.data as { splunk?: { dataPoints?: number } } | undefined)?.splunk?.dataPoints ?? 0;
-      await this.databaseService.updateCollectedRanges(testRunId, 'splunk', splunkConfigId, {
-        from: testRun.startTime,
-        to: testRun.endTime,
-      });
+      if (hasStatusRows) {
+        await this.databaseService.updateCollectedRanges(testRunId, 'splunk', splunkConfigId, {
+          from: testRun.startTime,
+          to: testRun.endTime,
+        });
+      }
     }
     if (errors.length > 0) {
-      return { success: false, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { dataPoints: total }, error: { message: errors.join(' | ') } };
+      // Soft-fail: analyze runs with errorHandling 'abort', and an optional log source must not
+      // take down statistics, checks and ADAPT for the whole run.
+      this.logger.warn(`Splunk collection for ${testRunId} failed, continuing the analysis: ${errors.join(' | ')}`);
+      return { success: true, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { dataPoints: total, skipped: 'splunk-failed', reason: errors.join(' | ') } };
     }
     return { success: true, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { dataPoints: total } };
   }

@@ -1,4 +1,3 @@
-import { getCollectableSplunkConfigIds } from '../services/collectable-sources.js';
 /**
  * Simplified Orchestrate Reevaluate Batch Worker
  *
@@ -17,6 +16,7 @@ import { getConfig } from '../config/environment.js';
 import { getDatabaseService } from '../common/database-accessor.js';
 import { getRedisPool } from '../config/redis-pool.js';
 import { JobLockService } from '../services/JobLockService.js';
+import { getCollectableSplunkConfigIds } from '../services/collectable-sources.js';
 import { ProgressReporter } from '../services/ProgressReporter.js';
 import { HEAVY_STAGE_MAX_WAIT_MS } from '../services/HeavyStageMutex.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
@@ -614,7 +614,6 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   }
                 }
 
-                // Discover Splunk connections that can collect for this run (same predicate as the scheduler)
                 // Discover performance test metrics (no source_id needed)
                 if (enabledSourceTypes.has('performance_test') && !sourcesToRefetch.some(s => s.source_type === 'performance_test')) {
                   discoveredSources.push({ source_type: 'performance_test', is_complete: false, collected_ranges: [] });
@@ -736,10 +735,19 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   if (!result.success) {
                     throw new Error(result.error?.message ?? 'Splunk re-fetch failed');
                   }
+                  // A live tick may stand with one panel's search failing; certifying the source
+                  // complete may not — "complete" is sticky and suppresses re-collection.
+                  const splunkErrors = ((result.data as { splunk?: { errors?: string[] } })?.splunk?.errors) ?? [];
+                  if (splunkErrors.length > 0) {
+                    throw new Error(`Splunk re-fetch had panel errors: ${splunkErrors.join(' | ')}`);
+                  }
                   dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;
                   // A Splunk connection discovered above has no status row yet, and markSourceComplete
                   // below only updates one. Recording the range upserts it, so coverage counts it too.
-                  if (status.source_id) {
+                  // Only on a run that already has status rows: creating the first one would make
+                  // the next analyze treat the run as incrementally collected and skip its Grafana
+                  // and Dynatrace stages (worker CLAUDE.md, "Gap-filling a completed run").
+                  if (status.source_id && statuses.length > 0) {
                     await db.updateCollectedRanges(testRunId, 'splunk', status.source_id, { from: fromTime, to: toTime });
                   }
                 } else {

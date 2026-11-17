@@ -80,12 +80,30 @@ describe('SplunkCollector', () => {
     expect(splunkTimechart.mock.calls[0][1].from.getTime()).toBe(from.getTime());
   });
 
-  it('fails the range when a search fails, so it is retried rather than recorded as collected', async () => {
-    splunkTimechart.mockRejectedValue(new SplunkError('Unknown search command'));
-    const { collector } = makeCollector();
+  it('keeps the tick when one panel fails and another collects, carrying the error', async () => {
+    splunkTimechart
+      .mockResolvedValueOnce([{ time: new Date('2026-11-17T10:30:00Z'), series: 'ERROR', value: 1 }])
+      .mockRejectedValueOnce(new SplunkError('Unknown search command'));
+    const { collector, batchProcessor } = makeCollector({ queries: [QUERY, { ...QUERY, id: 'q2', panel_id: 2, panel_title: 'p2' }] });
+    const result = await collector.collect('run-1', liveRun, undefined, from, to);
+    // A per-panel error must not fail the range: that would re-search the whole run every tick.
+    expect(result.success).toBe(true);
+    expect(result.errors.join()).toContain('Unknown search command');
+    expect(batchProcessor.processSplunkDocuments.mock.calls[0][0]).toHaveLength(1);
+  });
+
+  it('fails the tick when the connection row is gone', async () => {
+    const { collector } = makeCollector({ config: null });
     const result = await collector.collect('run-1', liveRun, undefined, from, to);
     expect(result.success).toBe(false);
-    expect(result.errors.join()).toContain('Unknown search command');
+    expect(splunkTimechart).not.toHaveBeenCalled();
+  });
+
+  it('refuses every connection for a run with no organization (fail closed)', async () => {
+    const { collector } = makeCollector();
+    const result = await collector.collect('run-1', { ...liveRun, organizationId: null }, undefined, from, to);
+    expect(result.success).toBe(false);
+    expect(splunkTimechart).not.toHaveBeenCalled();
   });
 
   it('retries a concurrency refusal before giving up', async () => {
@@ -117,9 +135,16 @@ describe('SplunkCollector', () => {
 });
 
 describe('splunkBucketSeconds', () => {
-  it('is never below 5 s and grows with the run', () => {
+  it('comes from planned_duration and does not move as a live run grows', () => {
     const start = new Date('2026-11-17T10:00:00Z');
-    expect(splunkBucketSeconds({ startTime: start, endTime: new Date('2026-11-17T10:10:00Z') }, to)).toBe(5);
-    expect(splunkBucketSeconds({ startTime: start, endTime: new Date('2026-11-17T13:00:00Z') }, to)).toBe(15);
+    const planned = splunkBucketSeconds({ startTime: start, plannedDuration: 3 * 3600 });
+    expect(planned).toBeGreaterThanOrEqual(5);
+    // end_time is not an input: the keep-alive moves it on every post.
+    expect(splunkBucketSeconds({ startTime: start, plannedDuration: 3 * 3600, endTime: new Date('2026-11-17T10:05:00Z') } as never)).toBe(planned);
+    expect(splunkBucketSeconds({ startTime: start, plannedDuration: 3 * 3600, endTime: new Date('2026-11-17T13:00:00Z') } as never)).toBe(planned);
+  });
+
+  it('falls back to the tick fallback with no planned duration', () => {
+    expect(splunkBucketSeconds({ startTime: new Date(), plannedDuration: null })).toBe(60);
   });
 });

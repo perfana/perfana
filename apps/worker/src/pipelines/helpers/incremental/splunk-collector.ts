@@ -19,6 +19,7 @@ import {
 import { safeDecrypt } from '@perfana/shared/utils';
 import { WorkerDatabaseService } from '../../../common/database.service.js';
 import { resolveFetchProxyDispatcher } from '../../../config/proxy-resolver.js';
+import { perfTestBucketSizes } from '../../../utils/time-bucketing.js';
 import type { PanelMetricsDocument } from '../../../types/dynatrace/index.js';
 import type { CollectionResult } from './types.js';
 import type { BatchProcessor } from './batch-processor.js';
@@ -42,6 +43,7 @@ interface TestRunData {
   startTime?: Date;
   endTime?: Date;
   completed?: boolean;
+  plannedDuration?: number | null;
   analysisStartOffset?: number;
   analysisEndOffset?: number;
   organizationId?: string | null;
@@ -85,13 +87,17 @@ interface MappingRow {
   labels: string[];
 }
 
-/** Bucket size: what a Dynatrace or perf-test panel on the same run would show. */
-export function splunkBucketSeconds(testRun: { startTime?: Date; endTime?: Date }, to: Date): number {
-  const start = testRun.startTime?.getTime() ?? to.getTime();
-  const end = (testRun.endTime ?? to).getTime();
-  const seconds = Math.max(0, (end - start) / 1000);
-  // ~720 points over the run, never below 5 s (the perf-test CAGG grain), rounded to a multiple of 5.
-  return Math.max(5, Math.ceil(seconds / 720 / 5) * 5);
+/**
+ * Bucket size: the perf-test ticks' size, from `planned_duration` (60 s without one). It must not
+ * come from `end_time`: the keep-alive moves that to "now" on every post, so the size would step up
+ * as a live run grows, and since `time` is in the ds_metrics conflict key, buckets of different
+ * sizes would pile up rather than overwrite (worker CLAUDE.md, `perfTestBucketSizes`). One size on
+ * every path — live tick, gap fill, force refetch — keeps a run on one grid.
+ * ponytail: no per-second normalisation, so runs of one workload with different planned durations
+ * compare counts per different spans; divide by the bucket if that shows up in ADAPT.
+ */
+export function splunkBucketSeconds(testRun: { startTime?: Date; plannedDuration?: number | null }): number {
+  return perfTestBucketSizes({ plannedDuration: testRun.plannedDuration, startTime: testRun.startTime ?? new Date(0) }).tick;
 }
 
 export class SplunkCollector {
@@ -110,6 +116,11 @@ export class SplunkCollector {
   ): Promise<CollectionResult> {
     const started = Date.now();
     const errors: string[] = [];
+    // Only a connection-level failure (config gone, wrong org, load/write threw) fails the tick.
+    // A panel whose search errors keeps its error in errors[] and the rest of the tick stands,
+    // exactly like GrafanaCollector: failing the range on one broken panel would re-search the
+    // whole run on every tick (worker CLAUDE.md, "Gap-filling a completed run", rule 4).
+    let fatal = false;
     let dataPoints = 0;
     let maxDataTimestamp: Date | undefined;
 
@@ -133,17 +144,20 @@ export class SplunkCollector {
 
       const lookback = testRun.completed ? 0 : SPLUNK_INGEST_LOOKBACK_MS;
       const from = new Date(Math.max(fromTime.getTime() - lookback, testRun.startTime?.getTime() ?? 0));
-      const bucketSeconds = splunkBucketSeconds(testRun, toTime);
+      const bucketSeconds = splunkBucketSeconds(testRun);
 
       for (const [configId, configQueries] of byConfig) {
         const config = await this.loadConfig(configId);
         if (!config) {
           errors.push(`Splunk connection ${configId} not found`);
+          fatal = true;
           continue;
         }
-        // A query must never read another organization's mapping, nor use another organization's token.
-        if (testRun.organizationId && config.organization_id !== testRun.organizationId) {
+        // A query must never read another organization's mapping, nor use another organization's
+        // token. Fail closed: a run with no organization cannot prove the connection is its own.
+        if (!testRun.organizationId || config.organization_id !== testRun.organizationId) {
           errors.push(`Splunk connection ${config.label} belongs to another organization than this run`);
+          fatal = true;
           continue;
         }
         const conn: SplunkConnection = {
@@ -169,10 +183,11 @@ export class SplunkCollector {
       }
     } catch (err) {
       errors.push(err instanceof Error ? err.message : 'Unknown Splunk collection error');
+      fatal = true;
     }
 
     if (errors.length > 0) {this.logger.error(`Splunk collection for ${testRunId} had errors: ${errors.join(' | ')}`);}
-    return { success: errors.length === 0, dataPoints, errors, duration: Date.now() - started, maxDataTimestamp };
+    return { success: !fatal, dataPoints, errors, duration: Date.now() - started, maxDataTimestamp };
   }
 
   /** Runs at most `concurrency` searches at once per connection (Splunk's per-user search quota). */
