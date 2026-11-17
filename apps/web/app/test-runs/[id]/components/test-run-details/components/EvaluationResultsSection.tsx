@@ -578,7 +578,7 @@ function DataQualitySubsection({ testRun, reasons, severity = 'error', onRefresh
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           testRunIds: [testRun.test_run_id],
-          sources: { grafana: true, dynatrace: true, performanceMetrics: true },
+          sources: { grafana: true, dynatrace: true, splunk: true, performanceMetrics: true },
         }),
       });
 
