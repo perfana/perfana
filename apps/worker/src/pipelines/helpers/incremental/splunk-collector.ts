@@ -253,6 +253,7 @@ export class SplunkCollector {
             benchmarkIds: [],
           });
         } catch (err) {
+          if (err instanceof SplunkError && err.detail) {this.logger.warn(`Splunk panel "${q.panel_title}" cause: ${err.detail}`);}
           errors.push(`Splunk panel "${q.panel_title}": ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
       }

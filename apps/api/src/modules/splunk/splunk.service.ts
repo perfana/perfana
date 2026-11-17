@@ -14,6 +14,7 @@ import {
   SplunkConnection,
   SplunkDiscoveredSource,
   SplunkError,
+  hostForLog,
   SplunkRequestOptions,
 } from '@perfana/shared/services/splunk/client';
 import { MetricsSource, SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest, TestRun } from '../../entities';
@@ -714,7 +715,10 @@ export class SplunkService {
       const info = await splunkServerInfo(conn, opts);
       return { success: true, message: `Connected to ${info.serverName ?? 'Splunk'}${info.version ? ` ${info.version}` : ''}` };
     } catch (err) {
-      const hint = err instanceof SplunkError && err.status === undefined
+      this.logger.warn(
+        `Splunk connection test to ${hostForLog(conn.host)} failed: ${errMsg(err)}${err instanceof SplunkError && err.detail ? ` | cause: ${err.detail}` : ''}`,
+      );
+      const hint = err instanceof SplunkError && err.status === undefined && /splunkcloud\.com|cloud\.splunk\.com/i.test(conn.host)
         ? ' On Splunk Cloud, port 8089 is opened through a support case and the search-api IP allow list is closed by default.'
         : '';
       return { success: false, message: `${errMsg(err)}${hint}` };
@@ -732,7 +736,7 @@ export class SplunkService {
 
   private toHttp(err: unknown): Error {
     if (err instanceof SplunkError) {
-      this.logger.warn(`Splunk request failed: ${err.message}`);
+      this.logger.warn(`Splunk request failed: ${err.message}${err.detail ? ` | cause: ${err.detail}` : ''}`);
       return new BadRequestException(`Splunk: ${err.message}`);
     }
     return err as Error;

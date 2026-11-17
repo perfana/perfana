@@ -36,6 +36,8 @@ export class SplunkError extends Error {
     readonly status?: number,
     /** True when Splunk refused the search for its concurrency quota; retry, do not fail the range. */
     readonly retryable = false,
+    /** Raw cause chain, for server-side logs only: it can carry the resolved IP:port. */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = 'SplunkError';
@@ -328,9 +330,7 @@ async function request(
       ...(opts.dispatcher ? { dispatcher: opts.dispatcher } : {}),
     } as RequestInit);
   } catch (err) {
-    const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
-    // On Splunk Cloud a closed 8089 shows up as a connect timeout, not a refusal.
-    throw new SplunkError(`Could not reach Splunk at ${baseUrl(conn)}: ${msg}`);
+    throw new SplunkError(`Could not reach Splunk at ${hostForLog(conn.host)}: ${describeFetchError(err)}`, undefined, false, causeChain(err));
   }
   const text = await res.text();
   if (!res.ok) {
@@ -340,6 +340,61 @@ async function request(
   }
   return text;
 }
+
+/**
+ * undici reports every network failure as "fetch failed" and keeps the reason in `cause`
+ * (sometimes nested once more, or as an AggregateError for a dual-stack connect). Surface the code
+ * and a hint for it, because "fetch failed" alone sends the operator looking in the wrong place.
+ */
+export function describeFetchError(err: unknown): string {
+  const seen: Array<{ code?: string; message?: string }> = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i++) {
+    const e = cur as { code?: string; message?: string; cause?: unknown; errors?: unknown[] };
+    seen.push(e);
+    cur = e.cause ?? (Array.isArray(e.errors) ? e.errors[0] : undefined);
+  }
+  if (seen.length === 0) return 'Unknown error';
+  if ((seen[0] as Error).name === 'TimeoutError') return 'no answer within the time limit (timeout)';
+  // ponytail: code + fixed hint only. The raw cause message carries the resolved IP:port, which
+  // would make this an internal-network oracle for anyone allowed to test a connection.
+  const code = seen.map((e) => e.code).find((c) => typeof c === 'string' && /^[A-Z0-9_]{2,64}$/.test(c));
+  if (!code) return 'fetch failed';
+  const hint = FETCH_ERROR_HINTS[code] ?? (/CERT|SSL|TLS|SELF_SIGNED|UNABLE_TO_VERIFY/.test(code) ? FETCH_ERROR_HINTS.CERT : undefined);
+  return `${code}${hint ? `. ${hint}` : ''}`;
+}
+
+/** A host for logs: scheme, hostname and port, never userinfo, path or query. */
+export function hostForLog(host: string): string {
+  try { const u = new URL(host); return `${u.protocol}//${u.host}`; } catch { return '[unparseable host]'; }
+}
+
+function causeChain(err: unknown): string {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i++) {
+    // Structured fields only, never message text: a message is free-form and could echo a header.
+    const e = cur as { name?: string; code?: string; syscall?: string; hostname?: string; address?: string; port?: number; cause?: unknown; errors?: unknown[] };
+    const fields = [e.name, e.code, e.syscall, e.hostname, e.address && `${e.address}${e.port ? `:${e.port}` : ''}`]
+      .filter((f): f is string => typeof f === 'string' && /^[\w.:\-[\]]{1,255}$/.test(f));
+    parts.push(fields.join(' ') || '?');
+    cur = e.cause ?? (Array.isArray(e.errors) ? e.errors[0] : undefined);
+  }
+  return parts.join(' <- ');
+}
+
+const FETCH_ERROR_HINTS: Record<string, string> = {
+  ENOTFOUND: 'The hostname does not resolve from the Perfana server; check the name, or the DNS the API and worker containers use',
+  EAI_AGAIN: 'DNS lookup failed temporarily; check the DNS the API and worker containers use',
+  ECONNREFUSED: 'The host answered but nothing listens on that port; the management port is usually 8089',
+  ECONNRESET: 'The connection was cut; often a firewall or proxy in between, or http:// against an https port',
+  ETIMEDOUT: 'No answer: a firewall or IP allow list is likely dropping the traffic, or a proxy is needed (enable "Use proxy")',
+  UND_ERR_CONNECT_TIMEOUT: 'No answer: a firewall or IP allow list is likely dropping the traffic, or a proxy is needed (enable "Use proxy")',
+  EHOSTUNREACH: 'No route to the host from the Perfana server; a proxy may be needed (enable "Use proxy")',
+  ENETUNREACH: 'No route to the host from the Perfana server; a proxy may be needed (enable "Use proxy")',
+  CERT: 'The TLS certificate is not trusted by the Perfana server. Splunk ships a self-signed certificate on 8089; add the issuing CA through NODE_EXTRA_CA_CERTS on the API and worker',
+  ERR_SSL_WRONG_VERSION_NUMBER: 'The port does not speak TLS; try http:// or check the port',
+};
 
 function extractMessage(body: string): string | null {
   try {

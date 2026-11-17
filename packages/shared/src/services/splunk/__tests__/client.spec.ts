@@ -1,4 +1,6 @@
 import {
+  splunkServerInfo,
+  hostForLog,
   buildEntitiesClause,
   buildTimechartSearch,
   expandSplTemplate,
@@ -193,5 +195,31 @@ describe('splunkExport', () => {
     expect((err as Error).message).toContain('neither a token');
     expect((err as Error).message).not.toContain('Could not reach');
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('describeFetchError', () => {
+  const { describeFetchError } = jest.requireActual('../client') as typeof import('../client');
+  it('surfaces the undici cause and a hint', () => {
+    const err = new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo ENOTFOUND x.example'), { code: 'ENOTFOUND' }) });
+    expect(describeFetchError(err)).toMatch(/^ENOTFOUND\. The hostname does not resolve/);
+  });
+  it('never echoes the resolved address', () => {
+    const err = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.1.2.3:8089'), { code: 'ECONNREFUSED' }) });
+    expect(describeFetchError(err)).not.toMatch(/10\.1\.2\.3/);
+  });
+  it('keeps the raw cause on the error for server logs only', async () => {
+    const cause = Object.assign(new Error('connect ECONNREFUSED 10.1.2.3:8089 Bearer secret'), { code: 'ECONNREFUSED', syscall: 'connect', address: '10.1.2.3', port: 8089 });
+    const fetchImpl = (async () => { throw new TypeError('fetch failed', { cause }); }) as unknown as typeof fetch;
+    const err = await splunkServerInfo({ host: 'https://s.example:8089', apiToken: 't' }, { fetchImpl }).catch((e) => e);
+    expect(err.message).not.toMatch(/10\.1\.2\.3/);
+    expect(err.detail).toMatch(/ECONNREFUSED connect 10\.1\.2\.3:8089/);
+    expect(err.detail).not.toContain('secret');
+    expect(hostForLog('https://u:p@s.example:8089/x?y=1')).toBe('https://s.example:8089');
+  });
+  it('maps certificate codes to the CA hint', () => {
+    const err = new TypeError('fetch failed', { cause: Object.assign(new Error('self-signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }) });
+    expect(describeFetchError(err)).not.toContain('in certificate chain');
+    expect(describeFetchError(err)).toMatch(/^SELF_SIGNED_CERT_IN_CHAIN\. .*NODE_EXTRA_CA_CERTS/);
   });
 });
