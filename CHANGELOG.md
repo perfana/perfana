@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.72] - 2026-11-17
+
+### Added
+- **Draft spec for a Splunk integration** (`docs/reference/Features/Splunk Log Metrics (spec).md`). It proposes turning Splunk log events into metrics through the same collection path as Dynatrace, so ADAPT, SLOs, graphs and reports cover them unchanged, and describes how Splunk sources are mapped to a system. Proposal only: nothing is implemented.
+
 ## [0.2.97.71] - 2026-11-12
 
 ### Added
