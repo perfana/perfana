@@ -36,6 +36,8 @@ export class SplunkError extends Error {
     readonly status?: number,
     /** True when Splunk refused the search for its concurrency quota; retry, do not fail the range. */
     readonly retryable = false,
+    /** Raw cause chain, for server-side logs only: it can carry the resolved IP:port. */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = 'SplunkError';
@@ -328,7 +330,7 @@ async function request(
       ...(opts.dispatcher ? { dispatcher: opts.dispatcher } : {}),
     } as RequestInit);
   } catch (err) {
-    throw new SplunkError(`Could not reach Splunk at ${baseUrl(conn)}: ${describeFetchError(err)}`);
+    throw new SplunkError(`Could not reach Splunk at ${baseUrl(conn)}: ${describeFetchError(err)}`, undefined, false, causeChain(err));
   }
   const text = await res.text();
   if (!res.ok) {
@@ -360,6 +362,17 @@ export function describeFetchError(err: unknown): string {
   if (!code) return 'fetch failed';
   const hint = FETCH_ERROR_HINTS[code] ?? (/CERT|SSL|TLS|SELF_SIGNED|UNABLE_TO_VERIFY/.test(code) ? FETCH_ERROR_HINTS.CERT : undefined);
   return `${code}${hint ? `. ${hint}` : ''}`;
+}
+
+function causeChain(err: unknown): string {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i++) {
+    const e = cur as { message?: string; code?: string; cause?: unknown; errors?: unknown[] };
+    parts.push(`${e.message ?? '?'}${e.code ? ` [${e.code}]` : ''}`);
+    cur = e.cause ?? (Array.isArray(e.errors) ? e.errors[0] : undefined);
+  }
+  return parts.join(' <- ');
 }
 
 const FETCH_ERROR_HINTS: Record<string, string> = {

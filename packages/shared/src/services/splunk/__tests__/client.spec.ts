@@ -1,4 +1,5 @@
 import {
+  splunkServerInfo,
   buildEntitiesClause,
   buildTimechartSearch,
   expandSplTemplate,
@@ -205,6 +206,13 @@ describe('describeFetchError', () => {
   it('never echoes the resolved address', () => {
     const err = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.1.2.3:8089'), { code: 'ECONNREFUSED' }) });
     expect(describeFetchError(err)).not.toMatch(/10\.1\.2\.3/);
+  });
+  it('keeps the raw cause on the error for server logs only', async () => {
+    const cause = Object.assign(new Error('connect ECONNREFUSED 10.1.2.3:8089'), { code: 'ECONNREFUSED' });
+    const fetchImpl = (async () => { throw new TypeError('fetch failed', { cause }); }) as unknown as typeof fetch;
+    const err = await splunkServerInfo({ host: 'https://s.example:8089', apiToken: 't' }, { fetchImpl }).catch((e) => e);
+    expect(err.message).not.toMatch(/10\.1\.2\.3/);
+    expect(err.detail).toMatch(/10\.1\.2\.3:8089 \[ECONNREFUSED\]/);
   });
   it('maps certificate codes to the CA hint', () => {
     const err = new TypeError('fetch failed', { cause: Object.assign(new Error('self-signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }) });
