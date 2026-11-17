@@ -109,8 +109,18 @@ describe('validateSplFilter', () => {
     ['index=x \\" | outputlookup foo "', 'backslash'],
     ['$entities "x $testRunId | outputlookup y"', 'outside a quoted string'],
     ['$entities "$entities"', 'outside a quoted string'],
+    ["$entities | eval x='\"' | outputlookup foo | eval y='\"'", 'single-quoted'],
+    ["$entities | where 'a|b'=1", 'single-quoted'],
+    ["$entities | eval x='unclosed", 'Unbalanced single quote'],
+    ['$entities[backend] [search index=_audit]', 'Subsearches'],
+    ['$entities [search index=_audit]', 'Subsearches'],
   ])('rejects %s', (spl, message) => {
     expect(validateSplFilter(spl)).toContain(message);
+  });
+
+  it('accepts a labelled $entities reference and a plain single-quoted field name', () => {
+    expect(validateSplFilter('$entities[backend] level=ERROR')).toBeNull();
+    expect(validateSplFilter("$entities[db] | where 'response.time' > 2")).toBeNull();
   });
 });
 
@@ -145,6 +155,16 @@ describe('export stream parsing', () => {
     }
   });
 
+  it('ignores interim preview result sets', () => {
+    const rows = parseExportLines(
+      [
+        '{"preview":true,"result":{"_time":"2026-11-17T10:00:00Z","ERROR":"1"}}',
+        '{"preview":false,"result":{"_time":"2026-11-17T10:00:00Z","ERROR":"2"}}',
+      ].join('\n'),
+    );
+    expect(timechartRowsToPoints(rows)).toEqual([{ time: new Date('2026-11-17T10:00:00Z'), series: 'ERROR', value: 2 }]);
+  });
+
   it('fails on a stream cut mid-record', () => {
     expect(() => parseExportLines('{"result":{"_time":"2026')).toThrow('ended mid-record');
   });
@@ -165,5 +185,13 @@ describe('splunkExport', () => {
   it('names a 401 as a credential problem', async () => {
     const fetchImpl = jest.fn().mockResolvedValue(new Response('', { status: 401 }));
     await expect(splunkExport({ host: 'https://s:8089', apiToken: 't' }, 'search x', { fetchImpl })).rejects.toThrow('credentials');
+  });
+
+  it('names missing credentials as such, without calling Splunk', async () => {
+    const fetchImpl = jest.fn();
+    const err = await splunkExport({ host: 'https://s:8089' }, 'search x', { fetchImpl }).catch((e: Error) => e);
+    expect((err as Error).message).toContain('neither a token');
+    expect((err as Error).message).not.toContain('Could not reach');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

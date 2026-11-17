@@ -132,8 +132,20 @@ export function validateSplFilter(spl: string): string | null {
   const segments: string[] = [];
   let current = '';
   let inQuote = false;
+  let inSingle = false;
   for (let i = 0; i < spl.length; i++) {
     const ch = spl[i]!;
+    if (inSingle) {
+      // eval/where read '...' as a field name. A double quote, pipe, bracket or backtick inside
+      // one would desynchronise this tokenizer from Splunk's (`'"' | outputlookup x | '"'` looks
+      // like one double-quoted string here), so none of them is allowed in a single-quoted name.
+      if (ch === '"' || ch === '|' || ch === '[' || ch === '`' || ch === '$' || ch === '\\') {
+        return 'A single-quoted field name may not contain quotes, pipes, brackets, backticks, $ or backslashes';
+      }
+      current += ch;
+      if (ch === "'") inSingle = false;
+      continue;
+    }
     if (inQuote) {
       // A placeholder expands to quoted text, which would close this string and turn the rest of
       // it into SPL. Placeholders belong outside strings.
@@ -155,6 +167,14 @@ export function validateSplFilter(spl: string): string | null {
     } else if (ch === '"') {
       inQuote = true;
       current += ch;
+    } else if (ch === "'") {
+      inSingle = true;
+      current += ch;
+    } else if (ch === '$' && /^\$entities\[[^\]\s"'|`[$\\]+\]/.test(spl.slice(i))) {
+      // A labelled reference is expanded by Perfana before the search runs; its brackets are not a subsearch.
+      const token = /^\$entities\[[^\]\s"'|`[$\\]+\]/.exec(spl.slice(i))![0];
+      current += token;
+      i += token.length - 1;
     } else if (ch === '`') {
       return 'Search macros (backticks) are not allowed';
     } else if (ch === '[') {
@@ -167,6 +187,7 @@ export function validateSplFilter(spl: string): string | null {
     }
   }
   if (inQuote) return 'Unbalanced double quote';
+  if (inSingle) return 'Unbalanced single quote';
   segments.push(current);
   if (!segments[0]!.trim()) return 'The filter must start with search terms, not a pipe';
   for (const seg of segments.slice(1)) {
@@ -237,6 +258,9 @@ export function parseExportLines(body: string): Array<Record<string, unknown>> {
     const messages = obj.messages as Array<{ type?: string; text?: string }> | undefined;
     const fatal = messages?.find((m) => m.type === 'FATAL' || m.type === 'ERROR');
     if (fatal) throw toSearchError(fatal.text ?? 'Splunk search failed');
+    // A transforming search can stream interim preview result sets before the final one; only the
+    // final rows count, or totals double up.
+    if (obj.preview === true) continue;
     if (obj.result && typeof obj.result === 'object') rows.push(obj.result as Record<string, unknown>);
   }
   return rows;
@@ -291,11 +315,13 @@ async function request(
   opts: SplunkRequestOptions,
 ): Promise<string> {
   const doFetch = opts.fetchImpl ?? fetch;
+  // Outside the try: missing credentials are a configuration error, not "could not reach".
+  const authorization = requireAuth(conn);
   let res: Response;
   try {
     res = await doFetch(`${baseUrl(conn)}${path}`, {
       ...init,
-      headers: { Authorization: requireAuth(conn), ...(init.headers ?? {}) },
+      headers: { Authorization: authorization, ...(init.headers ?? {}) },
       signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000),
       // Never follow a redirect: the Authorization header must only ever reach the configured host.
       redirect: 'error',
