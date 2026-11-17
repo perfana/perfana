@@ -18,6 +18,7 @@ import {
   Speed,
   Add,
   Business,
+  Article,
 } from '@mui/icons-material';
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
 import { NoOrganizationMembership } from '@/components/NoOrganizationMembership';
@@ -26,6 +27,7 @@ import { authenticatedFetch } from '@/lib/api';
 import { GrafanaInstance } from '@/lib/grafana-instances';
 import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
+import { SplunkConfig } from '@/lib/splunk';
 import { TracingInstance } from '@/lib/distributed-tracing';
 
 // Types
@@ -57,6 +59,9 @@ import {
   TracingDeleteDialog,
   AddIntegrationDialog,
   IntegrationCardComponent,
+  useSplunkIntegration,
+  SplunkFormDialog,
+  SplunkDeleteDialog,
 } from './components';
 
 export default function IntegrationsPage() {
@@ -78,6 +83,7 @@ export default function IntegrationsPage() {
   const dynatrace = useDynatraceIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
   const pyroscope = usePyroscopeIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
   const tracing = useTracingIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
+  const splunk = useSplunkIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
 
   // Load all data on mount and when organization changes
   useEffect(() => {
@@ -89,6 +95,7 @@ export default function IntegrationsPage() {
         dynatrace.loadConfigs(),
         pyroscope.loadInstances(),
         tracing.loadInstances(),
+        splunk.loadConfigs(),
         authenticatedFetch('/proxy').then(r => r.ok ? r.json() : null).then(data => {
           setProxyConfigured(data != null);
         }).catch(() => setProxyConfigured(false)),
@@ -209,6 +216,28 @@ export default function IntegrationsPage() {
       });
     });
 
+    // Splunk connections
+    splunk.configs.forEach((config) => {
+      const hostname = (() => {
+        try {
+          return new URL(config.host).host;
+        } catch {
+          return config.host;
+        }
+      })();
+      cards.push({
+        id: `splunk-${config.id}`,
+        integrationType: 'splunk',
+        name: config.label,
+        tldr: `${hostname} • ${config.apiToken ? 'Token' : 'Basic auth'}`,
+        category: INTEGRATION_CATEGORIES.splunk,
+        status: 'connected',
+        icon: <Article />,
+        color: INTEGRATION_COLORS.splunk,
+        instanceData: config,
+      });
+    });
+
     return cards;
   };
 
@@ -245,6 +274,8 @@ export default function IntegrationsPage() {
       pyroscope.openEditDialog(card.instanceData as PyroscopeInstance);
     } else if (card.integrationType === 'tracing' && card.instanceData) {
       tracing.openEditDialog(card.instanceData as TracingInstance);
+    } else if (card.integrationType === 'splunk' && card.instanceData) {
+      splunk.openEdit(card.instanceData as SplunkConfig);
     }
   };
 
@@ -257,6 +288,8 @@ export default function IntegrationsPage() {
       pyroscope.openDeleteDialog(card.instanceData as PyroscopeInstance);
     } else if (card.integrationType === 'tracing' && card.instanceData) {
       tracing.openDeleteDialog(card.instanceData as TracingInstance);
+    } else if (card.integrationType === 'splunk' && card.instanceData) {
+      splunk.openDelete(card.instanceData as SplunkConfig);
     }
   };
 
@@ -269,6 +302,8 @@ export default function IntegrationsPage() {
       pyroscope.setCreateDialogOpen(true);
     } else if (integrationType === 'tracing') {
       tracing.setCreateDialogOpen(true);
+    } else if (integrationType === 'splunk') {
+      splunk.openCreate();
     }
   };
 
@@ -453,6 +488,17 @@ export default function IntegrationsPage() {
         onClose={() => tracing.setDeleteDialogOpen(false)}
         onConfirm={tracing.handleDelete}
       />
+
+      {/* Splunk Dialogs */}
+      <SplunkFormDialog
+        open={splunk.dialogOpen}
+        editing={splunk.editing}
+        organizationId={currentOrganizationId}
+        proxyConfigured={proxyConfigured}
+        onClose={splunk.closeDialog}
+        onSave={splunk.save}
+      />
+      <SplunkDeleteDialog config={splunk.deleting} onClose={splunk.closeDelete} onConfirm={splunk.confirmDelete} />
 
       {/* Add Integration Dialog */}
       <AddIntegrationDialog

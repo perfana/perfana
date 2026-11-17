@@ -24,6 +24,8 @@ import { IntegrationCard as IntegrationCardType } from '../types';
 import { GrafanaInstance } from '@/lib/grafana-instances';
 import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
+import { SplunkConfig } from '@/lib/splunk';
+import { SplunkExpandedContent } from './SplunkIntegration';
 import { TracingInstance } from '@/lib/distributed-tracing';
 import { getStatusIcon, getStatusLabel, getIntegrationTypeLabel } from '../utils';
 import {
@@ -59,6 +61,7 @@ export function IntegrationCardComponent({
   const isDynatraceInstance = card.integrationType === 'dynatrace' && card.instanceData;
   const isPyroscopeInstance = card.integrationType === 'pyroscope' && card.instanceData;
   const isTracingInstance = card.integrationType === 'tracing' && card.instanceData;
+  const isSplunkInstance = card.integrationType === 'splunk' && card.instanceData;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -204,6 +207,10 @@ export function IntegrationCardComponent({
             {/* Tracing expanded content */}
             {isTracingInstance && (
               <TracingExpandedContent instance={card.instanceData as TracingInstance} />
+            )}
+
+            {isSplunkInstance && (
+              <SplunkExpandedContent config={card.instanceData as SplunkConfig} />
             )}
 
             {/* Placeholder content */}

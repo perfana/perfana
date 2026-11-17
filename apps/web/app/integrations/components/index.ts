@@ -10,3 +10,4 @@ export {
   PyroscopeExpandedContent,
   TracingExpandedContent,
 } from './expanded-content';
+export { useSplunkIntegration, SplunkFormDialog, SplunkDeleteDialog } from './SplunkIntegration';

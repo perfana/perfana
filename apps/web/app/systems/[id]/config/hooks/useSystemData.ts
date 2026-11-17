@@ -7,8 +7,9 @@ import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceConfigs } from '@/lib/dynatrace';
 import { fetchTracingInstances } from '@/lib/distributed-tracing';
 import { fetchPyroscopeInstances } from '@/lib/pyroscope';
+import { fetchSplunkConfigs } from '@/lib/splunk';
 
-export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'notifications' | 'templates' | 'adapt-settings';
+export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'splunk' | 'notifications' | 'templates' | 'adapt-settings';
 
 interface UseSystemDataProps {
   onDashboardsLoad?: (systemId: string, environment: string) => void;
@@ -35,6 +36,7 @@ interface UseSystemDataReturn {
   hasDynatrace: boolean;
   hasTracing: boolean;
   hasPyroscope: boolean;
+  hasSplunk: boolean;
 
   // Handlers
   handleEnvironmentChange: (environment: string) => void;
@@ -52,13 +54,14 @@ const TAB_NAME_MAPPING: { [key: string]: TabId } = {
   'Dynatrace': 'dynatrace',
   'Distributed Tracing': 'tracing',
   'Pyroscope': 'pyroscope',
+  'Splunk': 'splunk',
   'Notifications': 'notifications',
   'Reporting Templates': 'templates',
 };
 
 // Legacy numeric index to TabId mapping (for URL backward compat)
 const TAB_INDEX_MAPPING: TabId[] = [
-  'grafana', 'slo', 'deep-links', 'dynatrace', 'tracing', 'pyroscope', 'notifications', 'templates',
+  'grafana', 'slo', 'deep-links', 'dynatrace', 'tracing', 'pyroscope', 'notifications', 'templates', 'splunk',
 ];
 
 export function useSystemData({
@@ -87,15 +90,18 @@ export function useSystemData({
   const [hasDynatrace, setHasDynatrace] = useState(false);
   const [hasTracing, setHasTracing] = useState(false);
   const [hasPyroscope, setHasPyroscope] = useState(false);
+  const [hasSplunk, setHasSplunk] = useState(false);
 
   // Fetch integration availability
   const fetchIntegrations = useCallback(async () => {
     try {
-      const [dynatraceConfigs, tracingInstances, pyroscopeInstances] = await Promise.all([
+      const [dynatraceConfigs, tracingInstances, pyroscopeInstances, splunkConfigs] = await Promise.all([
         fetchDynatraceConfigs().catch(() => []),
         fetchTracingInstances().catch(() => []),
         fetchPyroscopeInstances().catch(() => []),
+        fetchSplunkConfigs().catch(() => []),
       ]);
+      setHasSplunk(splunkConfigs.length > 0);
       setHasDynatrace(dynatraceConfigs.length > 0);
       setHasTracing(tracingInstances.length > 0);
       setHasPyroscope(pyroscopeInstances.length > 0);
@@ -272,6 +278,7 @@ export function useSystemData({
     hasDynatrace,
     hasTracing,
     hasPyroscope,
+    hasSplunk,
     handleEnvironmentChange,
     handleWorkloadChange,
     handleTabChange,
