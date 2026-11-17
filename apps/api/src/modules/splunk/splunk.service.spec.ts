@@ -34,6 +34,7 @@ function build(opts: { canModify?: boolean; canAccess?: boolean; caps?: string[]
   const proxy = { resolve: jest.fn(async () => null) };
   const service = new SplunkService(
     configRepo as never, mappingRepo as never, queryRepo as never, sutRepo as never,
+    repo() as never, { manager: { query: jest.fn(async () => []) } } as never,
     authz as never, audit as never, proxy as never,
   );
   sutRepo.findOne.mockResolvedValue({ id: SUT, organization_id: ORG_A, team_id: null });
@@ -70,6 +71,21 @@ describe('SplunkService configs', () => {
     expect(configRepo.save).toHaveBeenCalledWith(expect.objectContaining({ apiToken: 'keep-me', label: 'renamed' }));
   });
 
+  it('refuses a host change that would carry the stored credentials to the new host', async () => {
+    const { service, configRepo } = build();
+    configRepo.findOne.mockResolvedValue({ id: CFG, organizationId: ORG_A, host: 'https://splunk.example.com:8089', apiToken: 'keep-me', label: 'x' });
+    await expect(service.updateConfig(CFG, { host: 'https://evil.example.net:8089' }, 'u', [])).rejects.toThrow('entered again');
+    await expect(service.updateConfig(CFG, { host: 'https://evil.example.net:8089', apiToken: '[MASKED]' }, 'u', [])).rejects.toThrow('entered again');
+    await service.updateConfig(CFG, { host: 'https://splunk2.example.com:8089', apiToken: 'new' }, 'u', []);
+    expect(configRepo.save).toHaveBeenLastCalledWith(expect.objectContaining({ host: 'https://splunk2.example.com:8089', apiToken: 'new' }));
+  });
+
+  it('requires integration:splunk:update to list what the token can see', async () => {
+    const { service } = build({ caps: [] });
+    await expect(service.discoverSources(CFG, 'u', [])).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.testSavedConnection(CFG, 'u', [])).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('answers 404, not 403, for a connection outside the caller organizations', async () => {
     const { service } = build({ canAccess: false });
     await expect(service.getConfig(CFG, 'u', [])).rejects.toBeInstanceOf(NotFoundException);
@@ -77,6 +93,13 @@ describe('SplunkService configs', () => {
 });
 
 describe('SplunkService mappings and queries', () => {
+  it('needs write access on the system to preview, since a preview runs SPL with the org token', async () => {
+    const { service } = build({ canModify: false, canAccess: true });
+    await expect(
+      service.previewQuery({ splunkConfigId: CFG, systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load', spl: '$entities' }, 'u', []),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('refuses to point a system at another organization\'s Splunk connection', async () => {
     const { service, configRepo } = build();
     configRepo.findOne.mockResolvedValue({ id: CFG, organizationId: ORG_B, host: 'https://s:8089', apiToken: 't' });
@@ -111,9 +134,11 @@ describe('SplunkService mappings and queries', () => {
   });
 
   it.each([
-    ['index=x | timechart count', 'timechart'],
-    ['index=x earliest=-1h', 'earliest'],
-    ['index=x | outputlookup foo', 'outputlookup'],
+    ['$entities | timechart count', 'timechart'],
+    ['$entities earliest=-1h', 'earliest'],
+    ['$entities | outputlookup foo', 'outputlookup'],
+    ['index=_audit', '$entities'],
+    ['$entities [search index=_audit]', 'Subsearches'],
   ])('rejects SPL that Perfana owns or that writes: %s', async (spl, word) => {
     const { service } = build();
     await expect(

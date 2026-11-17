@@ -91,12 +91,56 @@ export function expandSplTemplate(
   return empty ? null : out;
 }
 
-/** SPL commands that write or execute. A convenience check only — the Splunk role is the boundary. */
-const FORBIDDEN_COMMANDS = ['sendemail', 'outputlookup', 'outputcsv', 'collect', 'delete', 'script', 'run', 'map', 'sendalert'];
+/**
+ * Commands a Perfana filter may pipe through. An allowlist, because a denylist of "dangerous"
+ * commands is always one command short. Everything here is a streaming, read-only transform;
+ * Perfana appends `| timechart` itself. The Splunk role behind the token is still the real
+ * boundary (read-only, limited indexes) — this check keeps an org member from using the org's
+ * token for more than shaping a time series.
+ */
+export const ALLOWED_SPL_COMMANDS = ['search', 'where', 'rex', 'eval', 'fields', 'rename', 'regex', 'spath', 'fillnull'] as const;
 
-export function findForbiddenSplCommand(spl: string): string | null {
-  for (const cmd of FORBIDDEN_COMMANDS) {
-    if (new RegExp(`\\|\\s*${cmd}\\b`, 'i').test(spl)) return cmd;
+/**
+ * Validate a user filter. Returns an error message, or null when it is acceptable.
+ * Quote-aware: `|`, `[` and backticks inside a double-quoted string (a rex pattern) are literal.
+ */
+export function validateSplFilter(spl: string): string | null {
+  const segments: string[] = [];
+  let current = '';
+  let inQuote = false;
+  for (let i = 0; i < spl.length; i++) {
+    const ch = spl[i]!;
+    if (inQuote) {
+      current += ch;
+      if (ch === '\\' && i + 1 < spl.length) {
+        current += spl[++i];
+      } else if (ch === '"') {
+        inQuote = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuote = true;
+      current += ch;
+    } else if (ch === '`') {
+      return 'Search macros (backticks) are not allowed';
+    } else if (ch === '[') {
+      return 'Subsearches ([ ... ]) are not allowed';
+    } else if (ch === '|') {
+      segments.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (inQuote) return 'Unbalanced double quote';
+  segments.push(current);
+  if (!segments[0]!.trim()) return 'The filter must start with search terms, not a pipe';
+  for (const seg of segments.slice(1)) {
+    const cmd = seg.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+    if (!(ALLOWED_SPL_COMMANDS as readonly string[]).includes(cmd)) {
+      return `The SPL command "${cmd || '(empty)'}" is not allowed. Allowed after a pipe: ${ALLOWED_SPL_COMMANDS.join(', ')}`;
+    }
   }
   return null;
 }
@@ -216,6 +260,8 @@ async function request(
       ...init,
       headers: { Authorization: requireAuth(conn), ...(init.headers ?? {}) },
       signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000),
+      // Never follow a redirect: the Authorization header must only ever reach the configured host.
+      redirect: 'error',
       ...(opts.dispatcher ? { dispatcher: opts.dispatcher } : {}),
     } as RequestInit);
   } catch (err) {

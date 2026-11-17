@@ -105,4 +105,5 @@ export type MetricsSourceType =
   | 'dynatrace'
   | 'prometheus'
   | 'influxdb'
-  | 'performance_test';
+  | 'performance_test'
+  | 'splunk';

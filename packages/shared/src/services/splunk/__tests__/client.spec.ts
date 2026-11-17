@@ -2,7 +2,7 @@ import {
   buildEntitiesClause,
   buildTimechartSearch,
   expandSplTemplate,
-  findForbiddenSplCommand,
+  validateSplFilter,
   parseExportLines,
   splunkAuthHeader,
   splunkExport,
@@ -60,10 +60,22 @@ describe('buildTimechartSearch', () => {
   });
 });
 
-describe('findForbiddenSplCommand', () => {
-  it('flags commands that write or execute', () => {
-    expect(findForbiddenSplCommand('index=x | outputlookup foo.csv')).toBe('outputlookup');
-    expect(findForbiddenSplCommand('index=x "delete" | rex "(?<e>\\w+Exception)"')).toBeNull();
+describe('validateSplFilter', () => {
+  it('accepts the starter panels, including a rex pattern with | and [ inside quotes', () => {
+    expect(validateSplFilter('$entities log_level=ERROR')).toBeNull();
+    expect(validateSplFilter('$entities "Exception" | rex "(?<exception>[A-Za-z0-9_.]+Exception|Error)"')).toBeNull();
+    expect(validateSplFilter('$entities | eval x="a\\"|b" | where x!=""')).toBeNull();
+  });
+
+  it.each([
+    ['index=x | outputlookup foo.csv', 'outputlookup'],
+    ['index=x | inputlookup users.csv', 'inputlookup'],
+    ['| inputlookup users.csv', 'start with search terms'],
+    ['index=x [search index=_audit | fields user]', 'Subsearches'],
+    ['`some_macro` index=x', 'macros'],
+    ['index=x "unclosed', 'Unbalanced'],
+  ])('rejects %s', (spl, message) => {
+    expect(validateSplFilter(spl)).toContain(message);
   });
 });
 
@@ -112,6 +124,7 @@ describe('splunkExport', () => {
     expect(url).toBe('https://s:8089/servicesNS/-/perf%20app/search/v2/jobs/export');
     expect(init.headers.Authorization).toBe('Bearer t');
     expect(String(init.body)).toBe('search=search+index%3Dx&output_mode=json');
+    expect(init.redirect).toBe('error');
   });
 
   it('names a 401 as a credential problem', async () => {

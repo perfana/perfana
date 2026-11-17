@@ -1,11 +1,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { OwnedResource } from '@perfana/shared';
 import {
   buildEntitiesClause,
   expandSplTemplate,
-  findForbiddenSplCommand,
+  validateSplFilter,
   splunkDiscoverSources,
   splunkFieldSummary,
   splunkServerInfo,
@@ -15,7 +15,9 @@ import {
   SplunkError,
   SplunkRequestOptions,
 } from '@perfana/shared/services/splunk/client';
-import { SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest } from '../../entities';
+import { MetricsSource, SplunkConfig, SplunkEntityMapping, SplunkQuery, SystemUnderTest } from '../../entities';
+import { withRequestQuery } from '../../common/db/request-em';
+import { generateDeterministicUuid } from '../../utils/uuid-generator';
 import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
@@ -78,6 +80,8 @@ export class SplunkService {
     @InjectRepository(SplunkEntityMapping) private readonly mappingRepo: Repository<SplunkEntityMapping>,
     @InjectRepository(SplunkQuery) private readonly queryRepo: Repository<SplunkQuery>,
     @InjectRepository(SystemUnderTest) private readonly sutRepo: Repository<SystemUnderTest>,
+    @InjectRepository(MetricsSource) private readonly metricsSourceRepo: Repository<MetricsSource>,
+    private readonly dataSource: DataSource,
     private readonly authzService: AuthorizationService,
     private readonly auditService: AuditService,
     private readonly proxyResolver: ProxyResolverService,
@@ -131,7 +135,20 @@ export class SplunkService {
     const before = Object.assign(new SplunkConfig(), entity);
 
     if (dto.label !== undefined) entity.label = dto.label;
-    if (dto.host !== undefined) entity.host = this.checkHost(dto.host);
+    if (dto.host !== undefined) {
+      const host = this.checkHost(dto.host);
+      if (host !== entity.host) {
+        // Never send stored credentials to a host they were not entered for.
+        const freshToken = !!dto.apiToken && dto.apiToken !== MASK;
+        const freshPassword = !!dto.password && dto.password !== MASK;
+        if (!freshToken && !freshPassword) {
+          throw new BadRequestException('Changing the Splunk URL needs the token (or password) entered again');
+        }
+        if (!freshToken) entity.apiToken = null;
+        if (!freshPassword) entity.password = null;
+      }
+      entity.host = host;
+    }
     // null and '' both clear; an absent key leaves the stored value (Dynatrace client_url rule).
     if (dto.clientUrl !== undefined) entity.clientUrl = dto.clientUrl || null;
     // A masked value echoed back by a GET-then-PATCH client means "unchanged".
@@ -173,11 +190,14 @@ export class SplunkService {
 
   async testSavedConnection(id: string, userId: string, roles: string[]) {
     const config = await this.loadConfig(id, userId, roles);
+    await this.requireCapability(userId, roles, config.organizationId, Capability.IntegrationSplunkUpdate);
     return this.probe(this.connectionOf(config), await this.requestOptions(config.organizationId, config.useProxy));
   }
 
   async discoverSources(id: string, userId: string, roles: string[], hours = 24, refresh = false): Promise<SplunkDiscoveredSource[]> {
     const config = await this.loadConfig(id, userId, roles);
+    // Lists every index, sourcetype and host the token can see: a configuration action, not a read.
+    await this.requireCapability(userId, roles, config.organizationId, Capability.IntegrationSplunkUpdate);
     const key = `${id}:${hours}`;
     const cached = this.discoveryCache.get(key);
     if (!refresh && cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.sources;
@@ -301,10 +321,11 @@ export class SplunkService {
 
   async createQuery(dto: CreateSplunkQueryDto, userId: string, roles: string[]): Promise<SplunkQuery> {
     const sut = await this.loadSut(dto.systemUnderTestId, userId, roles, 'write');
-    await this.requireSameOrgConfig(dto.splunkConfigId, sut, userId, roles);
+    const config = await this.requireSameOrgConfig(dto.splunkConfigId, sut, userId, roles);
     this.checkSpl(dto.spl);
     const dashboardLabel = dto.dashboardLabel?.trim() || 'Splunk logs';
     const panelId = dto.panelId ?? (await this.nextPanelId(dto, dashboardLabel));
+    const { applicationDashboardId, metricsSourceId } = await this.ensureArtificialDashboard(sut, dto, dashboardLabel, config);
 
     const entity = this.queryRepo.create({
       splunkConfigId: dto.splunkConfigId,
@@ -312,6 +333,8 @@ export class SplunkService {
       testEnvironment: dto.testEnvironment,
       workload: dto.workload,
       dashboardLabel,
+      applicationDashboardId,
+      metricsSourceId,
       panelTitle: dto.panelTitle,
       panelId,
       spl: dto.spl,
@@ -389,7 +412,9 @@ export class SplunkService {
    * totals, and candidate split fields. This is what the editor shows before saving.
    */
   async previewQuery(dto: PreviewSplunkQueryDto, userId: string, roles: string[]) {
-    const sut = await this.loadSut(dto.systemUnderTestId, userId, roles, 'read');
+    // Write, not read: a preview runs caller-chosen SPL with the organization's token, so it is
+    // as privileged as saving the query.
+    const sut = await this.loadSut(dto.systemUnderTestId, userId, roles, 'write');
     const config = await this.requireSameOrgConfig(dto.splunkConfigId, sut, userId, roles);
     this.checkSpl(dto.spl);
     const mappings = await this.mappingsInScope(sut.id, dto.testEnvironment, dto.workload, dto.splunkConfigId);
@@ -476,11 +501,96 @@ export class SplunkService {
     return Number(row?.max ?? 0) + 1;
   }
 
+  /**
+   * The rows a Splunk panel's ds_metrics hang off, like a Dynatrace query's: a synthetic
+   * grafana_dashboards row (grafana_json NULL — that, never the grafana_id, is what marks it
+   * artificial), an application_dashboards row with grafana_instance_id NULL (root CLAUDE.md #41),
+   * and a metrics_sources row with source_type 'splunk'.
+   *
+   * The application dashboard id is deterministic over (system, environment, workload, label), and
+   * `ON CONFLICT (id)` is its only dedupe — never pass a random id here (CLAUDE.md, "An artificial
+   * Dynatrace dashboard is per-workload"). The Grafana instance the synthetic row needs is taken
+   * from the SYSTEM's organization, not the first row of the table (CLAUDE.md #60).
+   */
+  private async ensureArtificialDashboard(
+    sut: SystemUnderTest,
+    scope: ScopeRef,
+    dashboardLabel: string,
+    config: SplunkConfig,
+  ): Promise<{ applicationDashboardId: string; metricsSourceId: string }> {
+    const em = withRequestQuery(this.dataSource);
+    const applicationDashboardId = generateDeterministicUuid(
+      `${scope.systemUnderTestId}-${scope.testEnvironment}-${scope.workload}-splunk-${dashboardLabel}`,
+    );
+    const slug = dashboardLabel.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const dashboardUid = `splunk-${slug}`;
+
+    const existing = await em.query<Array<{ id: string }>>('SELECT id FROM application_dashboards WHERE id = $1', [applicationDashboardId]);
+    if (existing.length === 0) {
+      const instances = await em.query<Array<{ id: string }>>(
+        'SELECT id FROM grafana_instances WHERE organization_id = $1 ORDER BY created_at, id LIMIT 1',
+        [sut.organization_id],
+      );
+      const grafanaInstanceId = instances[0]?.id;
+      if (!grafanaInstanceId) {
+        // ponytail: grafana_dashboards.grafana_instance_id is NOT NULL, the same limit Dynatrace has.
+        // Lifting it means making that column nullable for artificial rows.
+        throw new BadRequestException('Add a Grafana connection to this organization first: Splunk panels are stored on a placeholder dashboard that needs one');
+      }
+      const gd = await em.query<Array<{ id: string }>>(
+        'SELECT id FROM grafana_dashboards WHERE uid = $1 AND grafana_instance_id = $2',
+        [dashboardUid, grafanaInstanceId],
+      );
+      let grafanaDashboardId = gd[0]?.id;
+      if (!grafanaDashboardId) {
+        const inserted = await em.query<Array<{ id: string }>>(
+          `INSERT INTO grafana_dashboards (grafana_instance_id, grafana_id, uid, name, panels, organization_id)
+           VALUES ($1, $2, $3, $4, '[]', $5) RETURNING id`,
+          [grafanaInstanceId, 700000 + Math.floor(Math.random() * 100000), dashboardUid, dashboardLabel, sut.organization_id],
+        );
+        grafanaDashboardId = inserted[0]!.id;
+      }
+      await em.query(
+        `INSERT INTO application_dashboards (
+           id, system_under_test_id, test_environment, grafana_dashboard_id,
+           dashboard_name, dashboard_uid, dashboard_label, organization_id, team_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO NOTHING`,
+        [applicationDashboardId, sut.id, scope.testEnvironment, grafanaDashboardId, dashboardLabel, dashboardUid, dashboardLabel, sut.organization_id, sut.team_id ?? null],
+      );
+    }
+
+    const conflictPaths = ['systemUnderTestId', 'testEnvironment', 'sourceType', 'externalRef', 'displayName', 'displayLabel'];
+    await withRequestEm(this.metricsSourceRepo).upsert(
+      {
+        systemUnderTestId: sut.id,
+        testEnvironment: scope.testEnvironment,
+        workload: scope.workload,
+        sourceType: 'splunk',
+        sourceConfigId: config.id,
+        externalRef: config.id,
+        displayName: config.label,
+        displayLabel: scope.workload,
+        organizationId: sut.organization_id,
+      },
+      { conflictPaths, skipUpdateIfNoValuesChanged: true },
+    );
+    const source = await withRequestEm(this.metricsSourceRepo).findOneOrFail({
+      where: { systemUnderTestId: sut.id, testEnvironment: scope.testEnvironment, sourceType: 'splunk', externalRef: config.id, displayLabel: scope.workload },
+    });
+    return { applicationDashboardId, metricsSourceId: source.id };
+  }
+
   private checkSpl(spl: string): void {
-    const forbidden = findForbiddenSplCommand(spl);
-    if (forbidden) throw new BadRequestException(`The SPL command "${forbidden}" is not allowed in a Perfana query`);
     if (/\|\s*timechart\b/i.test(spl)) {
       throw new BadRequestException('Leave out "| timechart": Perfana adds it with the run window and bucket size');
+    }
+    const problem = validateSplFilter(spl);
+    if (problem) throw new BadRequestException(problem);
+    // $entities is what bounds a query to the sources mapped for the system; without it a query
+    // could read anything the organization's token can.
+    if (!/\$entities\b/.test(spl)) {
+      throw new BadRequestException('A Splunk query must use $entities, so it only reads the sources mapped for this system');
     }
     if (/\b(earliest|latest)\s*=/i.test(spl)) {
       throw new BadRequestException('Leave out earliest/latest: Perfana sets the time range from the test run');

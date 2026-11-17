@@ -80,5 +80,6 @@ export function inferSourceTypeFromDashboardUid(dashboardUid: string | null | un
   if (!dashboardUid) return 'grafana';
   if (dashboardUid.startsWith('dynatrace-')) return 'dynatrace';
   if (dashboardUid.startsWith('performance-test-metrics-')) return 'performance_test';
+  if (dashboardUid.startsWith('splunk-')) return 'splunk';
   return 'grafana';
 }
