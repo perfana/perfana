@@ -32,7 +32,7 @@ export const EVALUATE_TYPE_OPTIONS = [
 
 export type EvaluateTypeOption = typeof EVALUATE_TYPE_OPTIONS[number];
 
-export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics';
+export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
 
 export interface TrendsCardProps {
   testRun: TestRun | null;

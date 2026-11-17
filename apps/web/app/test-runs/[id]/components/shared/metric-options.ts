@@ -23,7 +23,7 @@ import {
 import { buildUrlPanels, fetchUrlDistinctNames, isUrlPanel } from '@/lib/url-perf-panels';
 import { TestRun } from '@/types/test-runs';
 
-export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics';
+export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
 
 /** The dashboard shape every card's types declare; structurally identical across them. */
 export interface ApplicationDashboard {
@@ -140,6 +140,7 @@ export function sourceOf(dashboard: ApplicationDashboard): DataSource {
   const type = getSourceType(dashboard);
   if (type === 'dynatrace') return 'dynatrace';
   if (type === 'performance_test') return 'performance-metrics';
+  if (type === 'splunk') return 'splunk';
   return 'grafana';
 }
 
@@ -382,6 +383,22 @@ export async function fetchPanelsForDashboard(
       })));
     }
 
+    if (source === 'splunk') {
+      // A Splunk placeholder has no dashboard JSON: its panels are what the run recorded,
+      // like the perf-test ones, minus their URL panels and percentile folding.
+      if (!testRun) return [];
+      const rows = availableRows ?? await fetchAvailablePanelRows(testRun).catch(() => [] as AvailablePanelRow[]);
+      const seen = new Set<number>();
+      const panels: Panel[] = [];
+      for (const row of rows) {
+        if (row.dashboard_label === dashboard.dashboard_label && !seen.has(row.panel_id)) {
+          seen.add(row.panel_id);
+          panels.push({ id: row.panel_id, title: row.panel_title, type: 'timeseries', yAxesFormat: row.unit || 'short' });
+        }
+      }
+      return wrap(panels);
+    }
+
     if (source === 'performance-metrics') {
       // Performance-test panels are whatever the run actually recorded, not dashboard JSON.
       if (!testRun) return [];
@@ -529,7 +546,8 @@ export const fetchPanelsForDashboards = async (
   // re-runs on every dashboard toggle with nothing cached. The 625-request trace this change
   // comes from is a select-all over a perf-test run — exactly the case where these rows are
   // fetched for the panel list anyway, so reading their series out costs nothing extra.
-  const rows = testRun && dashboards.some((d) => sourceOf(d) === 'performance-metrics')
+  // Splunk placeholders read the same rows for their panel list, so they need the call too.
+  const rows = testRun && dashboards.some((d) => sourceOf(d) === 'performance-metrics' || sourceOf(d) === 'splunk')
     ? await fetchAvailablePanelRows(testRun).catch(() => undefined)
     : undefined;
   const lists = await mapLimit(dashboards, OPTION_FETCH_CONCURRENCY,
