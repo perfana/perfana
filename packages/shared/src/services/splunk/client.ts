@@ -103,7 +103,8 @@ export function scopeSplFilter(
   mappings: SplunkEntityMappingLike[],
   testRunId?: string,
 ): string | null {
-  const labels = [...spl.matchAll(/\$entities(?:\[([^\]]+)\])?/g)].map((m) => m[1]);
+  // undefined = a bare $entities (every mapping); a string = $entities[label].
+  const labels: Array<string | undefined> = [...spl.matchAll(/\$entities(?:\[([^\]]+)\])?/g)].map((m) => m[1]);
   if (labels.length === 0) return null;
   const scoped = labels.includes(undefined)
     ? mappings
