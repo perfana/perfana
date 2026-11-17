@@ -211,7 +211,7 @@ function PanelSummary({ panel }: { panel: SplunkRunPanel }) {
                         bgcolor: isError ? 'error.main' : SPLUNK_GREEN, opacity: 0.14,
                       }}
                     />
-                    <Box component="span" sx={{ position: 'relative', color: isError ? 'error.main' : 'text.primary' }}>{s.name}</Box>
+                    <Box component="span" sx={{ position: 'relative', color: isError ? 'readable.error' : 'text.primary' }}>{s.name}</Box>
                   </TableCell>
                   <TableCell align="right" sx={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>{fmt(value, isCount ? 0 : 2)}</TableCell>
                   <TableCell align="right" sx={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>{fmt(s.peak, 2)}</TableCell>

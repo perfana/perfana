@@ -17,8 +17,8 @@ import {
   deleteSplunkQuery, describeMapping, discoverSplunkSources, fetchSplunkConfigs, fetchSplunkMappings,
   fetchSplunkQueries, previewSplunkQuery, updateSplunkQuery,
 } from '@/lib/splunk';
+import { getErrorMessage } from '@/lib/errors';
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : 'Unknown error');
 const MONO = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 };
 
 const LEVEL_LABEL: Record<SplunkMappingLevel, string> = {
@@ -59,7 +59,11 @@ export default function SplunkSection({ systemId, systemName, organizationId, se
         // Explicit choice when there are several; only a single connection is picked for the user.
         setConfigId((current) => current || (usable.length === 1 ? usable[0]!.id : ''));
       })
-      .catch((err) => setError(errorText(err)));
+      .catch((err) => {
+        // Leave the spinner: with configs still null it returns before the error Alert renders.
+        setConfigs([]);
+        setError(getErrorMessage(err));
+      });
   }, [organizationId]);
 
   const reload = useCallback(async () => {
@@ -69,7 +73,7 @@ export default function SplunkSection({ systemId, systemName, organizationId, se
       setMappings(m);
       setQueries(q);
     } catch (err) {
-      setError(errorText(err));
+      setError(getErrorMessage(err));
     }
   }, [systemId, env, workload, scope]);
 
@@ -82,7 +86,7 @@ export default function SplunkSection({ systemId, systemName, organizationId, se
       if (done) setNotice(done);
       await reload();
     } catch (err) {
-      setError(errorText(err));
+      setError(getErrorMessage(err));
     }
   };
 
@@ -122,7 +126,7 @@ export default function SplunkSection({ systemId, systemName, organizationId, se
         )}
       </Box>
 
-      {configs.length === 0 && (
+      {configs.length === 0 && !error && (
         <Alert severity="info">
           This organization has no Splunk connection yet. Add one on the Integrations page.
         </Alert>
@@ -305,7 +309,7 @@ function AddSourceDialog({ open, configId, systemId, env, workload, onClose, onA
     try {
       setSources(await discoverSplunkSources(configId, 24, refresh));
     } catch (err) {
-      setError(errorText(err));
+      setError(getErrorMessage(err));
       setSources([]);
     } finally {
       setLoading(false);
@@ -343,7 +347,7 @@ function AddSourceDialog({ open, configId, systemId, env, workload, onClose, onA
       });
       onAdded();
     } catch (err) {
-      setError(errorText(err));
+      setError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -518,7 +522,7 @@ function PanelDialog({ target, configId, scope, onClose, onSaved }: {
         ...scope, splunkConfigId: configId, spl, splitBy: splitBy.trim() || null, aggregation: aggregation.trim(), maxSeries, minutes: 60,
       }));
     } catch (err) {
-      setError(errorText(err));
+      setError(getErrorMessage(err));
       setPreview(null);
     } finally {
       setBusy(null);
@@ -534,7 +538,7 @@ function PanelDialog({ target, configId, scope, onClose, onSaved }: {
       else await createSplunkQuery({ ...scope, splunkConfigId: configId, ...fields });
       onSaved();
     } catch (err) {
-      setError(errorText(err));
+      setError(getErrorMessage(err));
     } finally {
       setBusy(null);
     }

@@ -14,8 +14,8 @@ import {
   fetchSplunkConfigs, testSplunkConnection, testSavedSplunkConnection, updateSplunkConfig,
 } from '@/lib/splunk';
 import type { SnackbarState } from '../types';
+import { getErrorMessage } from '@/lib/errors';
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : 'Unknown error');
 
 interface FormState {
   label: string;
@@ -103,7 +103,7 @@ export function useSplunkIntegration({
       onSnackbar({ open: true, message: 'Splunk connection deleted', severity: 'success' });
       await loadConfigs();
     } catch (err) {
-      onSnackbar({ open: true, message: errorText(err), severity: 'error' });
+      onSnackbar({ open: true, message: getErrorMessage(err), severity: 'error' });
     } finally {
       setDeleting(null);
     }
@@ -182,7 +182,7 @@ export function SplunkFormDialog({
         );
       }
     } catch (err) {
-      setTest({ success: false, message: errorText(err) });
+      setTest({ success: false, message: getErrorMessage(err) });
     } finally {
       setBusy(null);
     }
@@ -194,7 +194,7 @@ export function SplunkFormDialog({
     try {
       await onSave(form);
     } catch (err) {
-      setError(errorText(err));
+      setError(getErrorMessage(err));
     } finally {
       setBusy(null);
     }
