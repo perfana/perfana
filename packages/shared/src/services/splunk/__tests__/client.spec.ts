@@ -81,6 +81,10 @@ describe('buildTimechartSearch', () => {
     expect(buildTimechartSearch({ ...base, aggregation: 'p95(duration_ms)' })).toContain('timechart span=5s p95(duration_ms)');
   });
 
+  it('validates the EXPANDED filter it is about to send', () => {
+    expect(() => buildTimechartSearch({ ...base, filter: 'index=x | outputlookup y' })).toThrow('Refusing');
+  });
+
   it('puts the time bounds before a piped filter, not into its last command', () => {
     expect(buildTimechartSearch({ ...base, filter: '(index="x") | search "Exception" | rex "(?<e>\\w+)"' })).toMatch(
       /^search earliest=\d+ latest=\d+ \(index="x"\) \| search "Exception" \| rex/,
@@ -103,6 +107,8 @@ describe('validateSplFilter', () => {
     ['`some_macro` index=x', 'macros'],
     ['index=x "unclosed', 'Unbalanced'],
     ['index=x \\" | outputlookup foo "', 'backslash'],
+    ['$entities "x $testRunId | outputlookup y"', 'outside a quoted string'],
+    ['$entities "$entities"', 'outside a quoted string'],
   ])('rejects %s', (spl, message) => {
     expect(validateSplFilter(spl)).toContain(message);
   });

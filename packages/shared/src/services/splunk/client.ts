@@ -134,6 +134,11 @@ export function validateSplFilter(spl: string): string | null {
   for (let i = 0; i < spl.length; i++) {
     const ch = spl[i]!;
     if (inQuote) {
+      // A placeholder expands to quoted text, which would close this string and turn the rest of
+      // it into SPL. Placeholders belong outside strings.
+      if (ch === '$' && /^\$(entities|testRunId)\b/.test(spl.slice(i))) {
+        return 'Use $entities and $testRunId outside a quoted string';
+      }
       current += ch;
       if (ch === '\\' && i + 1 < spl.length) {
         current += spl[++i];
@@ -198,6 +203,9 @@ export function buildTimechartSearch(q: TimechartQuery): string {
   const latest = Math.ceil(q.to.getTime() / 1000);
   const by = q.splitBy ? ` by ${q.splitBy} limit=${limit} useother=t` : '';
   const filter = q.filter.trim().replace(/^search\s+/i, '');
+  // Validate what is actually sent, after expansion — not only what was saved.
+  const problem = validateSplFilter(filter);
+  if (problem) throw new SplunkError(`Refusing to run the search: ${problem}`);
   // The bounds go FIRST: after a filter that pipes (| rex ...) they would be read as the last
   // command's arguments instead of bounding the search.
   return `search earliest=${earliest} latest=${latest} ${filter} | timechart span=${span}s ${aggregation}${by}`;
@@ -386,6 +394,8 @@ export async function splunkFieldSummary(
   filter: string,
   opts: SplunkRequestOptions = {},
 ): Promise<Array<{ field: string; distinctCount: number; values: string[] }>> {
+  const problem = validateSplFilter(filter);
+  if (problem) throw new SplunkError(`Refusing to run the search: ${problem}`);
   const rows = await splunkExport(
     conn,
     `search earliest=-1h ${filter} | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
