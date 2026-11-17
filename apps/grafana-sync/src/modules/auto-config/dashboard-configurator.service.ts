@@ -62,6 +62,21 @@ export class DashboardConfiguratorService {
       `Found application dashboard variables: ${JSON.stringify(applicationDashboardVariables)}`,
     );
 
+    // Step 3b: the template's own system/environment variable queries must know this run's
+    // values. If they do not, every panel filtered on them is empty for this SUT/env.
+    const missing = await this.variableDiscoveryService.findSeededValuesMissingFromDatasource(
+      templateDashboard,
+      grafanaInstance,
+      applicationDashboardVariables,
+    );
+    if (missing.length > 0) {
+      this.logger.warn(
+        `Skipping template ${autoConfigDashboard.dashboardUid} for test run ${testRun.testRunId}: ` +
+          `its datasource has no ${missing.join(' / ')} value for this run, so its panels would be empty`,
+      );
+      return;
+    }
+
     // Step 4: Process dashboards if variables are found
     if (
       this.variableValuesFound(

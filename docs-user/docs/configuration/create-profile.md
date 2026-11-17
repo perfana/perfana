@@ -36,6 +36,11 @@ The pencil in the **Actions** column of the Profiles list opens the same dialog 
 
 The **name** is read-only when editing. A profile's dashboards and deep links reference it by name, with nothing in the database linking them, so renaming it would leave both behind with no error. Three tags — `perfana`, `perfana-template` and `no-anomaly-detection` — are hidden from the field and put back when you save, so an edit cannot drop a tag you were never shown.
 
+**Troubleshooting**
+
+- *A profile dashboard was not added to a system* — Before adding a dashboard, Perfana runs the dashboard's own **system under test** and **test environment** variables in Grafana. If Grafana answers and the system's name (or the environment) is not among the values, the dashboard is skipped for that system, because every panel filtered on it would be empty. The grafana-sync log shows a warning such as `Skipping template <uid> for test run <id>: its datasource has no system_under_test value for this run, so its panels would be empty` (it names `test_environment`, or both, when those are the missing ones). Check that the data source behind the dashboard really collects data for that system and environment, and that the names match apart from upper and lower case. If Grafana returns an error, or the check cannot read the variable reliably, the dashboard is added as before.
+- *A dashboard stopped picking up new variable values* — The same check applies to systems that already have the dashboard. The existing dashboard stays, but it is not updated while the check skips it.
+
 **Tip**
 Profiles can also be provisioned from CI, so your standard set of dashboards and checks can be created as code.
 

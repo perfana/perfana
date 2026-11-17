@@ -30,6 +30,7 @@ The Grafana Sync service is a standalone NestJS application that runs scheduled 
   - Dashboard link relationships
 - Configurable confidence thresholds
 - Pattern-based variable detection
+- Template presence check (v0.2.97.73): a template is skipped, with a WARN `Skipping template <uid> for test run <id>: ...`, when its own `system_under_test` / `test_environment` query variable answers cleanly without the run's value. Anything it cannot trust (errors, unsupported datasources, non-`label_values` Prometheus queries, unresolved variables, a variable regex, non-literal overrides) lets the template through. See `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md`
 - Profile SLO provisioning: `profile_benchmarks` rows are copied onto the matching application dashboards of recent test runs. Grafana rows match by template dashboard uid; `source: performance-metrics` rows (v0.2.96.6) match the worker-written `Performance test metrics <scenario>` dashboards by a regex over their uid, one profile row per scenario
 
 ### Sanity Checker

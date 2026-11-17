@@ -36,6 +36,7 @@ describe('VariableDiscoveryService', () => {
   beforeEach(async () => {
     const mockVariableDetectorService = {
       getValuesFromDatasourceQuery: jest.fn(),
+      getValuesFromDatasourceQueryOrNull: jest.fn(),
     };
 
     const mockVariableMatcherService = {
@@ -2248,4 +2249,195 @@ ORDER BY 1`,
   // - overrideValues
   // - filterValuesOnRegex
   // Tests for these methods should be in variable-matcher.service.spec.ts
+  describe('findSeededValuesMissingFromDatasource', () => {
+    const instance = { label: 'g' } as any;
+    const dashboard = (vars: any[]): any => ({ name: 'Tpl', templatingVariables: vars });
+    const sutVar = {
+      name: 'system_under_test',
+      type: 'query',
+      query: 'SHOW TAG VALUES WITH KEY = "system"',
+      datasource: { uid: 'ds' },
+    };
+    const envVar = {
+      name: 'test_environment',
+      type: 'query',
+      query: 'label_values(up{system="$system_under_test"}, env)',
+      datasource: { uid: 'ds' },
+    };
+    const resolved = [
+      { name: 'system_under_test', values: ['shop'] },
+      { name: 'test_environment', values: ['acc'] },
+    ];
+    const orNull = () => variableDetectorService.getValuesFromDatasourceQueryOrNull as jest.Mock;
+
+    // Value: protects=the gate only acts on an answer it can trust: unresolved variable refs,
+    // a Grafana regex on the variable, and pattern-like or quoted values all skip the check;
+    // fails_when=any of those guards is removed (the query is then sent and a [] answer would
+    // skip the template); why_new=earlier cases only cover plain values and plain queries;
+    // seam=none; no_claim=real Grafana/Prometheus answers (detector mocked)
+    it.each([
+      [
+        'another variable is still referenced',
+        [{ ...sutVar, query: 'label_values(up{ns="$namespace"}, system)' }],
+        resolved,
+      ],
+      [
+        'a word-boundary lookalike is left behind',
+        [{ ...sutVar, query: 'label_values(up{x="$system_under_test_x"}, system)' }],
+        resolved,
+      ],
+      ['the variable rewrites values with a regex', [{ ...sutVar, regex: '/(.*)-svc/' }], resolved],
+      [
+        'a hardcoded override is a pattern',
+        [sutVar],
+        [{ name: 'system_under_test', values: ['shop.*'] }, resolved[1]],
+      ],
+      [
+        'a value carries a quote',
+        [sutVar],
+        [{ name: 'system_under_test', values: ["sh'op"] }, resolved[1]],
+      ],
+      [
+        'a hardcoded override holds several values',
+        [envVar],
+        [resolved[0], { name: 'test_environment', values: ['acc', 'test'] }],
+      ],
+      [
+        'a hardcoded override is All',
+        [sutVar],
+        [{ name: 'system_under_test', values: ['All'] }, resolved[1]],
+      ],
+      [
+        'the system value is empty, so the chained env query would read system = empty',
+        [envVar],
+        [{ name: 'system_under_test', values: [] }, resolved[1]],
+      ],
+      ['the stored query is not a string', [{ ...sutVar, query: { query: 42 } }], resolved],
+    ])('does not check (and never reports missing) when %s', async (_label, vars, values) => {
+      orNull().mockResolvedValue([]);
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard(vars as any[]),
+          instance,
+          values as any,
+        ),
+      ).toEqual([]);
+      expect(orNull()).not.toHaveBeenCalled();
+    });
+
+    // Value: protects=a case-only difference between the run's name and the datasource label is
+    // not "missing"; fails_when=the comparison goes back to exact includes();
+    // why_new=all other cases use identical casing; seam=none; no_claim=real label casing
+    it('matches the run value case-insensitively', async () => {
+      orNull().mockResolvedValueOnce(['SHOP']);
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard([sutVar]),
+          instance,
+          resolved,
+        ),
+      ).toEqual([]);
+      expect(orNull()).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes when both queries return the run values', async () => {
+      orNull().mockResolvedValueOnce(['shop', 'other']).mockResolvedValueOnce(['acc']);
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard([sutVar, envVar]),
+          instance,
+          resolved,
+        ),
+      ).toEqual([]);
+    });
+
+    it('reports a variable whose query answered without the run value', async () => {
+      orNull().mockResolvedValueOnce(['other']).mockResolvedValueOnce([]);
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard([sutVar, envVar]),
+          instance,
+          resolved,
+        ),
+      ).toEqual(['system_under_test', 'test_environment']);
+    });
+
+    it('substitutes the system into a chained environment query, every reference form', async () => {
+      const chained = {
+        ...envVar,
+        query: 'x{a="$system_under_test",b="${system_under_test}",c="[[system_under_test]]"}',
+      };
+      orNull().mockResolvedValueOnce(['acc']);
+      await service.findSeededValuesMissingFromDatasource(dashboard([chained]), instance, resolved);
+      expect(orNull().mock.calls[0][3]).toBe('x{a="shop",b="shop",c="shop"}');
+    });
+
+    it('fails open when the datasource cannot be queried or the query throws', async () => {
+      orNull().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('HTTP 500'));
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard([sutVar, envVar]),
+          instance,
+          resolved,
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores non-query variables, empty queries and templates without them', async () => {
+      const constant = { name: 'system_under_test', type: 'constant', query: 'x' };
+      const blank = { ...envVar, query: '' };
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard([constant, blank]),
+          instance,
+          resolved,
+        ),
+      ).toEqual([]);
+      expect(
+        await service.findSeededValuesMissingFromDatasource(dashboard([]), instance, resolved),
+      ).toEqual([]);
+      expect(orNull()).not.toHaveBeenCalled();
+    });
+
+    // Value: protects=object-form queries ({query:...}) and ${var:format} refs are substituted, and a variable with no run value is not queried;
+    // fails_when=the object arm reads variable.query raw, the (?::[^}]*) format group is dropped, or the empty-value guard is removed;
+    // why_new=existing cases use string queries, unformatted refs and always supply both values; seam=none; no_claim=datasource-side quoting of the format
+    it('reads an object-form query, substitutes ${var:format}, and skips a variable with no run value', async () => {
+      const objectEnv = {
+        ...envVar,
+        query: { query: 'label_values(up{system=~"${system_under_test:regex}"}, env)', refId: 'A' },
+      };
+      orNull().mockResolvedValueOnce(['other']);
+      const onlySystem = [{ name: 'system_under_test', values: ['shop'] }];
+      expect(
+        await service.findSeededValuesMissingFromDatasource(dashboard([objectEnv]), instance, [
+          ...onlySystem,
+          { name: 'test_environment', values: ['acc'] },
+        ]),
+      ).toEqual(['test_environment']);
+      expect(orNull().mock.calls[0][3]).toBe('label_values(up{system=~"shop"}, env)');
+
+      orNull().mockClear();
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard([objectEnv]),
+          instance,
+          onlySystem,
+        ),
+      ).toEqual([]);
+      expect(orNull()).not.toHaveBeenCalled();
+    });
+
+    it('looks for the overridden value, not the run name', async () => {
+      orNull().mockResolvedValueOnce(['shop-v2']);
+      const overridden = [{ name: 'system_under_test', values: ['shop-v2'] }, resolved[1]];
+      expect(
+        await service.findSeededValuesMissingFromDatasource(
+          dashboard([sutVar]),
+          instance,
+          overridden,
+        ),
+      ).toEqual([]);
+    });
+  });
 });

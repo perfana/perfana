@@ -13,6 +13,30 @@ with the version it landed in.
 
 ## Grafana integration
 
+### grafana-sync's Grafana calls have no timeout, and auto-config repeats the same variable query per run (P1)
+
+**What:** Give `GrafanaApiService`'s fetches (`apps/grafana-sync/src/modules/grafana-api/grafana-api.service.ts`) an `AbortSignal.timeout`, and memoize auto-config's variable-query answers per cron pass, keyed on (instance, datasource, substituted query).
+
+**Why:** Since v0.2.97.73 auto-config runs each template's own `system_under_test` / `test_environment` query before adding it (`VariableDiscoveryService.findSeededValuesMissingFromDatasource`). The Prometheus form is a `/api/v1/series` call over 7 days for the broadest selector on the dashboard, and fetch has no timeout, so a slow Prometheus/Thanos holds the call open until undici's default (300 s). Meanwhile `isProcessing` makes later 2-minute crons skip, and a run whose `endTime` leaves the 5-minute `findRecentTestRuns` window during the stall is never auto-configured, profile benchmarks included. A timeout lands on the gate's fail-open path, so it is safe to add.
+
+**Context:** Found by the red-team and performance reviewers on the v0.2.97.73 ship. The same `/series` pattern already ran for every non-seeded variable before that version, so the stall risk is older than the gate; the gate adds up to two calls per run x template. Several concurrent runs of one SUT/env ask the identical question in the same pass. Run the two seeded queries with `Promise.all` while there: they no longer depend on each other.
+
+**Effort:** S
+**Priority:** P1
+**Depends on:** None
+
+### Auto-config substitutes `$system_under_test` two different ways (P2)
+
+**What:** Use one substitution helper for both `VariableDiscoveryService.getValuesFromDatasource` and `findSeededValuesMissingFromDatasource` (`apps/grafana-sync/src/modules/auto-config/variable-discovery.service.ts`).
+
+**Why:** The legacy discovery path does `.replace('$system_under_test', sutName)`: first occurrence only, no word boundary (`$system_under_test_id` becomes `<sut>_id`), and `${system_under_test}` / `[[system_under_test]]` are sent to Grafana literally. The v0.2.97.73 presence check substitutes every occurrence and every form. A template can pass the check and then have its other variables discovered with a different query.
+
+**Context:** Deliberately left out of v0.2.97.73 because unifying changes the queries discovery already sends for every existing template, so existing auto-configured variable values could change. Needs before/after checks against real templates (the Demo instance has InfluxDB, Prometheus and Postgres ones), plus the SQL `IN ($var)` quoting the legacy path does and the gate does not need.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+
 ### Test Connection never contacts Grafana, and the dialog paints its failure green (P1)
 
 Origin: /ship review of basic auth (v0.2.97.68).

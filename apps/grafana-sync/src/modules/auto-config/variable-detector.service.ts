@@ -35,6 +35,9 @@ export interface TemplatingVariable {
  */
 const DS_QUERY_REF_ID = 'A';
 
+/** `label_values(<metric>, <label>)`, the one Prometheus variable form read faithfully. */
+const LABEL_VALUES_QUERY = /label_values\((.*),\s*([^)]+)\)/;
+
 @Injectable()
 export class VariableDetectorService {
   private readonly logger = new Logger(VariableDetectorService.name);
@@ -162,7 +165,7 @@ export class VariableDetectorService {
     response: any,
     variable: TemplatingVariable,
     column: 'first' | 'last',
-  ): string[] {
+  ): string[] | null {
     const variableValues: string[] = [];
 
     // /api/ds/query answers 200 (or 207) with a PER-QUERY error inside `results`, so an auth
@@ -174,7 +177,9 @@ export class VariableDetectorService {
         `Grafana query for variable "${variable.name}" failed ` +
           `(status ${result.status ?? 'n/a'}): ${result.error ?? 'no message'}`,
       );
-      return variableValues;
+      // null, not []: the query was not answered. The seeded-value gate must not read a
+      // failure as "the value is absent"; getValuesFromDatasourceQuery still answers [].
+      return null;
     }
 
     for (const frame of result?.frames ?? []) {
@@ -241,13 +246,54 @@ export class VariableDetectorService {
     templatingVariable: TemplatingVariable,
     systemUnderTestQuery: string,
   ): Promise<string[]> {
+    return (
+      (await this.queryVariableValues(
+        grafanaInstance,
+        grafanaDashboard,
+        templatingVariable,
+        systemUnderTestQuery,
+        false,
+      )) ?? []
+    );
+  }
+
+  /**
+   * Same, but `null` whenever the answer cannot be trusted as "these are all the values":
+   * no resolvable datasource, a datasource type with no implementation, a per-query error
+   * inside a 200 response, or a Prometheus query that is not `label_values(<metric>, <label>)`
+   * (the fallback asks for a label named after the variable, which is a guess). A request
+   * that fails outright still throws. Used by the seeded-value gate, which must only act on
+   * an answer it can trust.
+   */
+  async getValuesFromDatasourceQueryOrNull(
+    grafanaInstance: GrafanaInstance,
+    grafanaDashboard: GrafanaDashboard,
+    templatingVariable: TemplatingVariable,
+    systemUnderTestQuery: string,
+  ): Promise<string[] | null> {
+    return this.queryVariableValues(
+      grafanaInstance,
+      grafanaDashboard,
+      templatingVariable,
+      systemUnderTestQuery,
+      true,
+    );
+  }
+
+  private async queryVariableValues(
+    grafanaInstance: GrafanaInstance,
+    grafanaDashboard: GrafanaDashboard,
+    templatingVariable: TemplatingVariable,
+    systemUnderTestQuery: string,
+    strict: boolean,
+  ): Promise<string[] | null> {
     const datasource = await this.resolveVariableDatasource(
       grafanaInstance,
       grafanaDashboard,
       templatingVariable,
     );
     if (!datasource) {
-      return [];
+      return null;
     }
 
     // Route to datasource-specific implementation
@@ -262,6 +308,9 @@ export class VariableDetectorService {
         );
 
       case 'prometheus':
+        if (strict && !LABEL_VALUES_QUERY.test(systemUnderTestQuery)) {
+          return null;
+        }
         return await this.getPrometheusVariableValues(
           grafanaInstance,
           grafanaDashboard,
@@ -284,13 +333,13 @@ export class VariableDetectorService {
         this.logger.warn(
           `Graphite datasource queries not yet implemented for variable "${templatingVariable.name}"`,
         );
-        return [];
+        return null;
 
       default:
         this.logger.warn(
           `Datasource type "${datasource.type}" not supported for variable "${templatingVariable.name}"`,
         );
-        return [];
+        return null;
     }
   }
 
@@ -313,7 +362,7 @@ export class VariableDetectorService {
     datasource: { uid: string; type: string },
     variable: TemplatingVariable,
     query: string,
-  ): Promise<string[]> {
+  ): Promise<string[] | null> {
     const now = Date.now();
     const queryPayload = {
       queries: [
@@ -362,12 +411,12 @@ export class VariableDetectorService {
   ): Promise<string[]> {
     let queryUrl: string;
 
-    const queryRegex = /label_values\((.*),\s*([^)]+)\)/;
+    const queryRegex = LABEL_VALUES_QUERY;
     const isLabelValuesQuery = queryRegex.test(query);
 
     if (isLabelValuesQuery) {
       const match = queryRegex.exec(query);
-      const metric = match![1];
+      const metric = match![1].trim();
 
       const timeRangeDays = 7;
       const endTime = Math.round(new Date().getTime() / 1000);
@@ -392,7 +441,7 @@ export class VariableDetectorService {
 
       if (isLabelValuesQuery) {
         const match = queryRegex.exec(query);
-        const labelName = match![2];
+        const labelName = match![2].trim();
 
         if (response.data && Array.isArray(response.data)) {
           const uniqueValues = new Set<string>();
@@ -431,7 +480,7 @@ export class VariableDetectorService {
     datasource: { uid: string; type: string },
     variable: TemplatingVariable,
     query: string,
-  ): Promise<string[]> {
+  ): Promise<string[] | null> {
     const queryPayload = {
       queries: [
         {

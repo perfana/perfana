@@ -507,4 +507,89 @@ describe('VariableDetectorService — templated datasource on a query variable',
     expect(grafanaApiService.getDatasourceByUidForInstance).not.toHaveBeenCalled();
     expect(loggerWarnSpy).toHaveBeenCalledWith(expect.stringContaining('did not resolve'));
   });
+
+  // Value: protects=OrNull separates "never asked" (null) from "Grafana answered nothing" ([]), which the seeded-value gate's fail-open relies on;
+  // fails_when=a null arm reverts to [] (gate then skips templates on graphite/unknown/unresolvable), or an empty answer becomes null;
+  // why_new=existing tests call only the [] wrapper, which hides the difference;
+  // seam=none; no_claim=values returned by a datasource that answers
+  it.each([
+    ['an unresolvable datasource ref', { uid: '${datasource}' }, 'label_values(up, system)', null],
+    ['a graphite datasource', { uid: 'g-uid', type: 'graphite' }, 'label_values(up, system)', null],
+    ['an unsupported datasource type', { uid: 'x-uid', type: 'elasticsearch' }, 'q', null],
+    [
+      'a prometheus query that is not label_values(metric, label)',
+      { uid: 'p-uid', type: 'prometheus' },
+      'label_values(system)',
+      null,
+    ],
+    [
+      'a prometheus datasource that answers nothing',
+      { uid: 'p-uid', type: 'prometheus' },
+      'label_values(up, system)',
+      [],
+    ],
+  ])('getValuesFromDatasourceQueryOrNull on %s', async (_label, datasource, query, expected) => {
+    const variable = { name: 'system_under_test', type: 'query', datasource, query } as never;
+
+    await expect(
+      service.getValuesFromDatasourceQueryOrNull(
+        instance,
+        dashboardWith(undefined),
+        variable,
+        query,
+      ),
+    ).resolves.toEqual(expected);
+    // ...while the legacy wrapper keeps answering [] for every one of them.
+    await expect(
+      service.getValuesFromDatasourceQuery(instance, dashboardWith(undefined), variable, query),
+    ).resolves.toEqual([]);
+  });
+
+  // Value: protects=whitespace around the label in label_values(metric, label ) still reads the
+  // label; fails_when=the .trim() on the captured label is removed (the padded key is undefined
+  // and the gate would read a clean [] as missing); why_new=every other case has no padding;
+  // seam=none; no_claim=a real Prometheus series response (hand-built)
+  it('reads a padded label_values label', async () => {
+    grafanaApiService.getForInstance.mockResolvedValue({ data: [{ system: 'shop' }] } as never);
+    const variable = {
+      name: 'system_under_test',
+      type: 'query',
+      datasource: { uid: 'p-uid', type: 'prometheus' },
+      query: 'label_values(up , system )',
+    } as never;
+
+    await expect(
+      service.getValuesFromDatasourceQueryOrNull(
+        instance,
+        dashboardWith(undefined),
+        variable,
+        'label_values(up , system )',
+      ),
+    ).resolves.toEqual(['shop']);
+  });
+
+  // Value: protects=a per-query Grafana error (auth/syntax inside a 200) is null to the gate, so
+  // the template is let through instead of skipped, while the legacy wrapper still answers [];
+  // fails_when=collectFrameValues returns [] on an error again;
+  // why_new=the existing error tests call only the wrapper, which maps null back to [];
+  // seam=none; no_claim=that Grafana emits this exact shape (hand-built response; unit only)
+  it('answers null, not [], to the gate when Grafana reports a per-query error', async () => {
+    grafanaApiService.postForInstance.mockResolvedValue({
+      results: { A: { status: 401, error: 'Unauthorized', frames: [] } },
+    } as never);
+    const variable = {
+      name: 'system_under_test',
+      type: 'query',
+      datasource: { uid: 'i-uid', type: 'influxdb' },
+      query: 'SHOW TAG VALUES WITH KEY = "system"',
+    } as never;
+    const q = 'SHOW TAG VALUES WITH KEY = "system"';
+
+    await expect(
+      service.getValuesFromDatasourceQueryOrNull(instance, dashboardWith(undefined), variable, q),
+    ).resolves.toBeNull();
+    await expect(
+      service.getValuesFromDatasourceQuery(instance, dashboardWith(undefined), variable, q),
+    ).resolves.toEqual([]);
+  });
 });
