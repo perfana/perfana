@@ -354,11 +354,12 @@ export function describeFetchError(err: unknown): string {
   }
   if (seen.length === 0) return 'Unknown error';
   if ((seen[0] as Error).name === 'TimeoutError') return 'no answer within the time limit (timeout)';
-  const root = seen[seen.length - 1]!;
-  const code = seen.map((e) => e.code).find((c) => typeof c === 'string');
-  const detail = root.message && root.message !== 'fetch failed' ? root.message : (seen[0]!.message ?? 'fetch failed');
-  const hint = code ? FETCH_ERROR_HINTS[code] ?? (/CERT|SSL|TLS|SELF_SIGNED|UNABLE_TO_VERIFY/.test(code) ? FETCH_ERROR_HINTS.CERT : undefined) : undefined;
-  return `${detail}${code && !detail.includes(code) ? ` (${code})` : ''}${hint ? `. ${hint}` : ''}`;
+  // ponytail: code + fixed hint only. The raw cause message carries the resolved IP:port, which
+  // would make this an internal-network oracle for anyone allowed to test a connection.
+  const code = seen.map((e) => e.code).find((c) => typeof c === 'string' && /^[A-Z0-9_]{2,64}$/.test(c));
+  if (!code) return 'fetch failed';
+  const hint = FETCH_ERROR_HINTS[code] ?? (/CERT|SSL|TLS|SELF_SIGNED|UNABLE_TO_VERIFY/.test(code) ? FETCH_ERROR_HINTS.CERT : undefined);
+  return `${code}${hint ? `. ${hint}` : ''}`;
 }
 
 const FETCH_ERROR_HINTS: Record<string, string> = {
