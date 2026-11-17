@@ -126,6 +126,48 @@ export async function filterCollectableGrafanaDashboards(
  * NOT NULL with '' for performance_test, so null is normalised to '' — never to 'null'.
  * Every sweep and whitelist must build keys through this or they drift apart silently.
  */
+/**
+ * Splunk connections that can collect for a run's scope: an ENABLED query in the workload AND at
+ * least one entity mapping in scope for that connection. Without a mapping `$entities` expands to
+ * nothing, the source can never return data, and registering it would only pull the run's coverage
+ * down (root CLAUDE.md #21). Shared by the scheduler and getConfiguredSourceKeys so the two can
+ * never disagree about which sources exist. Params: system, environment, workload.
+ */
+export const COLLECTABLE_SPLUNK_CONFIGS_SQL = `
+  SELECT DISTINCT q.splunk_config_id
+    FROM splunk_queries q
+   WHERE q.system_under_test_id = $1 AND q.test_environment = $2 AND q.workload = $3
+     AND q.enabled
+     AND EXISTS (
+       SELECT 1 FROM splunk_entity_mappings m
+        WHERE m.splunk_config_id = q.splunk_config_id
+          AND m.system_under_test_id = q.system_under_test_id
+          AND (m.level = 'sut'
+               OR (m.level = 'environment' AND m.test_environment = $2)
+               OR (m.level = 'workload' AND m.test_environment = $2 AND m.workload = $3)))`;
+
+/**
+ * The same, but never throws: a worker that boots before migration 1825 has no Splunk tables,
+ * and an exception here would abandon every other source's collection for the tick.
+ */
+export async function getCollectableSplunkConfigIds(
+  db: { dataSource: { query: (sql: string, params?: unknown[]) => Promise<unknown> } },
+  testRun: { systemUnderTestId: string; testEnvironment: string; workload: string },
+): Promise<string[]> {
+  try {
+    const present = (await db.dataSource.query(
+      `SELECT to_regclass('public.splunk_queries') IS NOT NULL AS present`,
+    )) as Array<{ present: boolean }>;
+    if (!present[0]?.present) {return [];}
+    const rows = (await db.dataSource.query(COLLECTABLE_SPLUNK_CONFIGS_SQL, [
+      testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload,
+    ])) as Array<{ splunk_config_id: string }>;
+    return rows.map((r) => r.splunk_config_id);
+  } catch {
+    return [];
+  }
+}
+
 export function collectionSourceKey(sourceType: string, sourceId: string | null | undefined): string {
   return `${sourceType}::${sourceId ?? ''}`;
 }
@@ -171,6 +213,10 @@ export async function getConfiguredSourceKeys(
   );
   for (const row of dtConfigs) {
     configured.add(collectionSourceKey('dynatrace', row.dynatrace_config_id));
+  }
+
+  for (const id of await getCollectableSplunkConfigIds(db, testRun)) {
+    configured.add(collectionSourceKey('splunk', id));
   }
 
   return configured;

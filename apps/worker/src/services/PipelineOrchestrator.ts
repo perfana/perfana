@@ -21,7 +21,7 @@ import { WorkerDatabaseService } from '../common/database.service.js';
 import { ProgressReporter } from './ProgressReporter.js';
 import { HEAVY_STAGES, HeavyStageMutex } from './HeavyStageMutex.js';
 import type { DsMetricCollectionStatus } from '@perfana/shared/entities';
-import { collectionSourceKey, getConfiguredSourceKeys } from './collectable-sources.js';
+import { collectionSourceKey, getCollectableSplunkConfigIds, getConfiguredSourceKeys } from './collectable-sources.js';
 
 /**
  * Pipeline Orchestrator - Coordinates the execution of pipeline stages
@@ -44,6 +44,7 @@ import { collectionSourceKey, getConfiguredSourceKeys } from './collectable-sour
  */
 export const ORCHESTRATED_STAGES = [
   'dynatrace-collection',
+  'splunk-collection',
   'panels-processing',
   'performance-test-metrics',
   'transaction-stats-rollup',
@@ -349,6 +350,49 @@ export class PipelineOrchestrator {
   }
 
   /**
+   * Full-path Splunk collection: only reached for a run with no incremental collection (a
+   * re-analysis of a run from before Splunk was configured, a SUT import), since a ticked run is
+   * gap-filled and this stage is skipped. One pass over the whole run per collectable connection,
+   * recorded as one collected range so coverage counts it. Splunk keeps the window as long as its
+   * index retention does, so an old run can return nothing; that is a success with 0 points.
+   */
+  private async collectSplunkForWholeRun(testRunId: string): Promise<PipelineResult> {
+    const startedAt = Date.now();
+    const testRun = await this.databaseService.getTestRunByTestRunId(testRunId);
+    if (!testRun?.startTime || !testRun.endTime) {
+      return { success: true, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { skipped: 'run has no start or end time' } };
+    }
+    const configIds = await getCollectableSplunkConfigIds(this.databaseService, testRun);
+    let total = 0;
+    const errors: string[] = [];
+    for (const splunkConfigId of configIds) {
+      const result = await this.incrementalMetricsPipeline.execute({
+        testRunId,
+        fromTime: testRun.startTime,
+        toTime: testRun.endTime,
+        splunkConfigId,
+        collectGrafanaMetrics: false,
+        collectDynatraceMetrics: false,
+        collectSplunkMetrics: true,
+        collectPerformanceTestMetrics: false,
+      });
+      if (!result.success) {
+        errors.push(result.error?.message ?? `Splunk collection failed for ${splunkConfigId}`);
+        continue;
+      }
+      total += (result.data as { splunk?: { dataPoints?: number } } | undefined)?.splunk?.dataPoints ?? 0;
+      await this.databaseService.updateCollectedRanges(testRunId, 'splunk', splunkConfigId, {
+        from: testRun.startTime,
+        to: testRun.endTime,
+      });
+    }
+    if (errors.length > 0) {
+      return { success: false, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { dataPoints: total }, error: { message: errors.join(' | ') } };
+    }
+    return { success: true, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { dataPoints: total } };
+  }
+
+  /**
    * Retry collection for a specific time range and source
    *
    * @param testRunId - Test run ID
@@ -374,10 +418,12 @@ export class PipelineOrchestrator {
       toTime: to,
       collectGrafanaMetrics: sourceType === 'grafana',
       collectDynatraceMetrics: sourceType === 'dynatrace',
+      collectSplunkMetrics: sourceType === 'splunk',
       collectPerformanceTestMetrics: sourceType === 'performance_test',
       // Filter by specific source if needed
       ...(sourceType === 'grafana' && sourceId ? { grafanaInstanceId: sourceId } : {}),
       ...(sourceType === 'dynatrace' && sourceId ? { dynatraceConfigId: sourceId } : {}),
+      ...(sourceType === 'splunk' && sourceId ? { splunkConfigId: sourceId } : {}),
     });
 
     if (!result.success) {
@@ -501,6 +547,7 @@ export class PipelineOrchestrator {
       // Stages that gap-filling an incremental collection makes redundant.
       const metricCollectionStages = [
         'dynatrace-collection',
+        'splunk-collection',
         'panels-processing',
         'performance-test-metrics',
         'metrics-collection'
@@ -788,6 +835,10 @@ ${results.map(r => {
     switch (stageName) {
       case 'dynatrace-collection':
         executionPromise = this.dynatracePipeline.execute(batchInput);
+        break;
+
+      case 'splunk-collection':
+        executionPromise = this.collectSplunkForWholeRun(testRunId);
         break;
 
       case 'panels-processing':

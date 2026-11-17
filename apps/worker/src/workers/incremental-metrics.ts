@@ -115,6 +115,15 @@ export function incrementalMetricsWorker() {
           );
           break;
 
+        case 'splunk':
+          result = await collectSplunkMetrics(
+            testRunId,
+            sourceId!,
+            new Date(fromTime),
+            new Date(toTime)
+          );
+          break;
+
         case 'performance_test':
           result = await collectPerformanceTestMetrics(
             testRunId,
@@ -527,5 +536,47 @@ async function collectPerformanceTestMetrics(
         }, 'Failed to release Redis connection back to pool');
       }
     }
+  }
+}
+
+/**
+ * Collect Splunk log metrics for one connection. Same shape as collectDynatraceMetrics; the
+ * collector re-queries SPLUNK_INGEST_LOOKBACK_MS behind the window while the run is live.
+ */
+async function collectSplunkMetrics(
+  testRunId: string,
+  splunkConfigId: string,
+  fromTime: Date,
+  toTime: Date
+): Promise<CollectionResult> {
+  try {
+    const pipeline = new IncrementalMetricsPipeline(logger);
+    const result = await pipeline.execute({
+      testRunId,
+      fromTime,
+      toTime,
+      splunkConfigId,
+      collectGrafanaMetrics: false,
+      collectDynatraceMetrics: false,
+      collectSplunkMetrics: true,
+      collectPerformanceTestMetrics: false,
+    });
+
+    if (!result.success) {
+      const errorMessage = result.error
+        ? (typeof result.error === 'string' ? result.error : result.error.message)
+        : 'Splunk metrics collection failed';
+      return { success: false, error: errorMessage };
+    }
+
+    const data = result.data as { splunk?: { dataPoints?: number; maxDataTimestamp?: string } } | undefined;
+    return {
+      success: true,
+      dataPoints: data?.splunk?.dataPoints ?? 0,
+      maxDataTimestamp: data?.splunk?.maxDataTimestamp ? new Date(data.splunk.maxDataTimestamp) : undefined,
+    };
+  } catch (error) {
+    logger.error({ testRunId, splunkConfigId, error: error instanceof Error ? error.message : String(error) }, 'Splunk metrics collection error');
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

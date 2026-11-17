@@ -119,7 +119,11 @@ export function validateSplFilter(spl: string): string | null {
       }
       continue;
     }
-    if (ch === '"') {
+    if (ch === '\\') {
+      // Outside a string Splunk reads \" as an escaped quote, not the start of one; treating it
+      // as an opening quote here would hide a following pipe from the allowlist. Refuse instead.
+      return 'A backslash is only allowed inside a double-quoted string';
+    } else if (ch === '"') {
       inQuote = true;
       current += ch;
     } else if (ch === '`') {

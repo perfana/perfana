@@ -74,6 +74,7 @@ describe('validateSplFilter', () => {
     ['index=x [search index=_audit | fields user]', 'Subsearches'],
     ['`some_macro` index=x', 'macros'],
     ['index=x "unclosed', 'Unbalanced'],
+    ['index=x \\" | outputlookup foo "', 'backslash'],
   ])('rejects %s', (spl, message) => {
     expect(validateSplFilter(spl)).toContain(message);
   });

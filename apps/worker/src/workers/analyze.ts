@@ -145,6 +145,7 @@ export function analyzeTestWorker() {
       // reports 'partial' — which is exactly how data-sanity-check hid here.
       const orchestratedStages: OrchestratedStage[] = [
         'dynatrace-collection',       // External data collection (DQL metrics)
+        'splunk-collection',          // Splunk log metrics (full path only; skipped after gap fill)
         'panels-processing',          // Panel document creation
         'performance-test-metrics',   // Performance test metrics extraction (raw test data)
         'transaction-stats-rollup',   // Per-test-run transaction/sampler stats rollup (#150, #151)

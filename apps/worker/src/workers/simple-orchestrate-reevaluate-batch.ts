@@ -1,3 +1,4 @@
+import { getCollectableSplunkConfigIds } from '../services/collectable-sources.js';
 /**
  * Simplified Orchestrate Reevaluate Batch Worker
  *
@@ -544,6 +545,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         const enabledSourceTypes = new Set<string>();
         if (!sources || sources.grafana !== false) { enabledSourceTypes.add('grafana'); }
         if (!sources || sources.dynatrace !== false) { enabledSourceTypes.add('dynatrace'); }
+        if (!sources || sources.splunk !== false) { enabledSourceTypes.add('splunk'); }
         if (!sources || sources.performanceMetrics !== false) { enabledSourceTypes.add('performance_test'); }
 
         const forceRefetchStart = Date.now();
@@ -609,6 +611,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   );
                   for (const dc of dtConfigs) {
                     discoveredSources.push({ source_type: 'dynatrace', source_id: dc.id, is_complete: false, collected_ranges: [] });
+                  }
+                }
+
+                // Discover Splunk connections that can collect for this run (same predicate as the scheduler)
+                if (enabledSourceTypes.has('splunk') && !sourcesToRefetch.some(s => s.source_type === 'splunk')) {
+                  for (const id of await getCollectableSplunkConfigIds(db, testRunFull)) {
+                    discoveredSources.push({ source_type: 'splunk', source_id: id, is_complete: false, collected_ranges: [] });
                   }
                 }
 
@@ -698,6 +707,23 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   const result = await dynatracePipeline.execute({ testRunIds: [testRunId] });
                   const dtData = result.data as Record<string, unknown>;
                   dataPoints = (dtData?.totalMetrics ?? dtData?.totalDataPoints ?? dtData?.metricsCollected ?? 0) as number;
+                } else if (status.source_type === 'splunk') {
+                  const result = await incrementalPipeline.execute({
+                    testRunId,
+                    fromTime,
+                    toTime,
+                    collectGrafanaMetrics: false,
+                    collectDynatraceMetrics: false,
+                    collectSplunkMetrics: true,
+                    collectPerformanceTestMetrics: false,
+                    ...(status.source_id ? { splunkConfigId: status.source_id } : {}),
+                  });
+                  // Throw rather than fall through to markSourceComplete: a failed search must
+                  // never certify the source, or it is never collected again.
+                  if (!result.success) {
+                    throw new Error(result.error?.message ?? 'Splunk re-fetch failed');
+                  }
+                  dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;
                 } else {
                   // Grafana and performance_test use incremental pipeline with full time range
                   const result = await incrementalPipeline.execute({
@@ -817,6 +843,9 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           if (sources.dynatrace !== false) {
             enabledSourceTypes.add('dynatrace');
           }
+          if (sources.splunk !== false) {
+            enabledSourceTypes.add('splunk');
+          }
           if (sources.performanceMetrics !== false) {
             enabledSourceTypes.add('performance_test');
           }
@@ -875,9 +904,11 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     toTime: toDate,
                     collectGrafanaMetrics: g.sourceType === 'grafana',
                     collectDynatraceMetrics: g.sourceType === 'dynatrace',
+                    collectSplunkMetrics: g.sourceType === 'splunk',
                     collectPerformanceTestMetrics: g.sourceType === 'performance_test',
                     ...(g.sourceType === 'grafana' && g.sourceId ? { grafanaInstanceId: g.sourceId } : {}),
                     ...(g.sourceType === 'dynatrace' && g.sourceId ? { dynatraceConfigId: g.sourceId } : {}),
+                    ...(g.sourceType === 'splunk' && g.sourceId ? { splunkConfigId: g.sourceId } : {}),
                   });
 
                   const dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;

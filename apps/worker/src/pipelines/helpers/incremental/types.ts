@@ -62,6 +62,17 @@ export interface IncrementalMetricsInput {
    * Whether to collect Dynatrace metrics (default: true)
    */
   collectDynatraceMetrics?: boolean;
+
+  /**
+   * Whether to collect Splunk metrics (default: FALSE — unlike the other sources, so a caller
+   * written before Splunk existed never fires Splunk searches by omission)
+   */
+  collectSplunkMetrics?: boolean;
+
+  /**
+   * Splunk config ID (optional - if provided, only collect from this connection)
+   */
+  splunkConfigId?: string;
 }
 
 /**
@@ -121,6 +132,11 @@ export interface IncrementalMetricsOutput {
    * Dynatrace collection result
    */
   dynatrace: CollectionResult;
+
+  /**
+   * Splunk collection result
+   */
+  splunk: CollectionResult;
 
   /**
    * Performance test collection result

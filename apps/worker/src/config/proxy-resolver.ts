@@ -51,3 +51,20 @@ export async function resolveGrafanaAxiosProxy(
 ): Promise<{ proxy: AxiosProxyConfig } | Record<string, never>> {
   return resolveDynatraceAxiosProxy(organizationId, useProxy);
 }
+
+/**
+ * undici dispatcher for a native-fetch client (Splunk), mirroring the API's
+ * ProxyResolverService.resolve: only when use_proxy is set AND the organization has a
+ * ProxyServer row. Otherwise undefined, and fetch goes direct.
+ */
+export async function resolveFetchProxyDispatcher(
+  organizationId: string | null | undefined,
+  useProxy: boolean,
+): Promise<unknown> {
+  if (!useProxy || !organizationId) { return undefined; }
+  const db = getDatabaseService();
+  const proxyRow = await db.dataSource
+    .getRepository(ProxyServer)
+    .findOne({ where: { organizationId } });
+  return buildProxyAgent(proxyRow ?? null)?.dispatcher;
+}
