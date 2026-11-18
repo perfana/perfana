@@ -236,6 +236,15 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "matchRegexForVariables",
     "readOnly",
   ],
+  "ProfileSeriesGroupingRule": [
+    "profileDashboardId",
+    "panelId",
+    "preset",
+    "pattern",
+    "replacement",
+    "aggregations",
+    "enabled",
+  ],
   "ProvisionedTemplateDsCompareConfig": [
     "system_under_test_id",
     "test_environment",

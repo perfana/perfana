@@ -3,7 +3,7 @@ import type { SeriesGroupingAggregation, SeriesGroupingPreset } from '../utils/s
 import { ApplicationDashboard } from './application-dashboard.entity';
 import { SystemUnderTest } from './system-under-test.entity';
 
-export type SeriesGroupingRuleOrigin = 'manual' | 'suggestion' | 'copy';
+export type SeriesGroupingRuleOrigin = 'manual' | 'suggestion' | 'copy' | 'profile';
 
 /**
  * A per-workload rule that rewrites raw series names on one panel (or, with `panelId` null, every
@@ -83,6 +83,14 @@ export class SeriesGroupingRule {
 
   @Column({ name: 'origin', type: 'varchar', length: 16, default: 'manual' })
   origin!: SeriesGroupingRuleOrigin;
+
+  /**
+   * The profile rule this row was provisioned from (migration 1826). No foreign key, like
+   * `benchmarks.generic_check_id`. The row follows that rule only while `updatedBy` is null:
+   * any save through the rules API stamps the user and detaches it.
+   */
+  @Column({ name: 'profile_rule_id', type: 'uuid', nullable: true })
+  profileRuleId!: string | null;
 
   // Ownership tracking (RBAC): inherited from the application dashboard on create.
   @Column({ type: 'uuid', name: 'organization_id' })
