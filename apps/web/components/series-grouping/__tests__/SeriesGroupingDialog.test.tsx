@@ -76,6 +76,7 @@ const rule = (overrides: Partial<SeriesGroupingRuleResponse> = {}): SeriesGroupi
   aggregations: ['avg', 'count'],
   enabled: true,
   origin: 'manual',
+  profileRuleId: null,
   createdAt: '2026-11-01T00:00:00Z',
   updatedAt: '2026-11-01T00:00:00Z',
   ...overrides,

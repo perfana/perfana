@@ -221,7 +221,7 @@ export default function ProfileDetailsPage() {
         </CardContent>
       </Card>
 
-      <DashboardFormDialog open={dashboardsHook.formDialogOpen} mode={dashboardsHook.formMode} dashboard={dashboardsHook.editingDashboard}
+      <DashboardFormDialog open={dashboardsHook.formDialogOpen} mode={dashboardsHook.formMode} profileId={profileId} dashboard={dashboardsHook.editingDashboard}
         availableDashboards={grafanaData.dashboards} availableInstances={grafanaData.instances} loading={grafanaData.loading}
         onClose={() => dashboardsHook.setFormDialogOpen(false)} onSubmit={dashboardsHook.handleFormSubmit} />
       <BenchmarkFormDialog open={benchmarksHook.formDialogOpen} mode={benchmarksHook.formMode} benchmark={benchmarksHook.editingBenchmark}

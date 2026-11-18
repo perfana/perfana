@@ -182,7 +182,28 @@ export default function SeriesGroupingRulesSection({
               <TableBody>
                 {rules.map((rule) => (
                   <TableRow key={rule.id} data-testid="series-grouping-rule-row">
-                    <TableCell>{rule.panelId === null ? 'All panels' : `Panel ${rule.panelId}`}</TableCell>
+                    <TableCell>
+                      {rule.panelId === null ? 'All panels' : `Panel ${rule.panelId}`}
+                      {rule.origin === 'profile' && (
+                        <Tooltip
+                          title={
+                            rule.updatedBy
+                              ? 'Created by a profile and edited here since, so profile changes no longer reach it.'
+                              : 'Created by a profile and kept in step with it. Editing it here detaches it from the profile. Deleting it brings it back on the next run; disable it instead.'
+                          }
+                        >
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            display="block"
+                            tabIndex={0}
+                            sx={{ textDecoration: 'underline dotted', cursor: 'help', width: 'fit-content' }}
+                          >
+                            {rule.updatedBy ? 'From profile (edited)' : 'From profile'}
+                          </Typography>
+                        </Tooltip>
+                      )}
+                    </TableCell>
                     <TableCell>
                       {presetLabel(rule.preset)}
                       {rule.preset === 'custom' && rule.pattern && (

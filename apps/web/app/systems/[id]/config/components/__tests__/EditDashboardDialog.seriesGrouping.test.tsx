@@ -58,6 +58,7 @@ const rule = (id: string, panelId: number | null, extra: Record<string, unknown>
   aggregations: ['avg', 'count'],
   enabled: true,
   origin: 'manual',
+  profileRuleId: null,
   createdAt: '',
   updatedAt: '',
   ...extra,
@@ -119,6 +120,25 @@ describe('EditDashboardDialog — series grouping section', () => {
     expect(within(rows[1]).getByText('-[a-z0-9]{5}$')).toBeInTheDocument();
     expect(within(rows[1]).getByText('Highest pod')).toBeInTheDocument();
     expect(within(rows[1]).getByRole('switch')).not.toBeChecked();
+  });
+
+  // Value: protects=a profile-provisioned rule is labelled, and says whether a hand edit detached it;
+  // fails_when=the origin check or the updatedBy branch is dropped or inverted; why_new=no test covered the label;
+  // seam=none; no_claim=tooltip wording (jsdom does not open MUI tooltips here)
+  it('labels a rule a profile created, and one edited here since', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse([
+        rule('r-1', null),
+        rule('r-2', 4, { origin: 'profile', profileRuleId: 'pr-1' }),
+        rule('r-3', 5, { origin: 'profile', profileRuleId: 'pr-1', updatedBy: 'user-1' }),
+      ]),
+    );
+    renderDialog('peak');
+
+    const rows = await screen.findAllByTestId('series-grouping-rule-row');
+    expect(within(rows[0]).queryByText(/From profile/)).not.toBeInTheDocument();
+    expect(within(rows[1]).getByText('From profile')).toBeInTheDocument();
+    expect(within(rows[2]).getByText('From profile (edited)')).toBeInTheDocument();
   });
 
   it('opens the dialog without a run, for the whole dashboard or the rule being edited', async () => {
