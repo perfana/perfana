@@ -229,7 +229,13 @@ export class SplunkCollector {
             splunkTimechart(
               conn,
               { filter, from, to, bucketSeconds, aggregation: q.aggregation, splitBy: q.split_by, maxSeries: q.max_series },
-              { dispatcher },
+              {
+                dispatcher,
+                // String interpolation only: pino drops a second-argument object.
+                onSearch: (search, st, ms) => this.logger.debug(
+                  `Splunk panel "${q.panel_title}" search (${ms}ms, ${st.lines} lines, ${st.finalRows} final rows, ${st.previewRows} preview rows${st.usedPreview ? ', used last preview set' : ''}): ${search}`,
+                ),
+              },
             ),
           );
           if (points.length === 0) {
