@@ -21,7 +21,8 @@ const DATASOURCES: Record<string, { id: number; uid: string; name: string; type:
     name: 'Prometheus (override)',
     type: 'prometheus'
   },
-  'prom-a': { id: 13, uid: 'prom-a', name: 'Prometheus A', type: 'prometheus' }
+  'prom-a': { id: 13, uid: 'prom-a', name: 'Prometheus A', type: 'prometheus' },
+  'zabbix-legacy': { id: 15, uid: 'zabbix-legacy', name: 'Zabbix legacy', type: 'alexanderzobnin-zabbix-datasource' }
 };
 
 vi.mock('../../../config/grafana-client-factory.js', () => ({
@@ -550,5 +551,189 @@ describe('templated datasource (${datasource})', () => {
     expect(requestedUids).toEqual(['prometheus-main']);
     expect(query.datasource).toEqual({ type: 'prometheus', uid: '${datasource}' });
     expect(query.datasourceId).toBe('${datasource}');
+  });
+});
+
+describe('Zabbix filters follow the plugin\'s replaceTemplateVars', () => {
+  // Value: protects=a Zabbix filter reaches /api/ds/query in the form the grafana-zabbix plugin
+  // builds in the browser (escape concrete values, All raw, wrap a changed non-regex filter as /^…$/);
+  // fails_when=All/$__all reach Zabbix as a bare `.*` or `$__all`, a composite or author-regex filter
+  // breaks, or a non-Zabbix target gets wrapped; why_new=the worker substituted every datasource alike;
+  // seam=none; no_claim=a live Zabbix answering these filters (Grafana client mocked; unit only)
+  const ZABBIX = 'alexanderzobnin-zabbix-datasource';
+  const zabbixDs = { type: ZABBIX, uid: 'zabbix-main' };
+
+  function data(options: {
+    templating?: Record<string, unknown>[];
+    variables: { name: string; values: string[] }[];
+    target: Record<string, unknown>;
+    panelDatasource?: unknown;
+    repeat?: string;
+  }) {
+    return perfanaData({
+      templating: options.templating ?? [],
+      panels: [
+        {
+          id: 7,
+          title: 'Uptime',
+          type: 'timeseries',
+          ...(options.repeat ? { repeat: options.repeat } : {}),
+          datasource: options.panelDatasource ?? zabbixDs,
+          targets: [{ refId: 'A', datasource: zabbixDs, ...options.target }]
+        }
+      ],
+      appDashboardVariables: options.variables
+    });
+  }
+
+  async function firstQuery(options: Parameters<typeof data>[0]) {
+    const docs = await runCreatePanelDocuments(data(options));
+    return { doc: docs[0], query: docs[0].requests[0].request_body.queries[0] };
+  }
+
+  const filter = (query: Record<string, unknown>, field: string) =>
+    (query[field] as { filter: string }).filter;
+
+  test.each(['All', '$__all'])('sends a variable set to %s as a match-all regex', async (value) => {
+    const { doc, query } = await firstQuery({
+      variables: [{ name: 'Group', values: [value] }],
+      target: { group: { filter: '$Group' } }
+    });
+    expect(filter(query, 'group')).toBe('/^.*$/');
+    expect(doc.query_variables.Group).toBe('.*');
+  });
+
+  test.each<[string, string, { name: string; values: string[] }[], string]>([
+    ['escapes a concrete host name', '$Host', [{ name: 'Host', values: ['db01.acc.example.nl'] }], '/^db01\\.acc\\.example\\.nl$/'],
+    ['wraps a filter with literal text around All', '$Disk: Disk read rate', [{ name: 'Disk', values: ['All'] }], '/^.*: Disk read rate$/'],
+    ['wraps a filter with literal text around a value', '$Disk: Disk read rate', [{ name: 'Disk', values: ['sda'] }], '/^sda: Disk read rate$/'],
+    ['leaves an author-written regex unwrapped', '/^$Host$/', [{ name: 'Host', values: ['All'] }], '/^.*$/'],
+    ['escapes a value inside an author-written regex', '/^$Host$/', [{ name: 'Host', values: ['a.b'] }], '/^a\\.b$/'],
+    ['leaves a filter with no variable alone', 'System uptime', [{ name: 'Host', values: ['db01'] }], 'System uptime'],
+    ['inserts a value carrying $& literally', '$Host', [{ name: 'Host', values: ['a$&b'] }], '/^a\\$&b$/']
+  ])('%s', async (_label, itemFilter, variables, expected) => {
+    const { query } = await firstQuery({ variables, target: { item: { filter: itemFilter } } });
+    expect(filter(query, 'item')).toBe(expected);
+  });
+
+  test.each<[string, string, string]>([
+    ['a stored .*', '.*', '/^.*$/'],
+    ['a value already written as a regex', '/^web-.*$/', '/^web-.*$/']
+  ])('inserts %s raw rather than escaping it', async (_label, value, expected) => {
+    const { query } = await firstQuery({
+      variables: [{ name: 'Host', values: [value] }],
+      target: { host: { filter: '$Host' } }
+    });
+    expect(filter(query, 'host')).toBe(expected);
+  });
+
+  test('treats a variable name with regex characters literally', async () => {
+    const { query } = await firstQuery({
+      variables: [{ name: 'Host(x)', values: ['db01'] }],
+      target: { host: { filter: '${Host(x)}' } }
+    });
+    expect(filter(query, 'host')).toBe('/^db01$/');
+  });
+
+  test('recognises a uid-only target datasource on a Mixed panel through the datasource map', async () => {
+    const { query } = await firstQuery({
+      variables: [{ name: 'Group', values: ['All'] }],
+      panelDatasource: { type: 'datasource', uid: '-- Mixed --' },
+      target: { datasource: { uid: 'zabbix-legacy' }, group: { filter: '$Group' } }
+    });
+    expect(filter(query, 'group')).toBe('/^.*$/');
+  });
+
+  test.each<[string, string, string]>([
+    ['inserts a custom allValue raw, then wraps it', '.*', '/^.*$/'],
+    ['keeps a custom allValue that is already a regex', '/prod-.*/', '/prod-.*/']
+  ])('%s', async (_label, allValue, expected) => {
+    const { query } = await firstQuery({
+      templating: [{ name: 'Group', type: 'query', includeAll: true, allValue }],
+      variables: [{ name: 'Group', values: ['$__all'] }],
+      target: { group: { filter: '$Group' } }
+    });
+    expect(filter(query, 'group')).toBe(expected);
+  });
+
+  test('resolves the datasource uid without regex-wrapping it', async () => {
+    const { query } = await firstQuery({
+      templating: [{ name: 'datasource', type: 'datasource', current: { value: 'prometheus-main' } }],
+      variables: [{ name: 'Group', values: ['All'] }],
+      target: { datasource: { type: ZABBIX, uid: '${datasource}' }, group: { filter: '$Group' } }
+    });
+    expect((query.datasource as { uid: string }).uid).toBe('prometheus-main');
+    expect(filter(query, 'group')).toBe('/^.*$/');
+  });
+
+  test('substitutes a Prometheus target as before', async () => {
+    const promDs = { type: 'prometheus', uid: 'prometheus-main' };
+    const { query } = await firstQuery({
+      variables: [{ name: 'Group', values: ['$__all'] }],
+      panelDatasource: promDs,
+      target: { datasource: promDs, expr: 'up{group=~"$Group"}' }
+    });
+    expect(query.expr).toBe('up{group=~".*"}');
+  });
+
+  test('decides per target on a Mixed panel', async () => {
+    const promDs = { type: 'prometheus', uid: 'prometheus-main' };
+    const docs = await runCreatePanelDocuments(
+      perfanaData({
+        templating: [],
+        panels: [
+          {
+            id: 7,
+            title: 'Mixed',
+            type: 'timeseries',
+            datasource: { type: 'datasource', uid: '-- Mixed --' },
+            targets: [
+              { refId: 'A', datasource: zabbixDs, group: { filter: '$Group' } },
+              { refId: 'B', datasource: promDs, expr: 'up{group=~"$Group"}' }
+            ]
+          }
+        ],
+        appDashboardVariables: [{ name: 'Group', values: ['All'] }]
+      })
+    );
+    const [zabbixQuery, promQuery] = docs[0].requests.map(r => r.request_body.queries[0]);
+    expect(filter(zabbixQuery, 'group')).toBe('/^.*$/');
+    expect(promQuery.expr).toBe('up{group=~".*"}');
+  });
+
+  test('recognises a Grafana 8 string datasource through the datasource map', async () => {
+    const { query } = await firstQuery({
+      variables: [{ name: 'Group', values: ['All'] }],
+      panelDatasource: 'zabbix-legacy',
+      target: { datasource: 'zabbix-legacy', group: { filter: '$Group' } }
+    });
+    expect(filter(query, 'group')).toBe('/^.*$/');
+  });
+
+  test.each<[string, string]>([
+    ['All', '/^.*$/'],
+    ['$__all', '/^.*$/'],
+    ['sda', '/^sda$/']
+  ])('repeats a Zabbix panel over %s', async (value, expected) => {
+    const { query } = await firstQuery({
+      templating: [{ name: 'Disk', type: 'query', includeAll: true }],
+      variables: [{ name: 'Disk', values: [value] }],
+      repeat: 'Disk',
+      target: { item: { filter: '$Disk' } }
+    });
+    expect(filter(query, 'item')).toBe(expected);
+  });
+
+  test.each<[string, Record<string, unknown>, string]>([
+    ['an includeAll variable', { includeAll: true }, '/^.*$/'],
+    ['an includeAll variable with its own allValue', { includeAll: true, allValue: '/^prod/' }, '/^prod/'],
+    ['a variable without includeAll', { includeAll: false, current: { value: 'web01' } }, '/^web01$/']
+  ])('falls back to the template for %s with no values', async (_label, variable, expected) => {
+    const { query } = await firstQuery({
+      templating: [{ name: 'Group', type: 'query', ...variable }],
+      variables: [{ name: 'Group', values: [] }],
+      target: { group: { filter: '$Group' } }
+    });
+    expect(filter(query, 'group')).toBe(expected);
   });
 });

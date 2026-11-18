@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.81] - 2026-11-18
+
+### Fixed
+- **Zabbix panels collect data when a dashboard variable is set to All.** Perfana substitutes a panel's template variables itself before it asks Grafana for the data, and Grafana does not apply the Zabbix plugin's own rule on that path. So a Zabbix filter such as `$Group` reached the plugin as the literal `$__all`, or as `.*`, and the plugin read either as an exact group name and matched nothing. Perfana now applies the plugin's rule to Zabbix queries, as Grafana does in the browser: "All" (stored as `All` or `$__all`) matches everything, a concrete value matches only itself even when it contains dots, and a filter with text around the variable, such as `$Disk: Disk read rate`, works too. Each query on a Mixed panel is handled according to its own datasource. A run that collected nothing for these panels needs a force-refetch re-evaluate, while Zabbix still holds the data.
+- **A repeating panel over an "All" variable** now uses the variable's own *All value* as well, rather than always `.*`.
+
+### Changed
+- **"All" uses the variable's custom *All value* when the dashboard sets one, for every datasource.** Before, a variable set to All in Perfana was always sent as `.*`, and one stored as `$__all` was sent literally. Grafana uses the custom All value, and Perfana now does the same. On a Prometheus or InfluxDB dashboard whose variable has a custom All value other than `.*`, the queries for new runs change accordingly, which can change the series that anomaly detection compares against older runs.
+
+### Notes
+- A value already written as a regex in the application dashboard (`/.../`, or `.*`) is passed to Zabbix as written, so dashboards set up that way keep working.
+- "All" without a custom All value is sent as `.*`, which can match more hosts or items than the variable's option list in Grafana.
+- A Grafana 8 dashboard that names its Zabbix datasource by name rather than uid is not recognised as Zabbix, and keeps the old behaviour.
+
 ## [0.2.97.80] - 2026-11-18
 
 ### Fixed
