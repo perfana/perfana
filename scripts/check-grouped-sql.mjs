@@ -94,6 +94,9 @@ const SPEC = [
   // reference here is the identical outage; it was outside this check's first version.
   ['buildStatisticsInsertSQL($1)', () => stats.buildStatisticsInsertSQL('$1')],
   ['buildStatisticsInsertSQL($1,$2,$3)', () => stats.buildStatisticsInsertSQL('$1, $2, $3')],
+  // The SLO checks' on-the-fly per-pod statistics for a grouped panel (DataAggregator).
+  ['buildMemberStatisticsSelectSQL()', () => stats.buildMemberStatisticsSelectSQL()],
+  ['RUN_SERIES_GROUP_MEMBERS_SQL', () => stats.RUN_SERIES_GROUP_MEMBERS_SQL],
   ['INSERT_MEMBERSHIP_SQL', () => plan.INSERT_MEMBERSHIP_SQL],
   ['DELETE_MEMBERSHIP_SQL($1)', () => plan.DELETE_MEMBERSHIP_SQL('$1')],
   ['SERIES_GROUPING_RULES_SQL', () => plan.SERIES_GROUPING_RULES_SQL],

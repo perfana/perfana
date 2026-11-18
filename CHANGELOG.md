@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.78] - 2026-11-18
+
+### Fixed
+- **SLOs on a series-grouped panel are judged per pod again.** On a panel with a series grouping rule (for example per-pod series grouped into `pod: emc (avg/sum/max/count)`), every SLO was evaluated against the grouped series instead of the pods, so a threshold meant for one pod was compared with a sum or a pod count and failed. SLOs now judge each raw series, as they do on an ungrouped panel, while anomaly detection keeps comparing the groups. A re-evaluate scoped to a single group series (`pod: emc (avg)`) still judges that series.
+
+### Notes
+- Stored SLO results change only when a run is evaluated again: re-evaluate a run to replace its grouped-series verdicts.
+- The per-pod statistics are computed during the SLO check from the run's metrics, in one read per run however many SLOs sit on grouped panels.
+- An SLO whose *match pattern* was written against group names (`\(avg\)$`) now sees pod names and matches nothing, which reads as "could not be evaluated". Update such a pattern to match the pods.
+
 ## [0.2.97.77] - 2026-11-18
 
 ### Added

@@ -24,8 +24,10 @@ See whether a test run met the thresholds you set, using pass/fail check results
 You know which targets the run met or missed, its Apdex score, and how each measured metric behaved.
 
 **Troubleshooting**
+
 - *No checks appear* — no SLOs are defined for this system or workload yet. See [Define SLOs](../configuration/define-slos.md).
 - *A check shows no data* — the metric may not have been collected. Use **Re-fetch** from the run's actions menu to pull the metrics again.
+- *A check on a panel with series grouping could not be evaluated* — SLOs judge each individual series (for example each pod), not the grouped series anomaly detection compares. A match pattern written for group names, such as `\(avg\)$`, matches nothing; change it to match the pod names. Re-evaluate the run to replace results stored before this behaviour.
 
 **Related**
 - [Define SLOs](../configuration/define-slos.md)

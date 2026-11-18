@@ -329,6 +329,42 @@ Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.m
 shipped all three stages in one release: PR A (the engine), PR B (the rules API) and PR C (the
 web), which were developed as separate versions on one branch and squash-merged together.
 
+### The series grouping dialog's SLO warning is inverted since v0.2.97.78
+
+**Priority:** P1
+
+The rule dialog warns that an SLO whose match pattern selects pods "will match nothing after
+grouping" (`findSloWarnings` in `apps/api/src/modules/series-grouping/series-grouping-insights.service.ts`,
+shown by `apps/web/components/series-grouping/SeriesGroupingDialog.tsx`, described in
+`docs/reference/Features/Series Grouping.md`). Since v0.2.97.78 SLOs judge the raw series, so that
+warning is false, and the case that now breaks, a pattern written against group names (`\(avg\)$`)
+that matches no pod, goes unwarned. Invert the check, update its 8 preview specs, the dialog text
+and the doc, and check the dialog in a browser.
+
+### SLOs on grouped panels: follow-ups from the v0.2.97.78 review
+
+**Priority:** P2 (item 1), P3 (the rest)
+
+v0.2.97.78 made `DataAggregator` judge a grouped panel's raw series, computed from `ds_metrics`
+in one read per checks run (`buildMemberStatisticsSelectSQL`). Left open:
+
+1. **Persist the member statistics instead of recomputing them.** `StatisticsPipeline` already
+   reads the whole run; writing per-member rows there (a side table, or marked rows) would make
+   the SLO read the cheap index read it is on an ungrouped panel. Today's read runs under the
+   aggregation budget but outside `HeavyStageMutex`, inside the checks transaction, so on a very
+   large run it overlaps the other heavy stages and holds the run's chunk locks until the checks
+   commit. Measured 63 ms on the emc k6 run (all grouped panels); unmeasured at 20 M rows.
+2. **No live-schema equality check between the two reads.** Unit tests assert the SQL's shape and
+   `check:grouped-sql` resolves its names; nothing compares its numbers with what
+   `StatisticsPipeline` stores for an ungrouped panel. Equal by construction today (same CTE
+   chain), but a spec seeding `ds_metrics` and comparing both would catch a divergence.
+3. **The read window and the statistics window differ.** The SLO read is bounded by the run
+   window padded a day; `StatisticsPipeline` has no time bound. Points more than a day outside
+   the run with `ramp_up = false` would count for ADAPT and not for the SLO.
+4. **A metric-filtered re-evaluate naming a group series is path-dependent.** It re-judges that
+   benchmark on the group row, and the next full re-evaluate judges the pods again. The choice is
+   not stored on the benchmark.
+
 ### Profile series grouping rules: follow-ups from the v0.2.97.77 review
 
 **Priority:** P2 (items 1-3), P3 (the rest)

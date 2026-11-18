@@ -9,6 +9,13 @@ import {
   samplerMetricNameSql,
 } from '../../constants/performance-metrics.js';
 import { generateScenarioDashboardLabel } from '../../utils/uuid-generator.js';
+import {
+  RUN_SERIES_GROUP_MEMBERS_SQL,
+  SLO_STATISTIC_COLUMNS,
+  buildMemberStatisticsSelectSQL,
+} from '../helpers/statistics-sql.js';
+import { SERIES_GROUPING_TABLES_PROBE_SQL } from '../helpers/series-grouping-plan.js';
+import { applyAggregationBudget } from '../helpers/aggregation-budget.js';
 
 /** Perf-test panels whose stored series is a per-bucket ratio, not a per-run one. */
 const POOLED_ERROR_RATE_PANELS = new Set<number>([
@@ -25,6 +32,19 @@ const SCENARIO_LABEL_PREFIX = generateScenarioDashboardLabel('');
  */
 const TREND_MIN_CORR = 0.5;
 const TREND_MIN_POINTS = 10;
+
+/** Padding on the run window for the raw-series read: late ingest lands past `end_time`, and at
+ * 1-day chunks a day of padding excludes the same chunks a tight bound would. */
+const MEMBER_READ_PAD_MS = 24 * 60 * 60 * 1000;
+
+/** A run's series grouping, read once per run: raw series names by `dashboard|panel`, and the
+ * raw-series statistics of every grouped panel (computed lazily, on the first SLO that needs them). */
+interface RunGrouping {
+  members: Map<string, Set<string>>;
+  stats?: Promise<Map<string, Record<string, unknown>[]>>;
+}
+
+const panelKey = (dashboardId: unknown, panelId: unknown) => `${String(dashboardId)}|${String(panelId)}`;
 
 export interface MetricTarget {
   target: string;
@@ -69,6 +89,8 @@ export interface MetricStatistic {
  * Based on data_aggregator.py:32-199
  */
 export class DataAggregator extends BaseCheckService {
+  private readonly groupingByRun = new Map<string, Promise<RunGrouping>>();
+
   constructor(
     logger: Logger,
     private manager: EntityManager
@@ -137,14 +159,7 @@ export class DataAggregator extends BaseCheckService {
       }
 
       const metricStatisticsSql = `
-        SELECT
-          metric_name,
-          mean, median, min_value, max_value,
-          std_dev, last_value, count,
-          trend_pct_per_hour, trend_corr,
-          q10, q25, q75, q90, q95, q99,
-          is_constant, all_missing, pct_missing,
-          dashboard_label
+        SELECT${SLO_STATISTIC_COLUMNS}
         FROM ds_metric_statistics
         WHERE ${whereClauses.join('\n          AND ')}
           AND (
@@ -153,7 +168,17 @@ export class DataAggregator extends BaseCheckService {
           )
       `;
 
-      const result = await this.manager.query(metricStatisticsSql, queryParams) as Record<string, unknown>[];
+      // An SLO judges the raw series (each pod), never the series groups ADAPT compares: for a
+      // grouped panel ds_metric_statistics holds only `<group> (avg|sum|max|count)`. A single-metric
+      // re-evaluate scoped to one of those group series (metricNameFilter) keeps reading it.
+      const grouping = await this.loadRunGrouping(testRun);
+      const key = panelKey(benchmark.application_dashboard_id, panelId);
+      const members = grouping.members.get(key);
+      const readRawSeries = members !== undefined && (!metricNameFilter || members.has(metricNameFilter));
+      const result = readRawSeries
+        ? ((await this.loadMemberStatistics(testRun, grouping)).get(key) ?? [])
+            .filter((row) => !metricNameFilter || row.metric_name === metricNameFilter)
+        : await this.manager.query(metricStatisticsSql, queryParams) as Record<string, unknown>[];
 
       const metricStatistics: MetricStatistic[] = result.map((row) => ({
         metric_name: row.metric_name as string,
@@ -181,7 +206,7 @@ export class DataAggregator extends BaseCheckService {
       // Based on data_aggregator.py:59-131
       if (metricStatistics.length === 0) {
         this.logger.debug(
-          `No metric_statistics found for filter: ${JSON.stringify(filterCriteria)}`
+          `No ${readRawSeries ? 'raw ds_metrics series (grouped panel)' : 'metric_statistics'} found for filter: ${JSON.stringify(filterCriteria)}`
         );
 
         if (benchmark.validate_with_default_if_no_data) {
@@ -193,12 +218,16 @@ export class DataAggregator extends BaseCheckService {
 
           // Create and save a default dsMetricStatistics document
           // Based on data_aggregator.py:79-115
-          await this.createArtificialMetricStatistic(
-            testRun,
-            benchmark,
-            panelId,
-            defaultValue
-          );
+          // Not on a grouped panel: ds_metric_statistics holds ADAPT's group rows there, and a
+          // `default` series beside them would be compared as one more series.
+          if (!readRawSeries) {
+            await this.createArtificialMetricStatistic(
+              testRun,
+              benchmark,
+              panelId,
+              defaultValue
+            );
+          }
 
           // Return aggregation result with isArtificial: true
           // Based on data_aggregator.py:116-126
@@ -268,7 +297,10 @@ export class DataAggregator extends BaseCheckService {
       // Based on data_aggregator.py:141-152
       // A trend has no artificial default: a flat series has slope 0 and no correlation,
       // so it takes the weak-trend path below instead of being judged on its mean.
-      if (metricStatistics.length === 1 && metricStatistics[0].is_constant && fieldName !== 'trend_pct_per_hour') {
+      // The shortcut exists for the artificial row createArtificialMetricStatistic writes into
+      // ds_metric_statistics; a raw series is never that row, and a one-pod group whose value never
+      // moved (a restart count, a memory limit) must keep its pod name.
+      if (!readRawSeries && metricStatistics.length === 1 && metricStatistics[0].is_constant && fieldName !== 'trend_pct_per_hour') {
         targets.push({
           target: 'default',
           value: metricStatistics[0].mean,
@@ -329,6 +361,82 @@ export class DataAggregator extends BaseCheckService {
         `Failed to aggregate metrics for benchmark ${benchmark.id}: ${error}`
       );
     }
+  }
+
+  /**
+   * The run's grouping membership, read once per run per aggregator (one checks transaction).
+   * Every metric SLO passes through here, grouped or not, so it must not add a way to fail: the
+   * table is probed with to_regclass first (the worker can start before migration 1819, and a
+   * missing-table error would abort the benchmark's savepoint), and a failed read is evicted so the
+   * next benchmark retries instead of replaying one transient error to every SLO of the run.
+   */
+  private loadRunGrouping(testRun: TestRun): Promise<RunGrouping> {
+    let grouping = this.groupingByRun.get(testRun.test_run_id);
+    if (!grouping) {
+      grouping = (async (): Promise<RunGrouping> => {
+        const members = new Map<string, Set<string>>();
+        const [probe] = await this.manager.query(SERIES_GROUPING_TABLES_PROBE_SQL) as Array<{ present: boolean }>;
+        if (probe?.present !== true) { return { members }; }
+        const rows = await this.manager.query(RUN_SERIES_GROUP_MEMBERS_SQL, [testRun.test_run_id]) as Array<
+          { application_dashboard_id: string; panel_id: number; metric_name: string }
+        >;
+        for (const row of rows) {
+          const key = panelKey(row.application_dashboard_id, row.panel_id);
+          let names = members.get(key);
+          if (!names) { names = new Set(); members.set(key, names); }
+          names.add(row.metric_name);
+        }
+        return { members };
+      })();
+      grouping.catch(() => this.groupingByRun.delete(testRun.test_run_id));
+      this.groupingByRun.set(testRun.test_run_id, grouping);
+    }
+    return grouping;
+  }
+
+  /**
+   * Raw-series statistics of every grouped panel of the run, in ONE read of the run's ds_metrics
+   * (see buildMemberStatisticsSelectSQL), shared by every SLO on those panels.
+   */
+  private loadMemberStatistics(
+    testRun: TestRun,
+    grouping: RunGrouping
+  ): Promise<Map<string, Record<string, unknown>[]>> {
+    if (!grouping.stats) {
+      const dashboards: string[] = [];
+      const panels: number[] = [];
+      for (const key of grouping.members.keys()) {
+        const [dashboardId, panel] = key.split('|');
+        dashboards.push(dashboardId);
+        panels.push(Number(panel));
+      }
+      const from = new Date((testRun.start_time ? new Date(testRun.start_time).getTime() : 0) - MEMBER_READ_PAD_MS);
+      const to = new Date((testRun.end_time ? new Date(testRun.end_time).getTime() : Date.now()) + MEMBER_READ_PAD_MS);
+      grouping.stats = (async () => {
+        // The checks transaction runs on the pool default (statement_timeout = the client's 600 s
+        // query_timeout, work_mem 4MB). At equal deadlines node-postgres tears the socket down and
+        // every later SLO of the run fails with it; the aggregation budget (540 s, 128MB, as
+        // StatisticsPipeline runs this same chain) lets Postgres cancel cleanly instead. It is
+        // transaction-local, which only tightens the timeout for the cheap reads that follow.
+        await applyAggregationBudget(this.manager);
+        return await this.manager.query(
+          buildMemberStatisticsSelectSQL(),
+          [testRun.test_run_id, from, to, dashboards, panels]
+        ) as Record<string, unknown>[];
+      })().then((rows) => {
+        const byPanel = new Map<string, Record<string, unknown>[]>();
+        for (const row of rows) {
+          const key = panelKey(row.application_dashboard_id, row.panel_id);
+          const list = byPanel.get(key);
+          if (list) {list.push(row);} else {byPanel.set(key, [row]);}
+        }
+        return byPanel;
+      });
+      // A failed read stays cached for the run, unlike the membership read: this one is the whole
+      // run's segment, so a statement timeout would only repeat, N x statement_timeout for N
+      // grouped-panel SLOs. Each SLO still fails alone (ChecksPipeline's per-benchmark savepoint).
+    }
+    return grouping.stats;
   }
 
   /**

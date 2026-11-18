@@ -1257,8 +1257,12 @@ group name back to its members. Five things about it:
    `ds-metrics-comparison`), and the report fetcher's `getMetricsTimeSeries` /
    `getAvailableMetricsPanels`. MCP reads those routes over HTTP and needs nothing. Readers of
    `ds_metric_statistics` (`getMetricTrends`, `getBaselineRunComparisonFromStatistics`, the Compare
-   table, ADAPT, SLO checks) already see group names and must **not** expand them. `?members=true`
-   on the metric routes returns the raw per-pod series for drill-down.
+   table, ADAPT) already see group names and must **not** expand them. `?members=true`
+   on the metric routes returns the raw per-pod series for drill-down. SLO checks are the
+   exception since v0.2.97.78: on a grouped panel the worker's `DataAggregator` judges the raw
+   series, computed from `ds_metrics`, and reads a group row only for a single-metric re-evaluate
+   scoped to one — see item 8 of "Series grouping happens at the statistics layer" in
+   [apps/worker/CLAUDE.md](../worker/CLAUDE.md).
 
 ### A control group as a comparison baseline: one resolver, and a sentinel that is not a run
 
