@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.79] - 2026-11-18
+
+### Added
+- **Splunk in the user guide.** docs.perfana.io now has a *Connect Splunk* page under Integrations. It covers connecting Splunk for the organization (management URL on port 8089, token or username and password, Splunk Cloud prerequisites), choosing log sources and panels on a system's Splunk tab, where the log metrics show up, and troubleshooting.
+
 ## [0.2.97.78] - 2026-11-18
 
 ### Fixed
