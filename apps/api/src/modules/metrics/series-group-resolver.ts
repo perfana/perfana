@@ -38,11 +38,12 @@ import { getRequestEm } from '../../common/db/request-em';
  *   the one implementation shared with the worker and the web preview.
  * - Nothing here interpolates a name into SQL. Group names, member names and aggregations
  *   are bound parameters.
- * - It never throws. Grouping is an enhancement of a read that works without it, so a
- *   failure degrades to "nothing grouped" and logs at ERROR. Inside the request's RLS
- *   transaction (`DB_ENABLE_RLS_ROLE=true`) a failed statement would abort that transaction
- *   (25P02) and fail the CALLER's next query instead, so every lookup there runs under its
- *   own SAVEPOINT and is rolled back to it on failure (`guarded`).
+ * - It does not throw for a failed lookup. Grouping is an enhancement of a read that works
+ *   without it, so a failure degrades to "nothing grouped" and logs at ERROR. Inside the
+ *   request's RLS transaction (`DB_ENABLE_RLS_ROLE=true`) a failed statement would abort that
+ *   transaction (25P02) and fail the CALLER's next query instead, so lookups there run one at
+ *   a time, each under its own SAVEPOINT (`guarded`). The one case that throws is a failed
+ *   ROLLBACK TO: the transaction is dead then, and a fallback would only hide it.
  * - It has no RLS of its own: `ds_metrics` and `ds_metric_series_groups` carry none, so the
  *   CALLER must already have authorized the run.
  *
@@ -267,11 +268,24 @@ export class SeriesGroupResolver {
   /** Distinguishes the savepoints of lookups that share one request transaction. */
   private savepointSeq = 0;
 
+  /** The tail of each request transaction's lookup queue (see `guarded`). */
+  private readonly lookupQueues = new WeakMap<object, Promise<unknown>>();
+
   /**
    * Runs one lookup so that a failure degrades to `fallback` and leaves the caller's
-   * transaction usable. Outside a request transaction (the default, `DB_ENABLE_RLS_ROLE` off)
-   * there is nothing to protect and no SAVEPOINT is legal, so none is issued. The same gate as
-   * `saveSkippingDuplicateSlot` in series-grouping.service.ts.
+   * transaction usable.
+   *
+   * A SAVEPOINT is issued only when `q` IS the request transaction (`DB_ENABLE_RLS_ROLE=true`):
+   * outside one there is nothing to protect and a SAVEPOINT is illegal (25P01), and on any
+   * other connection it would protect nothing while failing every lookup.
+   *
+   * Lookups on one transaction run ONE AT A TIME. Two interleaved on one connection (the
+   * Comparisons section reads the current and the baseline run in a `Promise.all`) would nest
+   * their savepoints, and releasing the outer one destroys the inner one: the inner RELEASE
+   * then fails with 3B001 and aborts the transaction even though nothing else failed.
+   *
+   * If ROLLBACK TO itself fails the transaction is already dead, so this rethrows instead of
+   * returning a fallback the caller's next query would contradict with a 25P02.
    *
    * Logged at ERROR, not WARN: a missing table never gets here (`ensureTables` answers it), so
    * this is a real query failure, and every grouped series silently degrades to raw pods
@@ -284,17 +298,44 @@ export class SeriesGroupResolver {
     fallback: T,
     lookup: () => Promise<T>,
   ): Promise<T> {
-    const savepoint = getRequestEm() ? `series_group_lookup_${++this.savepointSeq}` : null;
+    const em = getRequestEm();
+    const onRequestTxn = em !== null && (q === em || (q as { manager?: unknown }).manager === em);
+    if (!onRequestTxn) return this.attempt(q, null, verb, ref, fallback, lookup);
+
+    const run = (this.lookupQueues.get(em) ?? Promise.resolve()).then(() =>
+      this.attempt(q, `series_group_lookup_${++this.savepointSeq}`, verb, ref, fallback, lookup),
+    );
+    this.lookupQueues.set(em, run.catch(() => undefined));
+    return run;
+  }
+
+  private async attempt<T>(
+    q: SeriesQueryable,
+    savepoint: string | null,
+    verb: 'reading' | 'listing',
+    ref: PanelRef,
+    fallback: T,
+    lookup: () => Promise<T>,
+  ): Promise<T> {
     try {
       if (savepoint) await q.query(`SAVEPOINT ${savepoint}`);
       const result = await lookup();
       if (savepoint) await q.query(`RELEASE SAVEPOINT ${savepoint}`);
       return result;
     } catch (error) {
-      if (savepoint) await q.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => undefined);
-      this.logger.error(
-        `Series grouping unavailable, ${verb} ungrouped ${JSON.stringify(ref)}: ${(error as Error).message}`,
-      );
+      const where = `${verb} ungrouped ${JSON.stringify(ref)}`;
+      if (savepoint) {
+        try {
+          await q.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        } catch (rollbackError) {
+          this.logger.error(
+            `Series grouping failed and could not roll back ${savepoint} (${where}): ` +
+              `${(error as Error).message}; rollback: ${(rollbackError as Error).message}`,
+          );
+          throw rollbackError;
+        }
+      }
+      this.logger.error(`Series grouping unavailable, ${where}: ${(error as Error).message}`);
       return fallback;
     }
   }

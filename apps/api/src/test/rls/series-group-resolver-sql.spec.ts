@@ -122,6 +122,22 @@ describe('SeriesGroupResolver SQL against the real schema', () => {
       expect(errors).toEqual([]);
     });
 
+    it('concurrent lookups on one transaction do not trip over each other’s savepoints', async () => {
+      let after: unknown;
+      await inRequestTransaction(async (em) => {
+        const resolver = new SeriesGroupResolver();
+        // The Comparisons section reads the current and the baseline run like this.
+        await Promise.all([
+          resolver.groupsForPanel(em, { testRunId: RUN, applicationDashboardId: DASH, panelId: 20 }, []),
+          resolver.groupsForPanel(em, { testRunId: `${RUN}-baseline`, applicationDashboardId: DASH, panelId: 20 }, []),
+          resolver.loadRun(em, RUN),
+        ]);
+        // Interleaved savepoints fail RELEASE with 3B001 and leave this aborted (25P02).
+        after = (await em.query('SELECT 1 AS ok'))[0].ok;
+      });
+      expect(after).toBe(1);
+    });
+
     it('a failed lookup degrades and leaves the transaction usable for the caller', async () => {
       let after: unknown;
       await inRequestTransaction(async (em) => {
