@@ -30,6 +30,7 @@ import { TestRunFinderService } from './test-run-finder.service';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
 import { BenchmarkProcessorService } from './benchmark-processor.service';
+import { GroupingRuleProcessorService } from './grouping-rule-processor.service';
 import { createMockConfigService } from '../../../test/helpers';
 
 describe('AutoConfigService', () => {
@@ -39,6 +40,10 @@ describe('AutoConfigService', () => {
   let dashboardFinderService: jest.Mocked<DashboardFinderService>;
   let dashboardConfiguratorService: jest.Mocked<DashboardConfiguratorService>;
   let benchmarkProcessorService: jest.Mocked<BenchmarkProcessorService>;
+  const groupingRuleProcessorService = {
+    findProfileGroupingRules: jest.fn().mockResolvedValue([]),
+    processProfileGroupingRules: jest.fn().mockResolvedValue(undefined),
+  };
 
   // Mock data
   const mockTestRun: any = {
@@ -126,6 +131,10 @@ describe('AutoConfigService', () => {
         {
           provide: BenchmarkProcessorService,
           useValue: benchmarkProcessorService,
+        },
+        {
+          provide: GroupingRuleProcessorService,
+          useValue: groupingRuleProcessorService,
         },
       ],
     }).compile();
@@ -332,6 +341,42 @@ describe('AutoConfigService', () => {
           ['Production Profile'],
           [mockProfileBenchmark],
         );
+      });
+
+      // Value: protects=auto-config hands the matched profiles' grouping rules to the processor, after the
+      //   dashboards it needs exist, and skips it with no rules; fails_when=the rules are not threaded from the
+      //   context, the call is dropped, or moved before dashboard configuration; why_new=the processor's own spec
+      //   cannot see its caller; seam=none; no_claim=what the processor writes (mocked; unit only)
+      it('provisions profile series grouping rules after the dashboards, and only when there are some', async () => {
+        const groupingRule: any = {
+          id: 'pr-1',
+          profile: 'Production Profile',
+          dashboard_uid: 'tmpl',
+        };
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
+        testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+          mockAutoConfigDashboard,
+        ]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
+        groupingRuleProcessorService.findProfileGroupingRules.mockResolvedValueOnce([groupingRule]);
+
+        await service.processAutoConfigDashboards();
+
+        expect(groupingRuleProcessorService.processProfileGroupingRules).toHaveBeenCalledWith(
+          mockTestRun,
+          ['Production Profile'],
+          [groupingRule],
+        );
+        expect(
+          dashboardConfiguratorService.processAutoConfigDashboard.mock.invocationCallOrder[0],
+        ).toBeLessThan(
+          groupingRuleProcessorService.processProfileGroupingRules.mock.invocationCallOrder[0]!,
+        );
+
+        groupingRuleProcessorService.processProfileGroupingRules.mockClear();
+        await service.processAutoConfigDashboards();
+        expect(groupingRuleProcessorService.processProfileGroupingRules).not.toHaveBeenCalled();
       });
 
       it('still processes profile benchmarks when the org has no profile dashboards', async () => {
