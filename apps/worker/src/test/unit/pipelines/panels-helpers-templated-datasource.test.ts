@@ -561,7 +561,7 @@ describe('Zabbix filters follow the plugin\'s replaceTemplateVars', () => {
   // breaks, or a non-Zabbix target gets wrapped; why_new=the worker substituted every datasource alike;
   // seam=none; no_claim=a live Zabbix answering these filters (Grafana client mocked; unit only)
   const ZABBIX = 'alexanderzobnin-zabbix-datasource';
-  const zabbixDs = { type: ZABBIX, uid: 'zabbix-ota' };
+  const zabbixDs = { type: ZABBIX, uid: 'zabbix-main' };
 
   function data(options: {
     templating?: Record<string, unknown>[];

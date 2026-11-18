@@ -269,9 +269,9 @@ query's rows. A `Set` plus hoisting the compile out of the loop is the whole fix
 
 ### Zabbix substitution: confirm against a live Zabbix (P1)
 
-**What:** After v0.2.97.81 deploys, force-refetch a run of the `emc` system's `DB2_L - bcm-els-emc-perflab` dashboard and confirm its panels store data. Check the worker's stored request bodies (`ds_panels.requests`) show `group.filter` `/^.*$/` and `host.filter` as the configured host, regex-escaped and wrapped in `/^…$/`.
+**What:** After v0.2.97.81 deploys, force-refetch a run of a Zabbix dashboard whose application-dashboard variables are set to All (the local dashboard this was found on) and confirm its panels store data. Check the worker's stored request bodies (`ds_panels.requests`) show `group.filter` `/^.*$/` and `host.filter` as the configured host, regex-escaped and wrapped in `/^…$/`.
 
-**Why:** `substituteZabbixFilter` (`apps/worker/src/pipelines/panels/helpers.ts`) copies grafana-zabbix's `replaceTemplateVars` from the plugin source, but the tests mock Grafana, so no real Zabbix has answered one of these filters yet. The dashboard's application-dashboard `Disk` variable is `$__all`, so panel 24 also exercises the composite `$Disk: Disk read rate` case.
+**Why:** `substituteZabbixFilter` (`apps/worker/src/pipelines/panels/helpers.ts`) copies grafana-zabbix's `replaceTemplateVars` from the plugin source, but the tests mock Grafana, so no real Zabbix has answered one of these filters yet. Pick a dashboard whose `Disk` variable is `$__all` too, so the composite `$Disk: Disk read rate` case is exercised.
 
 **Priority:** P1
 
@@ -279,7 +279,7 @@ query's rows. A `Set` plus hoisting the compile out of the loop is the whole fix
 
 Deferred while shipping. Each was reviewed and judged not to affect a dashboard shape in use today:
 
-- **"All" without a custom All value is `.*`, not the option list.** The plugin gets every option from Grafana and builds `/^(a|b|c)$/`. The worker does not know the options, so it sends `.*`, which can match items outside a variable narrowed by its own `regex` (DB2_L's `Disk` is `/.*((sd|vd)[a-z])/`). Fix: build the escaped alternation from `templateVar.options` when the dashboard JSON carries them.
+- **"All" without a custom All value is `.*`, not the option list.** The plugin gets every option from Grafana and builds `/^(a|b|c)$/`. The worker does not know the options, so it sends `.*`, which can match items outside a variable narrowed by its own `regex` (for example a `Disk` variable with regex `/.*((sd|vd)[a-z])/`). Fix: build the escaped alternation from `templateVar.options` when the dashboard JSON carries them.
 - **Substitution runs key by key.** An inserted value containing `$Other` is substituted again on a later key; the plugin does one pass. The generic path has the same shape. Fix: one regex over every key with a replacer.
 - **A Grafana 8 datasource *name* is not recognised as Zabbix.** `isZabbixTarget` looks strings up in a uid-keyed map, which is empty on a Viewer token anyway. Resolving names needs the Admin-only datasource API, which Perfana deliberately avoids.
 - **`isZabbixFilterKey` matches any key ending in `Filter`**, at any depth of a Zabbix target. The plugin lists its fields; an allow-list would survive a future plugin field.
