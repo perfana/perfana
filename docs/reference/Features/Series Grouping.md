@@ -144,7 +144,8 @@ It warns about four things:
 
 - **unticking a box on a saved rule**, which deletes that series on the next recalculation, so
   anything referencing it by name stops matching;
-- an **SLO** whose match pattern selects pods by name and would match nothing after grouping;
+- an **SLO** whose match pattern selects only the rule's group names (`^api$`, `\(avg\)$`). SLOs judge
+  each raw series, so such a pattern judges nothing; a pattern that matches the pods keeps working;
 - a **group name that is also a raw series name** in a baseline run that has not been recalculated —
   that run's series of that name is pooled into the group until it is;
 - a group whose members report at **different timestamps**, so its average is mostly single pods

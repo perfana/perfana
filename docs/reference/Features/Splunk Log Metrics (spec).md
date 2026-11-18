@@ -91,7 +91,7 @@ earliest_time=<from epoch>  latest_time=<to epoch>
 The mapped sources run first as their own search and the user's filter is piped after it, so a
 filter can only narrow the search (`$entities OR index=_audit` still reads only mapped sources).
 The time range travels as the export endpoint's `earliest_time` / `latest_time` form parameters,
-never inline in the search text (v0.2.97.79): against a real Splunk an inline
+never inline in the search text (v0.2.97.80): against a real Splunk an inline
 `earliest=<epoch> latest=<epoch>` returned no rows for a window that the same search showed in
 Splunk Web, where the range sits in the time picker. The mock in `perfana-demo` reads both shapes.
 
@@ -319,12 +319,12 @@ or ADAPT will flag every run.
   With `timeModifiers: true` (the API's save and preview check) it also refuses time modifiers in
   search segments (the leading terms and `| search`): `earliest`, `latest`,
   `_index_earliest`/`_index_latest`, `starttime`/`endtime` (and the `u` forms), and the deprecated
-  `*ago` / `searchtimespan*` spellings (v0.2.97.79), naming the one it found. Double-quoted text is
+  `*ago` / `searchtimespan*` spellings (v0.2.97.80), naming the one it found. Double-quoted text is
   a literal and is skipped; single-quoted names are checked; dotted or `$` names (`json.latest=`)
   and `| eval endtime=...` are fields and are allowed. The send path (`buildTimechartSearch`,
   `splunkFieldSummary`) runs the validator without that option: there the filter sits after
   Perfana's own `<sources> | search`, where a modifier cannot widen the window, and refusing it
-  would stop a saved panel from collecting. Before v0.2.97.79 the save check refused only
+  would stop a saved panel from collecting. Before v0.2.97.80 the save check refused only
   `earliest`/`latest`, anywhere in the filter. It is a convenience, not the
   boundary; the Splunk role is.
 - No SPL reaches a URL; it goes in the POST body.

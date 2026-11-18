@@ -30,6 +30,7 @@ import {
   applySeriesGrouping,
   compileSeriesGroupingRule,
   evaluateGroupingPresets,
+  groupSeriesName,
   seriesGroupingRuleHash,
   validateRegexPattern,
   type SeriesGroupingAggregation,
@@ -228,8 +229,10 @@ export class SeriesGroupingInsightsService {
   }
 
   /**
-   * SLOs whose match pattern would judge nothing after grouping: it matches at least one of the
-   * run's raw names today and no group name tomorrow. The pattern lives in two places
+   * SLOs whose match pattern selects only the rule's group names. Since v0.2.97.78 an SLO on a
+   * grouped panel judges each raw series (`DataAggregator`), so a pattern that matches a pod keeps
+   * working after grouping, and one written against a group (`\(avg\)$`, `^api$`) judges nothing:
+   * it matches a group or derived series name and no raw name. The pattern lives in two places
    * (`configuration.matchPattern`, which the SLO dialog writes and wins, and the `match_pattern`
    * column grafana-sync's auto-config writes) — the same fold `withColumnMatchPattern` does in
    * the worker. An inverted pattern names the series to EXCLUDE, so "judged" is "does not match".
@@ -284,7 +287,7 @@ export class SeriesGroupingInsightsService {
       const inverted = row.invert_match_pattern === 'true';
       const judged = (name: string): boolean => regex.test(name) !== inverted;
 
-      if (panel.currentNames.some(judged) && !Array.from(grouping.groups.keys()).some(judged)) {
+      if (!panel.currentNames.some(judged) && groupOnlyNames(grouping).some(judged)) {
         warnings.push({
           benchmarkId: row.id,
           name: row.config_title || row.panel_title || 'Unnamed SLO',
@@ -836,4 +839,15 @@ function findRawNameCollisions(
 
 function errorMessage(err: unknown): string {
   return err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
+}
+
+/** The names a rule adds that are not raw series: each renamed group and its derived series. */
+function groupOnlyNames(grouping: ReturnType<typeof applySeriesGrouping>): string[] {
+  const names: string[] = [];
+  for (const [group, renamed] of grouping.isRenamed) {
+    if (!renamed) continue;
+    names.push(group);
+    for (const a of grouping.seriesAggregations.get(group) ?? []) names.push(groupSeriesName(group, a));
+  }
+  return names;
 }

@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.79] - 2026-11-18
+## [0.2.97.80] - 2026-11-18
 
 ### Fixed
 - **Splunk collection sends the time range the way Splunk Web does.** Live and analysis collection asked Splunk for each panel with the run window written into the search text as epoch seconds (`earliest=… latest=…`). A real Splunk answered with no rows, so every tick logged `returned no data` and the run stored nothing, while *Open in Splunk*, which passes the same window through the time picker, showed the data. Perfana now sends the range as the export endpoint's `earliest_time` / `latest_time` parameters. This has been checked against the local Splunk mock only; confirm on the next live run that the `returned no data` lines stop. The panel preview's field list uses the same parameters. A run that was collected empty needs a force-refetch re-evaluate, while Splunk still holds its logs.
@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Splunk in the user guide.** docs.perfana.io now has a *Connect Splunk* page under Integrations. It covers connecting Splunk for the organization (management URL on port 8089, token or username and password, Splunk Cloud prerequisites), choosing log sources and panels on a system's Splunk tab, where the log metrics show up, and troubleshooting.
+
+## [0.2.97.79] - 2026-11-18
+
+### Fixed
+- **The series grouping dialog warns about the right SLOs.** Since v0.2.97.78 SLOs on a grouped panel judge each pod, so the dialog's warning that an SLO matching pods "will match nothing after grouping" was false. It now warns about the SLOs that do break: a match pattern that selects only group names, such as `^api$` or `\(avg\)$`, which matches no pod and judges nothing.
 
 ## [0.2.97.78] - 2026-11-18
 
