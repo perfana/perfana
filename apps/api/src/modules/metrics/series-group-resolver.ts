@@ -7,6 +7,7 @@ import {
   type SeriesGroupingPreset,
   type SeriesGroupingRuleSpec,
 } from '@perfana/shared/utils';
+import { getRequestEm } from '../../common/db/request-em';
 
 /**
  * Series grouping on the READ side of `ds_metrics`.
@@ -38,7 +39,10 @@ import {
  * - Nothing here interpolates a name into SQL. Group names, member names and aggregations
  *   are bound parameters.
  * - It never throws. Grouping is an enhancement of a read that works without it, so a
- *   failure degrades to "nothing grouped" and logs.
+ *   failure degrades to "nothing grouped" and logs at ERROR. Inside the request's RLS
+ *   transaction (`DB_ENABLE_RLS_ROLE=true`) a failed statement would abort that transaction
+ *   (25P02) and fail the CALLER's next query instead, so every lookup there runs under its
+ *   own SAVEPOINT and is rolled back to it on failure (`guarded`).
  * - It has no RLS of its own: `ds_metrics` and `ds_metric_series_groups` carry none, so the
  *   CALLER must already have authorized the run.
  *
@@ -195,7 +199,7 @@ export class SeriesGroupResolver {
    *   they are read from `ds_metrics`.
    */
   async groupsForPanel(q: SeriesQueryable, ref: PanelRef, rawNames?: readonly string[]): Promise<SeriesGroup[]> {
-    try {
+    return this.guarded(q, 'reading', ref, [], async () => {
       if (!(await this.ensureTables(q))) return [];
       const grouping = await this.load(q, ref);
       if (grouping.isEmpty) return [];
@@ -208,13 +212,8 @@ export class SeriesGroupResolver {
         const rule = pickRule(grouping.rules, ref.panelId);
         return rule ? groupsFromRule(rule.spec, rawNames) : [];
       }
-      return await this.applyRulesToStoredNames(q, ref, grouping.rules);
-    } catch (error) {
-      // ERROR, not WARN: a missing table never gets here (ensureTables answers it), so this is a
-      // real query failure, and every grouped series silently degrades to raw pods because of it.
-      this.logger.error(`Series grouping unavailable, reading ungrouped: ${(error as Error).message}`);
-      return [];
-    }
+      return this.applyRulesToStoredNames(q, ref, grouping.rules);
+    });
   }
 
   /**
@@ -236,13 +235,10 @@ export class SeriesGroupResolver {
    * that list every panel (the series pickers). Pair with `groupsInRun` per panel.
    */
   async loadRun(q: SeriesQueryable, testRunId: string): Promise<RunSeriesGrouping> {
-    try {
+    return this.guarded(q, 'listing', { testRunId }, EMPTY_GROUPING, async () => {
       if (!(await this.ensureTables(q))) return EMPTY_GROUPING;
-      return await this.load(q, { testRunId });
-    } catch (error) {
-      this.logger.error(`Series grouping unavailable, listing ungrouped: ${(error as Error).message}`);
-      return EMPTY_GROUPING;
-    }
+      return this.load(q, { testRunId });
+    });
   }
 
   /**
@@ -267,6 +263,41 @@ export class SeriesGroupResolver {
   }
 
   // ---------------------------------------------------------------------------------------
+
+  /** Distinguishes the savepoints of lookups that share one request transaction. */
+  private savepointSeq = 0;
+
+  /**
+   * Runs one lookup so that a failure degrades to `fallback` and leaves the caller's
+   * transaction usable. Outside a request transaction (the default, `DB_ENABLE_RLS_ROLE` off)
+   * there is nothing to protect and no SAVEPOINT is legal, so none is issued. The same gate as
+   * `saveSkippingDuplicateSlot` in series-grouping.service.ts.
+   *
+   * Logged at ERROR, not WARN: a missing table never gets here (`ensureTables` answers it), so
+   * this is a real query failure, and every grouped series silently degrades to raw pods
+   * because of it. The reference is JSON-encoded because the run id is a raw path parameter.
+   */
+  private async guarded<T>(
+    q: SeriesQueryable,
+    verb: 'reading' | 'listing',
+    ref: PanelRef,
+    fallback: T,
+    lookup: () => Promise<T>,
+  ): Promise<T> {
+    const savepoint = getRequestEm() ? `series_group_lookup_${++this.savepointSeq}` : null;
+    try {
+      if (savepoint) await q.query(`SAVEPOINT ${savepoint}`);
+      const result = await lookup();
+      if (savepoint) await q.query(`RELEASE SAVEPOINT ${savepoint}`);
+      return result;
+    } catch (error) {
+      if (savepoint) await q.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => undefined);
+      this.logger.error(
+        `Series grouping unavailable, ${verb} ungrouped ${JSON.stringify(ref)}: ${(error as Error).message}`,
+      );
+      return fallback;
+    }
+  }
 
   private async ensureTables(q: SeriesQueryable): Promise<boolean> {
     if (this.tablesPresent) return true;

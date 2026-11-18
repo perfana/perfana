@@ -12,8 +12,10 @@
  * failure from these assertions. The run id matches nothing, so each statement returns no rows:
  * resolution is what is under test, not the answer.
  */
-import { DataSource } from 'typeorm';
+import { ClsServiceManager } from 'nestjs-cls';
+import { DataSource, EntityManager } from 'typeorm';
 import { AppDataSource } from '../../data-source';
+import { REQ_EM } from '../../common/db/request-em';
 import { SeriesGroupResolver, type SeriesQueryable } from '../../modules/metrics/series-group-resolver';
 
 const RUN = 'series-group-resolver-sql-spec-no-such-run';
@@ -79,5 +81,61 @@ describe('SeriesGroupResolver SQL against the real schema', () => {
     await new SeriesGroupResolver().loadRun(q, RUN);
     expect(errors).toEqual([]);
     expect(statements).toBeGreaterThanOrEqual(2);
+  });
+
+  describe('inside the request RLS transaction, as perfana_app', () => {
+    const ROLLBACK = Symbol('rollback');
+
+    /** A CLS context + transaction with the EM published to REQ_EM, as the interceptor does; always rolled back. */
+    async function inRequestTransaction(fn: (em: EntityManager) => Promise<void>): Promise<void> {
+      const cls = ClsServiceManager.getClsService();
+      try {
+        await cls.run(async () => {
+          await ds.transaction(async (em) => {
+            cls.set(REQ_EM, em);
+            await em.query('SET LOCAL ROLE perfana_app');
+            await fn(em);
+            throw ROLLBACK;
+          });
+        });
+      } catch (err) {
+        if (err !== ROLLBACK) throw err;
+      }
+    }
+
+    it('has the grants every lookup needs', async () => {
+      await inRequestTransaction(async (em) => {
+        const resolver = new SeriesGroupResolver();
+        const rec: SeriesQueryable = {
+          query: async (sql: string, params?: unknown[]) => {
+            try {
+              return await em.query(sql, params);
+            } catch (error) {
+              errors.push(`${(error as Error).message}\n--- in ---\n${sql}`);
+              throw error;
+            }
+          },
+        };
+        await resolver.groupsForPanel(rec, { testRunId: RUN, applicationDashboardId: DASH, panelId: 20 }, []);
+        await resolver.loadRun(rec, RUN);
+      });
+      expect(errors).toEqual([]);
+    });
+
+    it('a failed lookup degrades and leaves the transaction usable for the caller', async () => {
+      let after: unknown;
+      await inRequestTransaction(async (em) => {
+        // A non-uuid dashboard id is a real Postgres error (22P02) inside the lookup.
+        const groups = await new SeriesGroupResolver().groupsForPanel(em, {
+          testRunId: RUN,
+          applicationDashboardId: 'not-a-uuid',
+          panelId: 20,
+        });
+        expect(groups).toEqual([]);
+        // Without the SAVEPOINT this is 25P02 "current transaction is aborted".
+        after = (await em.query('SELECT 1 AS ok'))[0].ok;
+      });
+      expect(after).toBe(1);
+    });
   });
 });
