@@ -11,6 +11,7 @@ import {
   splunkFieldSummary,
   splunkServerInfo,
   splunkTimechart,
+  timechartTimeRange,
   SplunkConnection,
   SplunkDiscoveredSource,
   SplunkError,
@@ -509,11 +510,9 @@ export class SplunkService {
     const webLink = (config: SplunkConfig | undefined, search: string): string | null => {
       if (!config || !start) return null;
       const base = (config.clientUrl || config.host).replace(/\/+$/, '');
-      const params = new URLSearchParams({
-        q: search,
-        earliest: String(Math.floor(start.getTime() / 1000)),
-        latest: String(Math.ceil(end.getTime() / 1000)),
-      });
+      // The same window the collector sends as earliest_time/latest_time.
+      const { earliestTime, latestTime } = timechartTimeRange({ from: start, to: end });
+      const params = new URLSearchParams({ q: search, earliest: earliestTime, latest: latestTime });
       return `${base}/en-US/app/${encodeURIComponent(config.splunkApp || 'search')}/search?${params}`;
     };
 
@@ -693,9 +692,6 @@ export class SplunkService {
     // could read anything the organization's token can.
     if (!/\$entities\b/.test(spl)) {
       throw new BadRequestException('A Splunk query must use $entities, so it only reads the sources mapped for this system');
-    }
-    if (/\b(earliest|latest)\s*=/i.test(spl)) {
-      throw new BadRequestException('Leave out earliest/latest: Perfana sets the time range from the test run');
     }
   }
 

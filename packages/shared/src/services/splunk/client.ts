@@ -127,12 +127,21 @@ export function scopeSplFilter(
 export const ALLOWED_SPL_COMMANDS = ['search', 'where', 'rex', 'eval', 'fields', 'rename', 'regex', 'spath', 'fillnull'] as const;
 
 /**
+ * Time modifiers a filter may not carry: Perfana sends the run window as earliest_time/latest_time,
+ * and an inline modifier would replace it. Matched outside quoted strings only, so a search for the
+ * literal text "earliest=" still works. Covers the index-time and legacy spellings too.
+ */
+const TIME_MODIFIER_RE = /(?:^|[^\w])_?(?:index_)?(?:earliest|latest)\s*=|\b(?:starttime|endtime|starttimeu|endtimeu)\s*=/i;
+
+/**
  * Validate a user filter. Returns an error message, or null when it is acceptable.
  * Quote-aware: `|`, `[` and backticks inside a double-quoted string (a rex pattern) are literal.
  */
 export function validateSplFilter(spl: string): string | null {
   const segments: string[] = [];
   let current = '';
+  // The filter with every quoted string removed, for the time-modifier check.
+  let unquoted = '';
   let inQuote = false;
   let inSingle = false;
   for (let i = 0; i < spl.length; i++) {
@@ -169,6 +178,7 @@ export function validateSplFilter(spl: string): string | null {
     } else if (ch === '"') {
       inQuote = true;
       current += ch;
+      unquoted += ' ';
     } else if (ch === "'") {
       inSingle = true;
       current += ch;
@@ -184,14 +194,19 @@ export function validateSplFilter(spl: string): string | null {
     } else if (ch === '|') {
       segments.push(current);
       current = '';
+      unquoted += ' ';
     } else {
       current += ch;
+      unquoted += ch;
     }
   }
   if (inQuote) return 'Unbalanced double quote';
   if (inSingle) return 'Unbalanced single quote';
   segments.push(current);
   if (!segments[0]!.trim()) return 'The filter must start with search terms, not a pipe';
+  if (TIME_MODIFIER_RE.test(unquoted)) {
+    return 'Leave out time modifiers (earliest, latest, starttime, endtime): Perfana sets the time range from the test run';
+  }
   for (const seg of segments.slice(1)) {
     const cmd = seg.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
     if (!(ALLOWED_SPL_COMMANDS as readonly string[]).includes(cmd)) {
@@ -467,7 +482,8 @@ export async function splunkExport(
     opts,
   );
   const { rows, stats } = parseExportStream(text);
-  const range = opts.earliestTime || opts.latestTime ? ` [earliest_time=${opts.earliestTime ?? ''} latest_time=${opts.latestTime ?? ''}]` : '';
+  const bounds = [opts.earliestTime && `earliest_time=${opts.earliestTime}`, opts.latestTime && `latest_time=${opts.latestTime}`].filter(Boolean);
+  const range = bounds.length ? ` [${bounds.join(' ')}]` : '';
   opts.onSearch?.(`${search}${range}`, stats, Date.now() - started);
   return rows;
 }

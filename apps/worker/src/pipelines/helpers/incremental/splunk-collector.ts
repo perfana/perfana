@@ -12,6 +12,7 @@ import type { Logger } from 'pino';
 import {
   scopeSplFilter,
   splunkTimechart,
+  timechartTimeRange,
   SplunkError,
   type SplunkConnection,
   type SplunkEntityMappingLike,
@@ -239,9 +240,12 @@ export class SplunkCollector {
             ),
           );
           if (points.length === 0) {
-            // The only trace of an empty search: say what was asked, so it can be pasted into Splunk.
+            // The only trace of an empty search: say what was asked, so it can be run in Splunk.
+            // The range is what was sent as earliest_time/latest_time (Splunk Web's time picker),
+            // never part of the search text.
+            const { earliestTime, latestTime } = timechartTimeRange({ from, to });
             this.logger.info(
-              `Splunk panel "${q.panel_title}" returned no data for ${from.toISOString()}..${to.toISOString()} (earliest=${Math.floor(from.getTime() / 1000)} latest=${Math.ceil(to.getTime() / 1000)}): ${filter}`,
+              `Splunk panel "${q.panel_title}" returned no data for ${from.toISOString()}..${to.toISOString()} (earliest_time=${earliestTime} latest_time=${latestTime}): ${filter}`,
             );
           }
           documents.push({

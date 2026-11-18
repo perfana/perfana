@@ -200,6 +200,14 @@ describe('SplunkService runSummary', () => {
     expect(url.searchParams.get('earliest')).toBe(String(run.startTime.getTime() / 1000));
     expect(url.searchParams.get('q')).toBe('search (index="app" host="be-*")');
     expect(new URL(summary.panels[0]!.link!).searchParams.get('q')).toContain('| timechart span=60s count by log_level');
+    // Value: protects=the per-panel Open-in-Splunk link carries the run window as time-picker params and not
+    // inline in q; fails_when=bounds reappear in q (doubled or conflicting with the picker) or the panel link loses
+    // its earliest/latest params; why_new=the case above pinned only the system link's earliest and the panel q's
+    // timechart tail; seam=none; no_claim=does not check the latest param's ceil on a fractional end time
+    const panelLink = new URL(summary.panels[0]!.link!);
+    expect(panelLink.searchParams.get('q')).not.toMatch(/earliest|latest/);
+    expect(panelLink.searchParams.get('earliest')).toBe(String(Math.floor(run.startTime.getTime() / 1000)));
+    expect(panelLink.searchParams.get('latest')).toBe(String(Math.ceil(run.endTime.getTime() / 1000)));
   });
 });
 

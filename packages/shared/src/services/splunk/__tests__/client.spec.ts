@@ -9,6 +9,7 @@ import {
   parseExportLines,
   splunkAuthHeader,
   splunkExport,
+  splunkFieldSummary,
   splunkTimechart,
   SplunkError,
   timechartRowsToPoints,
@@ -113,11 +114,52 @@ describe('splunkTimechart', () => {
   });
 });
 
+describe('splunkTimechart window precedence', () => {
+  // Value: protects=the collection window always comes from the run, whatever a caller passes in opts;
+  // fails_when=the spread in splunkTimechart is reversed so a stray earliestTime/latestTime replaces it;
+  // why_new=no test passed a range in opts; seam=none; no_claim=none beyond protects
+  it('keeps the run window when a caller passes its own earliestTime/latestTime', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(new Response(''));
+    await splunkTimechart(
+      { host: 'https://s:8089', apiToken: 't' },
+      { filter: 'index=web', from: new Date('2026-11-17T10:00:00Z'), to: new Date('2026-11-17T11:00:00Z'), bucketSeconds: 60 },
+      { fetchImpl, earliestTime: '-1h', latestTime: 'now' },
+    );
+    const body = new URLSearchParams(String(fetchImpl.mock.calls[0][1].body));
+    expect(body.get('earliest_time')).toBe('1794909600');
+    expect(body.get('latest_time')).toBe('1794913200');
+  });
+});
+
+describe('splunkFieldSummary', () => {
+  // Value: protects=field discovery searches the last hour via the earliest_time parameter; fails_when=the -1h bound
+  // goes back inline into the search text (the shape a real Splunk answered with no rows) or is dropped (unbounded
+  // scan); why_new=no test called splunkFieldSummary at all; seam=none; no_claim=does not check fieldsummary parsing
+  it('sends the last hour as earliest_time, not inline, and no latest_time', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(new Response(
+      '{"preview":false,"result":{"field":"log_level","distinct_count":"2","values":"[{\\"value\\":\\"ERROR\\"},{\\"value\\":\\"INFO\\"}]"}}\n'
+      + '{"preview":false,"result":{"field":"_raw","distinct_count":"9","values":"[]"}}\n',
+    ));
+    const fields = await splunkFieldSummary({ host: 'https://s:8089', apiToken: 't' }, 'index=web', { fetchImpl });
+    expect(fields).toEqual([{ field: 'log_level', distinctCount: 2, values: ['ERROR', 'INFO'] }]);
+    const body = new URLSearchParams(String(fetchImpl.mock.calls[0][1].body));
+    expect(body.get('earliest_time')).toBe('-1h');
+    expect(body.has('latest_time')).toBe(false);
+    expect(body.get('search')).toMatch(/^search index=web \| head 2000 \| fieldsummary/);
+    expect(body.get('search')).not.toMatch(/earliest|latest/);
+  });
+});
+
 describe('validateSplFilter', () => {
   it('accepts the starter panels, including a rex pattern with | and [ inside quotes', () => {
     expect(validateSplFilter('$entities log_level=ERROR')).toBeNull();
     expect(validateSplFilter('$entities "Exception" | rex "(?<exception>[A-Za-z0-9_.]+Exception|Error)"')).toBeNull();
     expect(validateSplFilter('$entities | eval x="a\\"|b" | where x!=""')).toBeNull();
+  });
+
+  it('allows the text of a time modifier inside a quoted string, and field names that only contain the word', () => {
+    expect(validateSplFilter('$entities "earliest=-1h"')).toBeNull();
+    expect(validateSplFilter('$entities my_earliest_value=3 latest_build=7')).toBeNull();
   });
 
   it.each([
@@ -126,6 +168,15 @@ describe('validateSplFilter', () => {
     ['| inputlookup users.csv', 'start with search terms'],
     ['index=x [search index=_audit | fields user]', 'Subsearches'],
     ['`some_macro` index=x', 'macros'],
+    // Value: protects=a filter cannot replace the run window with its own time modifier, checked on every send
+    // (API and worker), not only at save; fails_when=the check is dropped from validateSplFilter or misses a spelling;
+    // why_new=the API's save-time regex covered earliest/latest only, and nothing ran at send time; seam=none;
+    // no_claim=Splunk's own handling of a modifier after a pipe
+    ['$entities earliest=-1h', 'time modifiers'],
+    ['$entities | search latest=now', 'time modifiers'],
+    ['$entities _index_earliest=-1d', 'time modifiers'],
+    ['$entities starttime=11/18/2026:00:00:00', 'time modifiers'],
+    ['$entities endtimeu=1795007111', 'time modifiers'],
     ['index=x "unclosed', 'Unbalanced'],
     ['index=x \\" | outputlookup foo "', 'backslash'],
     ['$entities "x $testRunId | outputlookup y"', 'outside a quoted string'],
@@ -269,5 +320,25 @@ describe('parseExportStream preview handling', () => {
       fetchImpl, onSearch: (s, st) => seen.push(`${s} ${st.finalRows}`),
     });
     expect(seen).toEqual(['search index=x | timechart count 1']);
+  });
+
+  // Value: protects=the debug log shows the time range now that it is no longer part of the search text;
+  // fails_when=the range suffix is dropped from onSearch (a log reader can no longer tell which window ran);
+  // why_new=the existing onSearch case passes no range, so it pins only the no-range arm; seam=none;
+  // no_claim=does not check the wording the API/worker loggers wrap around it
+  it('appends the time range to the search reported to onSearch when one is sent', async () => {
+    const fetchImpl = (async () => new Response(line(false, 0, '3'))) as unknown as typeof fetch;
+    const seen: string[] = [];
+    await splunkExport({ host: 'https://s.example:8089', apiToken: 't' }, 'search index=x | timechart count', {
+      fetchImpl, earliestTime: '100', latestTime: '200', onSearch: (s) => seen.push(s),
+    });
+    // One bound only (the field summary's -1h): no empty "latest_time=" in the log.
+    await splunkExport({ host: 'https://s.example:8089', apiToken: 't' }, 'search index=x | timechart count', {
+      fetchImpl, earliestTime: '-1h', onSearch: (s) => seen.push(s),
+    });
+    expect(seen).toEqual([
+      'search index=x | timechart count [earliest_time=100 latest_time=200]',
+      'search index=x | timechart count [earliest_time=-1h]',
+    ]);
   });
 });
