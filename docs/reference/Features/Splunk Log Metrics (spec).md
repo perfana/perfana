@@ -355,8 +355,9 @@ the host only shows up once credentials are filled in.
 ## Troubleshooting empty panels
 
 With `LOG_LEVEL=debug` the worker logs every search it sends and what came back:
-`Splunk panel "<title>" search (<ms>ms, <n> lines, <n> final rows, <n> preview rows): <SPL>`.
-Paste the SPL into Splunk Web to compare. `0 lines` means Splunk returned nothing for that window;
+`Splunk panel "<title>" search (<ms>ms, <n> lines, <n> final rows, <n> preview rows): <SPL> [earliest_time=<epoch> latest_time=<epoch>]`.
+Paste the SPL into Splunk Web and set the bracketed range in the time picker to compare: since
+v0.2.97.80 the range is sent as parameters, not as part of the search text. `0 lines` means Splunk returned nothing for that window;
 `used last preview set` means the export sent no final rows (handled since v0.2.97.75). A panel
 whose search returns no points also logs its window and SPL at info level.
 

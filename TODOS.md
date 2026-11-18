@@ -299,6 +299,26 @@ scope; it ignores labels. A panel whose `$entities[label]` matches no mapping is
 points, the tick records a zero-width range, and the source sits in coverage at 0% (root CLAUDE.md
 #21 shape). Fix: give the predicate the label filter, or have the collector report "not applicable".
 
+### The earliest_time/latest_time fix is verified against the mock only (P1)
+
+v0.2.97.80 moved the run window out of the search text into the export endpoint's
+`earliest_time`/`latest_time` parameters, because one real Splunk returned no rows for inline
+`earliest=<epoch> latest=<epoch>` while Splunk Web showed data for the same window. Every check
+since ran against the perfana-demo mock, which reads both shapes. Confirm on the next live run of a
+system with Splunk panels (e.g. emc-bcm-els) that the worker's `returned no data` lines stop and
+`ds_metrics` gains rows for the Splunk dashboards; force-refetch runs collected empty before.
+Source discovery still bounds its `tstats` inline (`earliest=-Nh` in the tstats `where`), which
+the same Splunk answered; if that ever comes back empty, move it to `earliestTime` too.
+
+### A timechart export can run unbounded if a caller drops the range (P3)
+
+`splunkExport` sets `earliest_time`/`latest_time` only when given. `splunkTimechart` always passes
+them (spread last), but a future caller of `splunkExport` with a timechart search and no range would
+silently search the role's default window, often all time. An Invalid Date also reaches Splunk as
+`earliest_time=NaN` (a 400). Fix: have `timechartTimeRange` throw a `SplunkError` on a non-finite
+bound, and refuse a `| timechart` search in `splunkExport` without `earliestTime`. From the
+v0.2.97.80 adversarial review (findings 4 and 5).
+
 ### Splunk counts are per bucket, not per second (P3)
 
 `splunkBucketSeconds` is now the perf-test tick size from `planned_duration` (stable within a run),
