@@ -7,6 +7,7 @@ import {
   type SeriesGroupingPreset,
   type SeriesGroupingRuleSpec,
 } from '@perfana/shared/utils';
+import { getRequestEm } from '../../common/db/request-em';
 
 /**
  * Series grouping on the READ side of `ds_metrics`.
@@ -37,8 +38,12 @@ import {
  *   the one implementation shared with the worker and the web preview.
  * - Nothing here interpolates a name into SQL. Group names, member names and aggregations
  *   are bound parameters.
- * - It never throws. Grouping is an enhancement of a read that works without it, so a
- *   failure degrades to "nothing grouped" and logs.
+ * - It does not throw for a failed lookup. Grouping is an enhancement of a read that works
+ *   without it, so a failure degrades to "nothing grouped" and logs at ERROR. Inside the
+ *   request's RLS transaction (`DB_ENABLE_RLS_ROLE=true`) a failed statement would abort that
+ *   transaction (25P02) and fail the CALLER's next query instead, so lookups there run one at
+ *   a time, each under its own SAVEPOINT (`guarded`). The one case that throws is a failed
+ *   ROLLBACK TO: the transaction is dead then, and a fallback would only hide it.
  * - It has no RLS of its own: `ds_metrics` and `ds_metric_series_groups` carry none, so the
  *   CALLER must already have authorized the run.
  *
@@ -195,7 +200,7 @@ export class SeriesGroupResolver {
    *   they are read from `ds_metrics`.
    */
   async groupsForPanel(q: SeriesQueryable, ref: PanelRef, rawNames?: readonly string[]): Promise<SeriesGroup[]> {
-    try {
+    return this.guarded(q, 'reading', ref, [], async () => {
       if (!(await this.ensureTables(q))) return [];
       const grouping = await this.load(q, ref);
       if (grouping.isEmpty) return [];
@@ -208,11 +213,8 @@ export class SeriesGroupResolver {
         const rule = pickRule(grouping.rules, ref.panelId);
         return rule ? groupsFromRule(rule.spec, rawNames) : [];
       }
-      return await this.applyRulesToStoredNames(q, ref, grouping.rules);
-    } catch (error) {
-      this.logger.warn(`Series grouping unavailable, reading ungrouped: ${(error as Error).message}`);
-      return [];
-    }
+      return this.applyRulesToStoredNames(q, ref, grouping.rules);
+    });
   }
 
   /**
@@ -234,13 +236,10 @@ export class SeriesGroupResolver {
    * that list every panel (the series pickers). Pair with `groupsInRun` per panel.
    */
   async loadRun(q: SeriesQueryable, testRunId: string): Promise<RunSeriesGrouping> {
-    try {
+    return this.guarded(q, 'listing', { testRunId }, EMPTY_GROUPING, async () => {
       if (!(await this.ensureTables(q))) return EMPTY_GROUPING;
-      return await this.load(q, { testRunId });
-    } catch (error) {
-      this.logger.warn(`Series grouping unavailable, listing ungrouped: ${(error as Error).message}`);
-      return EMPTY_GROUPING;
-    }
+      return this.load(q, { testRunId });
+    });
   }
 
   /**
@@ -265,6 +264,81 @@ export class SeriesGroupResolver {
   }
 
   // ---------------------------------------------------------------------------------------
+
+  /** Distinguishes the savepoints of lookups that share one request transaction. */
+  private savepointSeq = 0;
+
+  /** The tail of each request transaction's lookup queue (see `guarded`). */
+  private readonly lookupQueues = new WeakMap<object, Promise<unknown>>();
+
+  /**
+   * Runs one lookup so that a failure degrades to `fallback` and leaves the caller's
+   * transaction usable.
+   *
+   * A SAVEPOINT is issued only when `q` IS the request transaction (`DB_ENABLE_RLS_ROLE=true`):
+   * outside one there is nothing to protect and a SAVEPOINT is illegal (25P01), and on any
+   * other connection it would protect nothing while failing every lookup.
+   *
+   * Lookups on one transaction run ONE AT A TIME. Two interleaved on one connection (the
+   * Comparisons section reads the current and the baseline run in a `Promise.all`) would nest
+   * their savepoints, and releasing the outer one destroys the inner one: the inner RELEASE
+   * then fails with 3B001 and aborts the transaction even though nothing else failed.
+   *
+   * If ROLLBACK TO itself fails the transaction is already dead, so this rethrows instead of
+   * returning a fallback the caller's next query would contradict with a 25P02.
+   *
+   * Logged at ERROR, not WARN: a missing table never gets here (`ensureTables` answers it), so
+   * this is a real query failure, and every grouped series silently degrades to raw pods
+   * because of it. The reference is JSON-encoded because the run id is a raw path parameter.
+   */
+  private async guarded<T>(
+    q: SeriesQueryable,
+    verb: 'reading' | 'listing',
+    ref: PanelRef,
+    fallback: T,
+    lookup: () => Promise<T>,
+  ): Promise<T> {
+    const em = getRequestEm();
+    const onRequestTxn = em !== null && (q === em || (q as { manager?: unknown }).manager === em);
+    if (!onRequestTxn) return this.attempt(q, null, verb, ref, fallback, lookup);
+
+    const run = (this.lookupQueues.get(em) ?? Promise.resolve()).then(() =>
+      this.attempt(q, `series_group_lookup_${++this.savepointSeq}`, verb, ref, fallback, lookup),
+    );
+    this.lookupQueues.set(em, run.catch(() => undefined));
+    return run;
+  }
+
+  private async attempt<T>(
+    q: SeriesQueryable,
+    savepoint: string | null,
+    verb: 'reading' | 'listing',
+    ref: PanelRef,
+    fallback: T,
+    lookup: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      if (savepoint) await q.query(`SAVEPOINT ${savepoint}`);
+      const result = await lookup();
+      if (savepoint) await q.query(`RELEASE SAVEPOINT ${savepoint}`);
+      return result;
+    } catch (error) {
+      const where = `${verb} ungrouped ${JSON.stringify(ref)}`;
+      if (savepoint) {
+        try {
+          await q.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        } catch (rollbackError) {
+          this.logger.error(
+            `Series grouping failed and could not roll back ${savepoint} (${where}): ` +
+              `${(error as Error).message}; rollback: ${(rollbackError as Error).message}`,
+          );
+          throw rollbackError;
+        }
+      }
+      this.logger.error(`Series grouping unavailable, ${where}: ${(error as Error).message}`);
+      return fallback;
+    }
+  }
 
   private async ensureTables(q: SeriesQueryable): Promise<boolean> {
     if (this.tablesPresent) return true;
@@ -305,8 +379,7 @@ export class SeriesGroupResolver {
               g.dashboard_label::text AS dashboard_label, g.panel_title::text AS panel_title,
               g.metric_name::text AS metric_name, g.group_name::text AS group_name,
               g.aggregations::text[] AS aggregations,
-              NULL::text AS preset, NULL::text AS pattern, NULL::text AS replacement,
-
+              NULL::text AS preset, NULL::text AS pattern, NULL::text AS replacement
          FROM ds_metric_series_groups g
         WHERE g.test_run_id = $1 AND ${membershipWhere}
        UNION ALL

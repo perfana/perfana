@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.76] - 2026-11-18
+
+### Fixed
+- **Grouped series appear in the series pickers again.** Since v0.2.97.44 the Compare, Graphs and Trends pickers offered a grouped panel's raw pod series (`pod: emc-66547f8465-68wd4`) instead of its grouped series (`pod: emc (avg)`, `(sum)`, `(max)`, `(count)`). The raw pods have no statistics, so the Compare card had nothing to compare them with. Anomaly detection was unaffected: the worker computes and stores the grouped series itself. The cause was a stray comma in the API's group lookup query, which Postgres rejected, and the lookup read the error as "nothing grouped". Charts and report sections that draw a group from its pods were affected the same way.
+- **A failed group lookup is now logged at ERROR and names the panel.** It used to log a WARN with no context, which is how this went unnoticed for weeks.
+- **With `DB_ENABLE_RLS_ROLE=true`, a failed group lookup no longer fails the whole request.** The failed statement used to abort the request's transaction, so the next query answered 500 with `current transaction is aborted`. Lookups in a request now run one at a time, each under its own savepoint, and fall back to ungrouped series as intended. This also covers the report's Comparisons section, which reads the current and baseline runs at the same time. Deploys with the setting off (the default) were not affected.
+
 ## [0.2.97.75] - 2026-11-18
 
 ### Fixed
