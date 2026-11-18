@@ -316,15 +316,16 @@ or ADAPT will flag every run.
   macros. It is quote-aware: inside double quotes `|`, `[` and backticks are literal; a
   single-quoted field name may not contain quotes, pipes, brackets, backticks, `$` or backslashes,
   so it cannot desynchronise the tokenizer and hide a pipe. Placeholders belong outside quotes.
-  It also refuses time modifiers in search segments (the leading terms and `| search`): `earliest`,
-  `latest`, `_index_earliest`/`_index_latest`, `starttime`/`endtime` (and the `u` forms), and the
-  deprecated `*ago` / `searchtimespan*` spellings (v0.2.97.79), because Perfana sends the run window
-  as `earliest_time`/`latest_time` and an inline modifier would replace it. Double-quoted text is a
-  literal and is skipped; single-quoted names are checked. `| eval endtime=...` is an ordinary field
-  and is allowed. The error names the modifier it found. The check runs at save and at preview on
-  the raw filter, and again on the expanded filter on every send (API preview and worker
-  collection); before v0.2.97.79 only the API's save check refused `earliest`/`latest`, anywhere in
-  the filter. It is a convenience, not the
+  With `timeModifiers: true` (the API's save and preview check) it also refuses time modifiers in
+  search segments (the leading terms and `| search`): `earliest`, `latest`,
+  `_index_earliest`/`_index_latest`, `starttime`/`endtime` (and the `u` forms), and the deprecated
+  `*ago` / `searchtimespan*` spellings (v0.2.97.79), naming the one it found. Double-quoted text is
+  a literal and is skipped; single-quoted names are checked; dotted or `$` names (`json.latest=`)
+  and `| eval endtime=...` are fields and are allowed. The send path (`buildTimechartSearch`,
+  `splunkFieldSummary`) runs the validator without that option: there the filter sits after
+  Perfana's own `<sources> | search`, where a modifier cannot widen the window, and refusing it
+  would stop a saved panel from collecting. Before v0.2.97.79 the save check refused only
+  `earliest`/`latest`, anywhere in the filter. It is a convenience, not the
   boundary; the Splunk role is.
 - No SPL reaches a URL; it goes in the POST body.
 - A failed connection answers with the network error code and a fixed hint only

@@ -127,20 +127,21 @@ export function scopeSplFilter(
 export const ALLOWED_SPL_COMMANDS = ['search', 'where', 'rex', 'eval', 'fields', 'rename', 'regex', 'spath', 'fillnull'] as const;
 
 /**
- * Time modifiers a filter may not carry: Perfana sends the run window as earliest_time/latest_time,
- * and an inline modifier would replace it. Checked only in search segments (the leading terms and
- * `| search`), where Splunk reads them as modifiers; `| eval endtime=...` is an ordinary field.
- * Double-quoted text is skipped, so a search for the literal text "earliest=" still works.
- * Covers the index-time and legacy spellings too.
+ * Time modifiers a filter may not carry: Perfana sends the run window as earliest_time/latest_time.
+ * Checked only when a filter is saved or previewed (`timeModifiers: true`), where the user's terms
+ * lead the search. At send time the filter sits after Perfana's own `<sources> | search`, where a
+ * modifier cannot widen the window, so a panel that already runs is never refused there.
+ * Only search segments (the leading terms and `| search`) count; `| eval endtime=...` is a field.
+ * Double-quoted text is skipped; a dotted or `$` name (`json.latest=`) is a field, not a modifier.
  */
 const TIME_MODIFIER_RE =
-  /(?:^|[^\w])_?(?:index_)?(?:earliest|latest)\s*=|\b(?:starttimeu?|endtimeu?|(?:start|end)?(?:days|hours|minutes|months)ago|searchtimespan(?:days|hours|minutes|months))\s*=/i;
+  /(?:^|[^\w.$])_?(?:index_)?(?:earliest|latest)\s*=|(?<![\w.$])(?:starttimeu?|endtimeu?|(?:start|end)?(?:days|hours|minutes|months)ago|searchtimespan(?:days|hours|minutes|months))\s*=/i;
 
 /**
  * Validate a user filter. Returns an error message, or null when it is acceptable.
  * Quote-aware: `|`, `[` and backticks inside a double-quoted string (a rex pattern) are literal.
  */
-export function validateSplFilter(spl: string): string | null {
+export function validateSplFilter(spl: string, opts: { timeModifiers?: boolean } = {}): string | null {
   const segments: string[] = [];
   let current = '';
   // Each segment with its double-quoted strings blanked, for the time-modifier check.
@@ -215,7 +216,7 @@ export function validateSplFilter(spl: string): string | null {
   unquotedSegments.push(unquoted);
   if (!segments[0]!.trim()) return 'The filter must start with search terms, not a pipe';
   const searchSegment = (i: number) => i === 0 || /^\s*search\b/i.test(segments[i]!);
-  for (let i = 0; i < unquotedSegments.length; i++) {
+  for (let i = 0; opts.timeModifiers && i < unquotedSegments.length; i++) {
     const m = searchSegment(i) ? TIME_MODIFIER_RE.exec(unquotedSegments[i]!) : null;
     if (m) {
       // Name the modifier the filter used: the regex accepts some 25 spellings.
@@ -562,7 +563,7 @@ export async function splunkFieldSummary(
   const rows = await splunkExport(
     conn,
     `search ${filter} | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
-    { ...opts, earliestTime: '-1h' },
+    { ...opts, earliestTime: '-1h', latestTime: undefined },
   );
   return rows
     .filter((r) => typeof r.field === 'string' && !String(r.field).startsWith('_'))

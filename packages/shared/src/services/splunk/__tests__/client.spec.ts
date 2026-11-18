@@ -114,19 +114,20 @@ describe('splunkTimechart', () => {
   });
 });
 
-describe('splunkTimechart send-time guard', () => {
-  // Value: protects=an expanded, scoped filter carrying a time modifier is refused before any request leaves,
-  // on the path the worker and the API preview both use; fails_when=buildTimechartSearch stops validating the
-  // expanded filter; why_new=the validator cases call validateSplFilter directly; seam=none; no_claim=none beyond protects
-  it('refuses a scoped filter with a time modifier and sends nothing', async () => {
-    const fetchImpl = jest.fn();
-    const filter = scopeSplFilter('$entities earliest=-30d', [{ indexName: 'a' }])!;
-    await expect(splunkTimechart(
+describe('splunkTimechart send path', () => {
+  // Value: protects=a panel already saved keeps collecting: the send path does not re-check time modifiers (the
+  // scoped filter sits after Perfana's own `| search`, where a modifier cannot widen the window); fails_when=the
+  // send path starts refusing them, so saved panels silently stop collecting; why_new=the validator cases call
+  // validateSplFilter directly; seam=none; no_claim=Splunk's handling of a modifier after a pipe
+  it('sends a saved filter that carries a field named like a modifier', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(new Response(''));
+    const filter = scopeSplFilter('$entities starttime=*', [{ indexName: 'a' }])!;
+    await splunkTimechart(
       { host: 'https://s:8089', apiToken: 't' },
       { filter, from: new Date('2026-11-17T10:00:00Z'), to: new Date('2026-11-17T11:00:00Z'), bucketSeconds: 60 },
       { fetchImpl },
-    )).rejects.toThrow('Leave out the time modifier "earliest"');
-    expect(fetchImpl).not.toHaveBeenCalled();
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -173,16 +174,32 @@ describe('validateSplFilter', () => {
     expect(validateSplFilter('$entities | eval x="a\\"|b" | where x!=""')).toBeNull();
   });
 
-  it('allows the text of a time modifier inside a quoted string, and field names that only contain the word', () => {
-    expect(validateSplFilter('$entities "earliest=-1h"')).toBeNull();
-    expect(validateSplFilter('$entities my_earliest_value=3 latest_build=7')).toBeNull();
+  // Value: protects=a filter saved or previewed with its own time range is refused, naming the modifier;
+  // fails_when=the timeModifiers check is dropped or misses a spelling; why_new=the API's old save-time regex
+  // covered earliest/latest only; seam=none; no_claim=Splunk's own handling of a modifier after a pipe
+  it.each([
+    ['$entities earliest=-1h', 'earliest'],
+    ['$entities | search latest=now', 'latest'],
+    ['$entities _index_earliest=-1d', '_index_earliest'],
+    ['$entities starttime=11/18/2026:00:00:00', 'starttime'],
+    ['$entities endtimeu=1795007111', 'endtimeu'],
+    ['$entities hoursago=48', 'hoursago'],
+    ["$entities | search 'a earliest=-1y'", 'earliest'],
+  ])('refuses the time modifier in %s when saving', (spl, name) => {
+    expect(validateSplFilter(spl, { timeModifiers: true })).toBe(
+      `Leave out the time modifier "${name}": Perfana sets the time range from the test run`,
+    );
+    // The send path does not re-check them.
+    expect(validateSplFilter(spl)).toBeNull();
   });
 
-  it('allows a field named like a modifier outside search segments', () => {
-    expect(validateSplFilter('$entities | eval endtime=_time+5 | where starttime=0 | eval earliest=1')).toBeNull();
-    expect(validateSplFilter('$entities hoursago=48')).toBe(
-      'Leave out the time modifier "hoursago": Perfana sets the time range from the test run',
-    );
+  it('allows quoted text, look-alike names, dotted fields and fields outside search segments', () => {
+    for (const spl of [
+      '$entities "earliest=-1h"',
+      '$entities my_earliest_value=3 latest_build=7',
+      '$entities json.latest=1 event.starttime=2',
+      '$entities | eval endtime=_time+5 | where starttime=0 | eval earliest=1',
+    ]) expect(validateSplFilter(spl, { timeModifiers: true })).toBeNull();
   });
 
   it.each([
@@ -191,17 +208,6 @@ describe('validateSplFilter', () => {
     ['| inputlookup users.csv', 'start with search terms'],
     ['index=x [search index=_audit | fields user]', 'Subsearches'],
     ['`some_macro` index=x', 'macros'],
-    // Value: protects=a filter cannot replace the run window with its own time modifier, checked on every send
-    // (API and worker), not only at save; fails_when=the check is dropped from validateSplFilter or misses a spelling;
-    // why_new=the API's save-time regex covered earliest/latest only, and nothing ran at send time; seam=none;
-    // no_claim=Splunk's own handling of a modifier after a pipe
-    ['$entities earliest=-1h', 'time modifier'],
-    ['$entities | search latest=now', 'time modifier'],
-    ['$entities _index_earliest=-1d', 'time modifier'],
-    ['$entities starttime=11/18/2026:00:00:00', 'time modifier'],
-    ['$entities endtimeu=1795007111', 'time modifier'],
-    ['$entities hoursago=48', 'time modifier'],
-    ["$entities | search 'a earliest=-1y'", 'time modifier'],
     ['index=x "unclosed', 'Unbalanced'],
     ['index=x \\" | outputlookup foo "', 'backslash'],
     ['$entities "x $testRunId | outputlookup y"', 'outside a quoted string'],

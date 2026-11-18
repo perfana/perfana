@@ -686,7 +686,8 @@ export class SplunkService {
     if (/\|\s*timechart\b/i.test(spl)) {
       throw new BadRequestException('Leave out "| timechart": Perfana adds it with the run window and bucket size');
     }
-    const problem = validateSplFilter(spl);
+    // Time modifiers are refused here, at save and preview, and not at send: see validateSplFilter.
+    const problem = validateSplFilter(spl, { timeModifiers: true });
     if (problem) throw new BadRequestException(problem);
     // $entities is what bounds a query to the sources mapped for the system; without it a query
     // could read anything the organization's token can.
