@@ -67,6 +67,77 @@ interface TemplateVariable {
   current?: { value?: string | string[] };
 }
 
+/** How an application dashboard stores "All" for a variable: the label, or Grafana's `$__all`. */
+const ALL_VALUE_SENTINELS = new Set(['All', '$__all']);
+
+/**
+ * What "All" substitutes as: the variable's own `allValue` if the author set one (Grafana
+ * inserts it raw), else `.*`. Grafana's frontend would substitute every option value, which
+ * the worker does not know; `.*` matches the same series for a regex-capable datasource.
+ */
+function allValueFor(templateVar: TemplateVariable | undefined): string {
+  return templateVar?.allValue || '.*';
+}
+
+const ZABBIX_DATASOURCE_TYPE = 'alexanderzobnin-zabbix-datasource';
+
+/** grafana-zabbix `utils.isRegex`: a filter written as `/pattern/flags`. */
+const ZABBIX_REGEX_FILTER = /^\/(.*)\/([gmi]*)$/m;
+
+/**
+ * A variable name as a literal inside a RegExp source. Application-dashboard variable names
+ * are free-form Perfana config, so a `(` in one would otherwise throw and abort the dashboard.
+ */
+function variableNamePattern(name: string): string {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** grafana-zabbix `utils.escapeRegex`. */
+function escapeZabbixRegex(value: string): string {
+  return value.replace(/[\\^$*+?.()|[\]{}/]/g, '\\$&');
+}
+
+/**
+ * A Zabbix query field the plugin runs through `replaceTemplateVars`: the `filter` of
+ * group/host/application/itemTag/item/proxy/trigger and tags, plus textFilter,
+ * itServiceFilter and slaFilter.
+ */
+function isZabbixFilterKey(key: string | undefined): boolean {
+  return key === 'filter' || (key?.endsWith('Filter') ?? false);
+}
+
+/**
+ * grafana-zabbix `utils.replaceTemplateVars`, which the plugin applies in the browser and
+ * /api/ds/query does not: each concrete value is regex-escaped, an "All" value goes in raw,
+ * and a filter that changed and is not already `/.../` is wrapped as `/^...$/`. Without it a
+ * Zabbix filter like `$Group` or `$Disk: Disk read rate` reaches the plugin as an exact name
+ * (`.*`, or `.*: Disk read rate`) and matches nothing.
+ */
+function substituteZabbixFilter(
+  filter: string,
+  queryVariables: Record<string, string>,
+  allVariableNames: ReadonlySet<string>
+): string {
+  let result = filter;
+  for (const [key, value] of Object.entries(queryVariables)) {
+    if (value) {
+      // Inserted raw: an "All" value, and a value an operator already wrote as a pattern (`.*`
+      // or `/.../`). Before this rule every value went in raw, so a regex typed into the
+      // application dashboard was the only way to make a Zabbix filter work; escaping it now
+      // would silently break those configs.
+      const raw = allVariableNames.has(key) || value === '.*' || ZABBIX_REGEX_FILTER.test(value);
+      const formatted = raw ? value : escapeZabbixRegex(value);
+      const name = variableNamePattern(key);
+      // A function replacer: an escaped value carries `$`, which a string replacement would
+      // read as a `$&`-style pattern.
+      result = result
+        .replace(new RegExp(`\\$${name}\\b`, 'g'), () => formatted)
+        .replace(new RegExp(`\\$\\{${name}\\}`, 'g'), () => formatted);
+    }
+  }
+  return result !== filter && !ZABBIX_REGEX_FILTER.test(result) ? `/^${result}$/` : result;
+}
+
 const logger = getLogger('panels-helpers');
 
 // Supported panel types - only these should be stored in the database
@@ -297,7 +368,7 @@ const RESERVED_QUERY_VARIABLES = new Set([
 ]);
 
 /** Grafana's "all values selected" sentinels. Never a datasource uid. */
-const ALL_SENTINELS = new Set(['All', '$__all', '.*']);
+const ALL_SENTINELS = new Set([...ALL_VALUE_SENTINELS, '.*']);
 
 /**
  * Concrete datasource uids for the dashboard's `type: 'datasource'` template variables,
@@ -404,7 +475,7 @@ export async function createPanelDocuments(
           continue;
         }
         for (const override of variable.values ?? []) {
-          // `All` becomes `.*` at substitution time, so neither is ever a uid to resolve.
+          // `All` resolves to the variable's allValue or `.*` at substitution time, never a uid.
           if (override && !ALL_SENTINELS.has(override) && !TEMPLATE_REF_RE.test(override)) {
             addUid(instanceId, override);
           }
@@ -525,12 +596,19 @@ export async function createPanelDocuments(
         .map(b => b.id);
 
       // Base template variable values from application dashboard variables
-      const baseQueryVariables = generateTemplateVariablesFromAppDashboard(
-        perfanaData.test_run,
-        systemUnderTestName,
-        appDashboard,
-        dashboardJson.dashboard.templating?.list || []
-      );
+      const templateVariables = dashboardJson.dashboard.templating?.list || [];
+      const { variables: baseQueryVariables, allVariableNames: baseAllVariableNames } =
+        generateTemplateVariablesFromAppDashboard(
+          perfanaData.test_run,
+          systemUnderTestName,
+          appDashboard,
+          templateVariables
+        );
+      const repeatTemplateVar = p.repeat
+        ? (templateVariables.find(tv => (tv as TemplateVariable)?.name === p.repeat) as
+            | TemplateVariable
+            | undefined)
+        : undefined;
 
       // Extract datasource type - handle both string and object datasource formats
       // (invariant across repeat expansion — depends only on the panel definition)
@@ -580,9 +658,16 @@ export async function createPanelDocuments(
 
       for (const repeatValue of expansionValues) {
         const queryVariables = { ...baseQueryVariables };
+        const allVariableNames = new Set(baseAllVariableNames);
         let panelTitle = p.title;
         if (repeatValue !== null && repeatVar) {
-          queryVariables[repeatVar] = repeatValue === 'All' ? '.*' : repeatValue;
+          if (ALL_VALUE_SENTINELS.has(repeatValue)) {
+            queryVariables[repeatVar] = allValueFor(repeatTemplateVar);
+            allVariableNames.add(repeatVar);
+          } else {
+            queryVariables[repeatVar] = repeatValue;
+            allVariableNames.delete(repeatVar);
+          }
           panelTitle = substituteVarInString(p.title, repeatVar, repeatValue);
         }
 
@@ -598,7 +683,13 @@ export async function createPanelDocuments(
         }
 
         // Create Grafana API request with variable substitution (per repeat value)
-        const requests = await createPanelRequests(panelForDoc, queryVariables, perfanaData.test_run, datasourceMap);
+        const requests = await createPanelRequests(
+          panelForDoc,
+          queryVariables,
+          allVariableNames,
+          perfanaData.test_run,
+          datasourceMap
+        );
 
         const panelDocument = {
           test_run_id: perfanaData.test_run_id,
@@ -635,8 +726,10 @@ function generateTemplateVariablesFromAppDashboard(
   systemUnderTestName: string,
   applicationDashboard: ApplicationDashboard,
   templateVariables: unknown[]
-): Record<string, string> {
+): { variables: Record<string, string>; allVariableNames: Set<string> } {
   const logger = getLogger('panels-helpers');
+  // Variables resolved to "All": a Zabbix filter inserts these raw rather than escaped.
+  const allVariableNames = new Set<string>();
 
   const queryVariables: Record<string, string> = {
     // Base test run variables
@@ -677,9 +770,11 @@ function generateTemplateVariablesFromAppDashboard(
         // Use the first value if multiple values exist
         let value = variable.values[0];
 
-        // Handle "All" as regex wildcard (matches Grafana behavior)
-        if (value === 'All') {
-          value = '.*';
+        // "All" in either spelling Grafana stores it; `$__all` would otherwise reach the
+        // datasource as a literal name and match nothing.
+        if (ALL_VALUE_SENTINELS.has(value)) {
+          value = allValueFor(templateVarMap.get(variable.name));
+          allVariableNames.add(variable.name);
         }
 
         queryVariables[variable.name] = value;
@@ -689,14 +784,11 @@ function generateTemplateVariablesFromAppDashboard(
         const templateVar = templateVarMap.get(variable.name);
 
         if (templateVar) {
-          // If template variable has includeAll, use its allValue
-          if (templateVar.includeAll && templateVar.allValue) {
-            queryVariables[variable.name] = templateVar.allValue;
-            logger.debug(`Variable ${variable.name} = ${templateVar.allValue} (from template allValue)`);
-          } else if (templateVar.includeAll) {
-            // Default to wildcard if includeAll is true but no allValue specified
-            queryVariables[variable.name] = '.*';
-            logger.debug(`Variable ${variable.name} = .* (default wildcard for includeAll)`);
+          if (templateVar.includeAll) {
+            const allValue = allValueFor(templateVar);
+            queryVariables[variable.name] = allValue;
+            allVariableNames.add(variable.name);
+            logger.debug(`Variable ${variable.name} = ${allValue} (includeAll)`);
           } else if (firstCurrentValue(templateVar.current?.value)) {
             // Use template's current value as fallback
             const currentValue = firstCurrentValue(templateVar.current?.value)!;
@@ -712,7 +804,7 @@ function generateTemplateVariablesFromAppDashboard(
     }
   }
 
-  return queryVariables;
+  return { variables: queryVariables, allVariableNames };
 }
 
 /**
@@ -772,6 +864,7 @@ function _generateTemplateVariables(
 async function createPanelRequests(
   panel: unknown,
   queryVariables: Record<string, string>,
+  allVariableNames: ReadonlySet<string>,
   testRun: TestRun,
   datasourceMap: Map<string, { id: number; uid: string; name: string; type: string }>
 ): Promise<Record<string, unknown>[]> {
@@ -786,8 +879,13 @@ async function createPanelRequests(
     const target = p.targets[targetIndex];
 
 
-    // Substitute variables in the target query
-    const substitutedTarget = substituteVariablesInTarget(target, queryVariables);
+    // Substitute variables in the target query. Zabbix filters follow the plugin's own rule,
+    // decided per target because a Mixed panel's targets each name their datasource.
+    const substitutedTarget = substituteVariablesInTarget(
+      target,
+      queryVariables,
+      isZabbixTarget(target, p, datasourceMap) ? allVariableNames : null
+    );
 
     // CRITICAL: Add datasourceId to query root level for Grafana API
     // The datasource info is in the target.datasource object but Grafana needs numeric datasourceId at root
@@ -852,7 +950,38 @@ async function createPanelRequests(
 /**
  * Substitute template variables in a Grafana target query
  */
-function substituteVariablesInTarget(target: unknown, queryVariables: Record<string, string>): Record<string, unknown> {
+/**
+ * Whether a target runs on the Zabbix datasource: its own datasource type, else the panel's.
+ * A datasource without a type (a Grafana 8 string, or a `{ uid }` ref) is looked up in the
+ * datasource map. ponytail: that map is empty on a Viewer token and keyed by uid, so a Grafana 8
+ * datasource *name* still reads as non-Zabbix; resolving names needs the Admin-only API.
+ */
+function isZabbixTarget(
+  target: GrafanaTargetJson,
+  panel: GrafanaPanelJson,
+  datasourceMap: Map<string, { type: string }>
+): boolean {
+  for (const ds of [target.datasource, panel.datasource]) {
+    const type =
+      typeof ds === 'string'
+        ? datasourceMap.get(ds)?.type
+        : (ds?.type ?? (ds?.uid ? datasourceMap.get(ds.uid)?.type : undefined));
+    if (type) {
+      return type === ZABBIX_DATASOURCE_TYPE;
+    }
+  }
+  return false;
+}
+
+/**
+ * `zabbixAllVariableNames` is non-null only for a Zabbix target: its filter fields then go
+ * through substituteZabbixFilter, with these variables inserted raw.
+ */
+function substituteVariablesInTarget(
+  target: unknown,
+  queryVariables: Record<string, string>,
+  zabbixAllVariableNames: ReadonlySet<string> | null = null
+): Record<string, unknown> {
   const substitutedTarget = structuredClone(target) as Record<string, unknown>;
 
   // For Prometheus queries, ensure proper interval/step settings
@@ -879,14 +1008,17 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
   delete substitutedTarget.maxDataPoints;
 
   // Substitute variables in all string fields recursively
-  function substituteInObject(obj: unknown): unknown {
+  function substituteInObject(obj: unknown, key?: string): unknown {
     if (typeof obj === 'string') {
+      if (zabbixAllVariableNames && isZabbixFilterKey(key)) {
+        return substituteZabbixFilter(obj, queryVariables, zabbixAllVariableNames);
+      }
       let result = obj;
       for (const [key, value] of Object.entries(queryVariables)) {
         if (value) {
           // Replace both $variable and ${variable} formats
-          const dollarVarRegex = new RegExp(`\\$${key}\\b`, 'g');
-          const bracesVarRegex = new RegExp(`\\$\\{${key}\\}`, 'g');
+          const dollarVarRegex = new RegExp(`\\$${variableNamePattern(key)}\\b`, 'g');
+          const bracesVarRegex = new RegExp(`\\$\\{${variableNamePattern(key)}\\}`, 'g');
 
           result = result.replace(dollarVarRegex, value);
           result = result.replace(bracesVarRegex, value);
@@ -895,11 +1027,11 @@ function substituteVariablesInTarget(target: unknown, queryVariables: Record<str
       }
       return result;
     } else if (Array.isArray(obj)) {
-      return obj.map(item => substituteInObject(item));
+      return obj.map(item => substituteInObject(item, key));
     } else if (obj && typeof obj === 'object') {
       const substituted: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(obj)) {
-        substituted[k] = substituteInObject(v);
+        substituted[k] = substituteInObject(v, k);
       }
       return substituted;
     }
