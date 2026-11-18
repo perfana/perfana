@@ -197,7 +197,11 @@ all learned from `uq_benchmarks_active_metric_target` (v0.2.96.15):
   `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` guarantees a 500 and loses the rows already written. Gate
   the savepoint on `getRequestEm() !== null` — it is only legal inside a transaction, and with
   `DB_ENABLE_RLS_ROLE=false` there is none. Worked example:
-  `BenchmarkMutationService.saveSkippingDuplicateTarget`.
+  `BenchmarkMutationService.saveSkippingDuplicateTarget`. Two refinements from
+  `SeriesGroupResolver.guarded` (v0.2.97.76), for code that is handed an arbitrary queryable: gate
+  on that queryable *being* the request EM, not merely on one existing; and serialise callers that
+  may run concurrently on one transaction (a `Promise.all` over two reads), because releasing an
+  outer savepoint destroys the inner one and the inner RELEASE then fails with 3B001.
 
 Do not confuse this with the repo's **idempotent-provisioning** 409, which returns the existing
 resource so a CI script can call the endpoint unconditionally. A constraint 409 is a hard refusal

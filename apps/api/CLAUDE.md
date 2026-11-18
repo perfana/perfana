@@ -1234,10 +1234,19 @@ group name back to its members. Five things about it:
    incoherence — the worker's membership DELETE was gated on it while `ds_metric_statistics` was
    rewritten regardless. If a future migration adds a column to these tables, probe it on BOTH
    tables and make every statement that NAMES it conditional, not just the SELECT.
-3. **It probes for its tables with `to_regclass` and never throws.** The API can start before
-   migration 1819 runs, and a statement on a missing table inside the request's RLS transaction
-   aborts it (25P02) and takes every later query of the request with it. Only a positive probe is
-   cached. Any lookup failure reads as "nothing grouped".
+3. **It probes for its tables with `to_regclass`, and a failed lookup degrades rather than
+   throws.** The API can start before migration 1819 runs, and a statement on a missing table
+   inside the request's RLS transaction aborts it (25P02) and takes every later query of the
+   request with it. Only a positive probe is cached. Any other lookup failure reads as "nothing
+   grouped" **and logs at ERROR** with the panel or run it was for (v0.2.97.76). It was a WARN with
+   no context before, which is how a trailing comma in the lookup SQL (`syntax error at or near
+   "FROM"`, from v0.2.97.44) made every series picker list raw pods for weeks unnoticed. Inside the
+   request transaction (`DB_ENABLE_RLS_ROLE=true`) each lookup runs under its own SAVEPOINT, **one
+   at a time per transaction**: the Comparisons section reads two runs in a `Promise.all`, and
+   interleaved savepoints fail RELEASE with 3B001. The one case that throws is a failed
+   `ROLLBACK TO`, because the transaction is dead then. The unit spec mocks its queryable and cannot
+   parse SQL; `src/test/rls/series-group-resolver-sql.spec.ts` runs every lookup against the
+   migrated schema, as `perfana_app`, in preflight's RLS step.
 4. **The ungrouped path keeps its SQL.** Every reader's statements were snapshotted before the
    change (`metrics.service.ungrouped-sql.spec.ts`, `report-data-fetcher.ungrouped-sql.spec.ts`);
    an ungrouped panel costs one extra indexed lookup against two small tables and nothing in
