@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.2.97.79] - 2026-11-18
 
+### Fixed
+- **Splunk collection now gets data.** Live and analysis collection asked Splunk for each panel with the time range written into the search text (`earliest=… latest=…`), and a real Splunk answered with no rows, so every tick logged `returned no data` and the run stored nothing, while *Open in Splunk* showed the data for the same window. Perfana now sends the range as the export endpoint's `earliest_time` / `latest_time` parameters, the way Splunk Web's time picker does. The panel preview's field list uses the same parameters. A run that was collected empty needs a force-refetch re-evaluate, while Splunk still holds its logs.
+
 ### Added
 - **Splunk in the user guide.** docs.perfana.io now has a *Connect Splunk* page under Integrations. It covers connecting Splunk for the organization (management URL on port 8089, token or username and password, Splunk Cloud prerequisites), choosing log sources and panels on a system's Splunk tab, where the log metrics show up, and troubleshooting.
 

@@ -83,13 +83,17 @@ Users write the filter. Perfana owns the time bounds and the bucketing, so a que
 accidentally read outside the run or at the wrong resolution. Perfana sends:
 
 ```
-search earliest=<from epoch> latest=<to epoch> <mapped sources> | search <spl, expanded>
-| timechart span=<bucket>s <aggregation> by <split_by> limit=<max_series> useother=t
+search=search <mapped sources> | search <spl, expanded>
+       | timechart span=<bucket>s <aggregation> by <split_by> limit=<max_series> useother=t
+earliest_time=<from epoch>  latest_time=<to epoch>
 ```
 
 The mapped sources run first as their own search and the user's filter is piped after it, so a
 filter can only narrow the search (`$entities OR index=_audit` still reads only mapped sources).
-The time bounds go first because after a piped command they would be read as its arguments.
+The time range travels as the export endpoint's `earliest_time` / `latest_time` form parameters,
+never inline in the search text (v0.2.97.79): against a real Splunk an inline
+`earliest=<epoch> latest=<epoch>` returned no rows for a window that the same search showed in
+Splunk Web, where the range sits in the time picker. The mock in `perfana-demo` reads both shapes.
 
 `limit` + `useother=t` caps the number of series (log levels and hosts are free text, the same
 problem as `requests_error.response_code` / `MAX_CODE_SERIES`). The `OTHER` series is kept, so

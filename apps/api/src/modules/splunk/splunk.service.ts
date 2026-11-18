@@ -527,7 +527,7 @@ export class SplunkService {
           // The same search the collector ran, as a Splunk Web timechart over the run.
           link = webLink(config, buildTimechartSearch({
             filter, from: start, to: end, bucketSeconds: 60, aggregation: q.aggregation, splitBy: q.splitBy, maxSeries: q.maxSeries,
-          }).replace(/ earliest=\d+ latest=\d+/, ''));
+          }));
         } catch {
           link = null;
         }

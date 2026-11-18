@@ -216,23 +216,32 @@ export interface TimechartQuery {
 const AGGREGATION_RE = /^(count|(dc|avg|sum|min|max|median|p\d{1,2}|perc\d{1,2})\([A-Za-z_][\w.]*\))$/;
 const FIELD_RE = /^[A-Za-z_][\w.]*$/;
 
-/** Perfana owns the time bounds and bucketing; the user only ever writes `filter`. */
+/**
+ * The run window as the export endpoint's `earliest_time` / `latest_time` parameters, epoch seconds.
+ * Sent as parameters, never inline in the search: an inline `earliest=<epoch> latest=<epoch>` in a
+ * REST export returned no rows from a real Splunk while the same search over the same window, with
+ * the range in the time picker ("Open in Splunk"), showed data.
+ */
+export function timechartTimeRange(q: Pick<TimechartQuery, 'from' | 'to'>): { earliestTime: string; latestTime: string } {
+  return {
+    earliestTime: String(Math.floor(q.from.getTime() / 1000)),
+    latestTime: String(Math.ceil(q.to.getTime() / 1000)),
+  };
+}
+
+/** Perfana owns the time bounds and bucketing; the user only ever writes `filter`. The bounds travel separately, see timechartTimeRange. */
 export function buildTimechartSearch(q: TimechartQuery): string {
   const aggregation = q.aggregation?.trim() || 'count';
   if (!AGGREGATION_RE.test(aggregation)) throw new SplunkError(`Unsupported aggregation: ${aggregation}`);
   if (q.splitBy && !FIELD_RE.test(q.splitBy)) throw new SplunkError(`Invalid split-by field: ${q.splitBy}`);
   const span = Math.max(1, Math.round(q.bucketSeconds));
   const limit = Math.max(1, Math.min(100, q.maxSeries ?? 20));
-  const earliest = Math.floor(q.from.getTime() / 1000);
-  const latest = Math.ceil(q.to.getTime() / 1000);
   const by = q.splitBy ? ` by ${q.splitBy} limit=${limit} useother=t` : '';
   const filter = q.filter.trim().replace(/^search\s+/i, '');
   // Validate what is actually sent, after expansion — not only what was saved.
   const problem = validateSplFilter(filter);
   if (problem) throw new SplunkError(`Refusing to run the search: ${problem}`);
-  // The bounds go FIRST: after a filter that pipes (| rex ...) they would be read as the last
-  // command's arguments instead of bounding the search.
-  return `search earliest=${earliest} latest=${latest} ${filter} | timechart span=${span}s ${aggregation}${by}`;
+  return `search ${filter} | timechart span=${span}s ${aggregation}${by}`;
 }
 
 export interface TimechartPoint {
@@ -325,6 +334,9 @@ export interface SplunkRequestOptions {
   fetchImpl?: typeof fetch;
   /** undici dispatcher from the org's proxy resolver, when the config has use_proxy. */
   dispatcher?: unknown;
+  /** Search time range, as the export endpoint's earliest_time / latest_time (epoch seconds or relative, e.g. -1h). */
+  earliestTime?: string;
+  latestTime?: string;
   /** Called after each export with the exact search sent and what came back, for debug logs. */
   onSearch?: (search: string, stats: ExportStats, ms: number) => void;
 }
@@ -445,6 +457,8 @@ export async function splunkExport(
 ): Promise<Array<Record<string, unknown>>> {
   const app = encodeURIComponent(conn.splunkApp?.trim() || 'search');
   const body = new URLSearchParams({ search, output_mode: 'json' });
+  if (opts.earliestTime) body.set('earliest_time', opts.earliestTime);
+  if (opts.latestTime) body.set('latest_time', opts.latestTime);
   const started = Date.now();
   const text = await request(
     conn,
@@ -453,7 +467,8 @@ export async function splunkExport(
     opts,
   );
   const { rows, stats } = parseExportStream(text);
-  opts.onSearch?.(search, stats, Date.now() - started);
+  const range = opts.earliestTime || opts.latestTime ? ` [earliest_time=${opts.earliestTime ?? ''} latest_time=${opts.latestTime ?? ''}]` : '';
+  opts.onSearch?.(`${search}${range}`, stats, Date.now() - started);
   return rows;
 }
 
@@ -462,7 +477,7 @@ export async function splunkTimechart(
   q: TimechartQuery,
   opts: SplunkRequestOptions = {},
 ): Promise<TimechartPoint[]> {
-  return timechartRowsToPoints(await splunkExport(conn, buildTimechartSearch(q), opts));
+  return timechartRowsToPoints(await splunkExport(conn, buildTimechartSearch(q), { ...opts, ...timechartTimeRange(q) }));
 }
 
 export interface SplunkServerInfo {
@@ -514,8 +529,8 @@ export async function splunkFieldSummary(
   if (problem) throw new SplunkError(`Refusing to run the search: ${problem}`);
   const rows = await splunkExport(
     conn,
-    `search earliest=-1h ${filter} | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
-    opts,
+    `search ${filter} | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
+    { ...opts, earliestTime: '-1h' },
   );
   return rows
     .filter((r) => typeof r.field === 'string' && !String(r.field).startsWith('_'))

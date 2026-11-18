@@ -9,6 +9,7 @@ import {
   parseExportLines,
   splunkAuthHeader,
   splunkExport,
+  splunkTimechart,
   SplunkError,
   timechartRowsToPoints,
 } from '../client';
@@ -71,9 +72,9 @@ describe('scopeSplFilter', () => {
 describe('buildTimechartSearch', () => {
   const base = { filter: 'index=web', from: new Date('2026-11-17T10:00:00Z'), to: new Date('2026-11-17T11:00:00.5Z'), bucketSeconds: 5 };
 
-  it('adds the run window and the bucketing, capping series with OTHER', () => {
+  it('adds the bucketing, capping series with OTHER, and keeps the run window OUT of the search text', () => {
     expect(buildTimechartSearch({ ...base, splitBy: 'log_level', maxSeries: 20 })).toBe(
-      'search earliest=1794909600 latest=1794913201 index=web | timechart span=5s count by log_level limit=20 useother=t',
+      'search index=web | timechart span=5s count by log_level limit=20 useother=t',
     );
   });
 
@@ -87,10 +88,28 @@ describe('buildTimechartSearch', () => {
     expect(() => buildTimechartSearch({ ...base, filter: 'index=x | outputlookup y' })).toThrow('Refusing');
   });
 
-  it('puts the time bounds before a piped filter, not into its last command', () => {
+  it('keeps a piped filter intact', () => {
     expect(buildTimechartSearch({ ...base, filter: '(index="x") | search "Exception" | rex "(?<e>\\w+)"' })).toMatch(
-      /^search earliest=\d+ latest=\d+ \(index="x"\) \| search "Exception" \| rex/,
+      /^search \(index="x"\) \| search "Exception" \| rex/,
     );
+  });
+});
+
+describe('splunkTimechart', () => {
+  // An inline earliest=<epoch> latest=<epoch> returned nothing from a real Splunk while the same
+  // search with the range in the time picker showed data; the range must travel as parameters.
+  it('sends the run window as earliest_time / latest_time, not inline', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(new Response('{"preview":false,"result":{"_time":"2026-11-17T10:00:00Z","ERROR":"3"}}\n'));
+    const points = await splunkTimechart(
+      { host: 'https://s:8089', apiToken: 't' },
+      { filter: 'index=web', from: new Date('2026-11-17T10:00:00Z'), to: new Date('2026-11-17T11:00:00.5Z'), bucketSeconds: 60, splitBy: 'log_level' },
+      { fetchImpl },
+    );
+    expect(points).toEqual([{ time: new Date('2026-11-17T10:00:00Z'), series: 'ERROR', value: 3 }]);
+    const body = new URLSearchParams(String(fetchImpl.mock.calls[0][1].body));
+    expect(body.get('earliest_time')).toBe('1794909600');
+    expect(body.get('latest_time')).toBe('1794913201');
+    expect(body.get('search')).not.toMatch(/earliest|latest/);
   });
 });
 
