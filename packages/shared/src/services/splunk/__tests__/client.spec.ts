@@ -125,7 +125,7 @@ describe('splunkTimechart send-time guard', () => {
       { host: 'https://s:8089', apiToken: 't' },
       { filter, from: new Date('2026-11-17T10:00:00Z'), to: new Date('2026-11-17T11:00:00Z'), bucketSeconds: 60 },
       { fetchImpl },
-    )).rejects.toThrow('time modifiers');
+    )).rejects.toThrow('Leave out the time modifier "earliest"');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
@@ -179,7 +179,10 @@ describe('validateSplFilter', () => {
   });
 
   it('allows a field named like a modifier outside search segments', () => {
-    expect(validateSplFilter('$entities | eval endtime=_time+5 | where starttime>0')).toBeNull();
+    expect(validateSplFilter('$entities | eval endtime=_time+5 | where starttime=0 | eval earliest=1')).toBeNull();
+    expect(validateSplFilter('$entities hoursago=48')).toBe(
+      'Leave out the time modifier "hoursago": Perfana sets the time range from the test run',
+    );
   });
 
   it.each([
@@ -192,13 +195,13 @@ describe('validateSplFilter', () => {
     // (API and worker), not only at save; fails_when=the check is dropped from validateSplFilter or misses a spelling;
     // why_new=the API's save-time regex covered earliest/latest only, and nothing ran at send time; seam=none;
     // no_claim=Splunk's own handling of a modifier after a pipe
-    ['$entities earliest=-1h', 'time modifiers'],
-    ['$entities | search latest=now', 'time modifiers'],
-    ['$entities _index_earliest=-1d', 'time modifiers'],
-    ['$entities starttime=11/18/2026:00:00:00', 'time modifiers'],
-    ['$entities endtimeu=1795007111', 'time modifiers'],
-    ['$entities hoursago=48', 'time modifiers'],
-    ["$entities | search 'a earliest=-1y'", 'time modifiers'],
+    ['$entities earliest=-1h', 'time modifier'],
+    ['$entities | search latest=now', 'time modifier'],
+    ['$entities _index_earliest=-1d', 'time modifier'],
+    ['$entities starttime=11/18/2026:00:00:00', 'time modifier'],
+    ['$entities endtimeu=1795007111', 'time modifier'],
+    ['$entities hoursago=48', 'time modifier'],
+    ["$entities | search 'a earliest=-1y'", 'time modifier'],
     ['index=x "unclosed', 'Unbalanced'],
     ['index=x \\" | outputlookup foo "', 'backslash'],
     ['$entities "x $testRunId | outputlookup y"', 'outside a quoted string'],

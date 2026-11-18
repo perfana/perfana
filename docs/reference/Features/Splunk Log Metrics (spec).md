@@ -321,9 +321,10 @@ or ADAPT will flag every run.
   deprecated `*ago` / `searchtimespan*` spellings (v0.2.97.79), because Perfana sends the run window
   as `earliest_time`/`latest_time` and an inline modifier would replace it. Double-quoted text is a
   literal and is skipped; single-quoted names are checked. `| eval endtime=...` is an ordinary field
-  and is allowed. The check runs at save, at preview and again on every send, in the API and the
-  worker; before v0.2.97.79 only the API's save check refused `earliest`/`latest`.
-  The check runs again on the expanded search before it is sent. It is a convenience, not the
+  and is allowed. The error names the modifier it found. The check runs at save and at preview on
+  the raw filter, and again on the expanded filter on every send (API preview and worker
+  collection); before v0.2.97.79 only the API's save check refused `earliest`/`latest`, anywhere in
+  the filter. It is a convenience, not the
   boundary; the Splunk role is.
 - No SPL reaches a URL; it goes in the POST body.
 - A failed connection answers with the network error code and a fixed hint only

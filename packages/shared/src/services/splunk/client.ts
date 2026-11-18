@@ -215,8 +215,13 @@ export function validateSplFilter(spl: string): string | null {
   unquotedSegments.push(unquoted);
   if (!segments[0]!.trim()) return 'The filter must start with search terms, not a pipe';
   const searchSegment = (i: number) => i === 0 || /^\s*search\b/i.test(segments[i]!);
-  if (unquotedSegments.some((seg, i) => searchSegment(i) && TIME_MODIFIER_RE.test(seg))) {
-    return 'Leave out time modifiers (earliest, latest, starttime, endtime): Perfana sets the time range from the test run';
+  for (let i = 0; i < unquotedSegments.length; i++) {
+    const m = searchSegment(i) ? TIME_MODIFIER_RE.exec(unquotedSegments[i]!) : null;
+    if (m) {
+      // Name the modifier the filter used: the regex accepts some 25 spellings.
+      const name = m[0].replace(/^[^\w]/, '').replace(/\s*=$/, '');
+      return `Leave out the time modifier "${name}": Perfana sets the time range from the test run`;
+    }
   }
   for (const seg of segments.slice(1)) {
     const cmd = seg.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
