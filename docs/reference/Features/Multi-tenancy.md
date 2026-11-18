@@ -91,7 +91,7 @@ That organization is resolved by reading the `api_keys` row on the **plain poole
 
 Performance profiles are organization-scoped:
 - Profiles belong to an organization
-- Profile-linked dashboards and benchmarks inherit org scope
+- Profile-linked dashboards, benchmarks and series grouping rules inherit org scope (a profile series grouping rule is stamped with its profile's organization, and the workload rules grafana-sync provisions from it are pinned to that organization too)
 - Cross-org profile sharing not supported
 
 ## Related

@@ -1364,11 +1364,11 @@ was compiled into `dist`.
 
 ### A profile series grouping rule is provisioned per workload and followed while unedited
 
-`/profiles/:id/dashboards/:dashboardId/grouping-rules` (v0.2.97.75, `profile-series-grouping.*` in
+`/profiles/:id/dashboards/:dashboardId/grouping-rules` (v0.2.97.77, `profile-series-grouping.*` in
 `modules/profiles/`) stores rules on a profile dashboard in `profile_series_grouping_rules`
 (migration 1826). grafana-sync's `GroupingRuleProcessorService` writes them into
 `series_grouping_rules` per application dashboard built from the template (`template_dashboard_uid`,
-the same lookup profile SLOs use) and per run workload. Five things to keep:
+the same lookup profile SLOs use) and per run workload. Seven things to keep:
 
 1. **Ownership is `updated_by IS NULL`**, the profile-SLO rule. Provisioned rows are written with
    `created_by = 'system:profile'` and no `updated_by`; every save through `/series-grouping-rules`
@@ -1389,7 +1389,6 @@ the same lookup profile SLOs use) and per run workload. Five things to keep:
 5. **Both write paths pin the organization**, even though grafana-sync already only matches a
    profile inside its own organization: `profile_rule_id` is not trustworthy on its own once a SUT
    import has carried it across environments.
-
 6. **grafana-sync writes the rule's fields from the table, never from its pass-start copy, and the API
    deletes rules before their copies.** The upsert is `INSERT ... SELECT ... FROM
    profile_series_grouping_rules r JOIN profile_grafana_dashboards d ... WHERE r.id = $5 AND r.enabled

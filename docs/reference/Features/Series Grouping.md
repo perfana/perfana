@@ -101,14 +101,14 @@ is checked by the same ReDoS guard the worker uses, and the dialog refuses an un
 - **System configuration → Grafana dashboards → Edit.** A *Series grouping* section lists the
   dashboard's rules for the selected workload, with add, edit, enable/disable and delete. There is
   no run here, so the preview uses the workload's most recent completed run.
-- **Settings → Profiles → a profile → Dashboards → Edit** (v0.2.97.75). A *Series grouping* section
+- **Settings → Profiles → a profile → Dashboards → Edit** (v0.2.97.77). A *Series grouping* section
   holds rules on a profile dashboard. grafana-sync's auto-config writes each one as a workload rule
   (`origin = 'profile'`, `profile_rule_id` set) on every application dashboard built from that
   profile dashboard, for the workload of each run the profile matches. A profile-rule edit reaches
   every such rule nobody has saved since (`updated_by IS NULL`), a delete removes them, and an
   edited one is left alone and labelled *From profile (edited)* on the system page. An empty slot is
   filled; a slot held by a hand-made rule, or by another profile rule, is never taken over. No
-  preview here: there is no run to preview against. Four consequences worth knowing:
+  preview here: there is no run to preview against. Five consequences worth knowing:
   - **Deleting a provisioned rule on the system page does not opt the workload out**: the slot is
     empty again, and the profile's next matching run fills it. Disable the rule there instead (that
     is a save, so the rule detaches and stays disabled), or delete it on the profile.
@@ -165,14 +165,18 @@ saved graph presets and reports holding a group name draw it by combining its me
 Reading and previewing follow the system's organization like any other resource. Creating, editing
 or deleting a rule needs the SLO capability (`benchmark:manage`, org admins and members), because a
 rule changes ADAPT verdicts the way an SLO does. Recalculating needs `test-run:update` on the run.
-Every write is audited.
+A rule on a profile dashboard follows the profile instead: any member of the profile's
+organization can read it, and creating, editing or deleting it needs org-admin there, like every
+other profile write. Every write is audited.
 
 ## For developers
 
 - Worker: "Series grouping happens at the statistics layer, in its own INSERT" in
   `apps/worker/CLAUDE.md`.
 - API: "A series group is not a `ds_metrics` series, so every raw reader expands it" and "Series
-  grouping rules: who may write them, and what apply does" in `apps/api/CLAUDE.md`.
+  grouping rules: who may write them, and what apply does" in `apps/api/CLAUDE.md`; profile rules in
+  "A profile series grouping rule is provisioned per workload and followed while unedited" there.
+- grafana-sync: `GroupingRuleProcessorService` in [[Grafana Sync Overview]].
 - Web: "Series grouping in the web" in `apps/web/CLAUDE.md`.
 - Routes: `/series-grouping-rules` (CRUD, `preview`, `apply`),
   `/profiles/:id/dashboards/:dashboardId/grouping-rules` (CRUD),

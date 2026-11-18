@@ -1001,7 +1001,14 @@ three web surfaces: suggestions and a stale notice on the anomaly card
 (`anomaly-detection/components/SeriesGroupingNotices.tsx`), a **Series grouping** section in a
 dashboard's settings (`systems/[id]/config/components/SeriesGroupingRulesSection.tsx`), and the
 `N pods` badge plus **show pods** switch in the series picker. All of them open one dialog,
-`components/series-grouping/SeriesGroupingDialog.tsx`. Seven things are easy to undo:
+`components/series-grouping/SeriesGroupingDialog.tsx`. A fourth surface, the **Series grouping**
+section of a profile dashboard's edit dialog (v0.2.97.77,
+`components/series-grouping/ProfileSeriesGroupingSection.tsx`), does **not** open that dialog: it
+has its own form with no preview, because a profile has no run to preview against, and it only
+validates the rule with `compileSeriesGroupingRule`. Its panel list comes from
+`fetchGrafanaDashboardByUid` scoped by the template's instance (root #43). The system page's section
+labels a provisioned rule *From profile* / *From profile (edited)*, keyed on `origin` and
+`updatedBy`. Seven things are easy to undo:
 
 1. **The picker learns a panel's groups from `/ds-metrics/distinct-series`, not from
    `/ds-metrics/available`.** The plan said `available`, and that would have shipped a badge that
