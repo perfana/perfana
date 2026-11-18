@@ -33,6 +33,9 @@
       "apps/worker/src/test/unit/pipelines/helpers/incremental/metric-processor-upsert.test.ts",
       "apps/worker/src/test/unit/pipelines/helpers/ds-metrics-columns.test.ts"
     ],
+    "apps/worker/src/pipelines/helpers/incremental/splunk-collector.ts": [
+      "apps/worker/src/test/unit/pipelines/helpers/incremental/splunk-collector.test.ts"
+    ],
     "apps/worker/src/pipelines/helpers/series-grouping-plan.ts": [
       "apps/worker/src/test/unit/pipelines/statistics-series-grouping.test.ts"
     ],
