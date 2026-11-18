@@ -229,9 +229,21 @@ export class SplunkCollector {
             splunkTimechart(
               conn,
               { filter, from, to, bucketSeconds, aggregation: q.aggregation, splitBy: q.split_by, maxSeries: q.max_series },
-              { dispatcher },
+              {
+                dispatcher,
+                // String interpolation only: pino drops a second-argument object.
+                onSearch: (search, st, ms) => this.logger.debug(
+                  `Splunk panel "${q.panel_title}" search (${ms}ms, ${st.lines} lines, ${st.finalRows} final rows, ${st.previewRows} preview rows${st.usedPreview ? ', used last preview set' : ''}): ${search}`,
+                ),
+              },
             ),
           );
+          if (points.length === 0) {
+            // The only trace of an empty search: say what was asked, so it can be pasted into Splunk.
+            this.logger.info(
+              `Splunk panel "${q.panel_title}" returned no data for ${from.toISOString()}..${to.toISOString()} (earliest=${Math.floor(from.getTime() / 1000)} latest=${Math.ceil(to.getTime() / 1000)}): ${filter}`,
+            );
+          }
           documents.push({
             testRunId,
             applicationDashboardId: q.application_dashboard_id,

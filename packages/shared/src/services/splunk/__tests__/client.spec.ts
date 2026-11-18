@@ -223,3 +223,32 @@ describe('describeFetchError', () => {
     expect(describeFetchError(err)).toMatch(/^SELF_SIGNED_CERT_IN_CHAIN\. .*NODE_EXTRA_CA_CERTS/);
   });
 });
+
+describe('parseExportStream preview handling', () => {
+  const { parseExportStream, splunkExport } = jest.requireActual('../client') as typeof import('../client');
+  const line = (preview: boolean, offset: number, count: string) =>
+    JSON.stringify({ preview, offset, result: { _time: `2026-11-18T09:1${offset}:00.000+01:00`, count } });
+
+  it('uses the final rows and ignores interim previews', () => {
+    const body = [line(true, 0, '1'), line(false, 0, '5'), line(false, 1, '6')].join('\n');
+    const { rows, stats } = parseExportStream(body);
+    expect(rows.map((r) => r.count)).toEqual(['5', '6']);
+    expect(stats).toMatchObject({ finalRows: 2, previewRows: 1, usedPreview: false });
+  });
+
+  it('falls back to the LAST preview set when Splunk sends no final row', () => {
+    const body = [line(true, 0, '1'), line(true, 0, '4'), line(true, 1, '7')].join('\n');
+    const { rows, stats } = parseExportStream(body);
+    expect(rows.map((r) => r.count)).toEqual(['4', '7']);
+    expect(stats.usedPreview).toBe(true);
+  });
+
+  it('reports the exact search sent to onSearch', async () => {
+    const fetchImpl = (async () => new Response(line(false, 0, '3'))) as unknown as typeof fetch;
+    const seen: string[] = [];
+    await splunkExport({ host: 'https://s.example:8089', apiToken: 't' }, 'search index=x | timechart count', {
+      fetchImpl, onSearch: (s, st) => seen.push(`${s} ${st.finalRows}`),
+    });
+    expect(seen).toEqual(['search index=x | timechart count 1']);
+  });
+});

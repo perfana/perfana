@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.75] - 2026-11-18
+
+### Fixed
+- **A run collected live is re-read from Splunk at analysis.** Splunk indexes events minutes late, and the analysis of a run whose Splunk data was collected live used to skip Splunk entirely, so anything that arrived after the live ticks' 5-minute lookback was never collected. The panels read empty while the same search in Splunk Web showed events. Analysis now runs one whole-run search per panel and overwrites the live buckets with complete counts. It does this only for a run that ended in the last 24 hours, because an older run's chunks may be compressed. Recover an older run with a force re-fetch.
+- **A Splunk export whose answer is marked preview is no longer read as no data.** A transforming search streams interim preview result sets, and the parser kept only rows marked final. When no final row arrives, it now uses the last preview set instead of dropping everything.
+
+### Added
+- **Every Splunk search is logged at debug level**, with the exact SPL sent and what came back (lines, final rows, preview rows, duration). This covers both the worker's collection and the API's panel preview. Set `LOG_LEVEL=debug` on the worker to see it. A panel whose search returns no points also logs its window and search at info level.
+
 ## [0.2.97.74] - 2026-11-17
 
 ### Fixed

@@ -241,15 +241,27 @@ export interface TimechartPoint {
   value: number;
 }
 
+export interface ExportStats {
+  lines: number;
+  finalRows: number;
+  previewRows: number;
+  /** True when Splunk sent no final (preview:false) row and the last preview set was used. */
+  usedPreview: boolean;
+}
+
 /**
  * Parse an export stream body (output_mode=json: one JSON object per line). Throws SplunkError on
  * a FATAL/ERROR message line — a failed search must never read as "collected, 0 points".
  */
-export function parseExportLines(body: string): Array<Record<string, unknown>> {
-  const rows: Array<Record<string, unknown>> = [];
+export function parseExportStream(body: string): { rows: Array<Record<string, unknown>>; stats: ExportStats } {
+  const finals: Array<Record<string, unknown>> = [];
+  let previewSet: Array<Record<string, unknown>> = [];
+  let lines = 0;
+  let previewRows = 0;
   for (const raw of body.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
+    lines++;
     let obj: Record<string, unknown>;
     try {
       obj = JSON.parse(line) as Record<string, unknown>;
@@ -260,12 +272,29 @@ export function parseExportLines(body: string): Array<Record<string, unknown>> {
     const messages = obj.messages as Array<{ type?: string; text?: string }> | undefined;
     const fatal = messages?.find((m) => m.type === 'FATAL' || m.type === 'ERROR');
     if (fatal) throw toSearchError(fatal.text ?? 'Splunk search failed');
-    // A transforming search can stream interim preview result sets before the final one; only the
-    // final rows count, or totals double up.
-    if (obj.preview === true) continue;
-    if (obj.result && typeof obj.result === 'object') rows.push(obj.result as Record<string, unknown>);
+    const result = obj.result && typeof obj.result === 'object' ? (obj.result as Record<string, unknown>) : null;
+    if (!result) continue;
+    if (obj.preview === true) {
+      // A transforming search streams interim result sets, each restarting at offset 0; only one
+      // set may count, or totals double up.
+      previewRows++;
+      if (obj.offset === 0 || obj.offset === '0') previewSet = [];
+      previewSet.push(result);
+    } else {
+      finals.push(result);
+    }
   }
-  return rows;
+  // Some Splunk versions mark every row of a reporting search's export as preview, the final set
+  // included. Dropping all of them read as "no data" with no error; the last set is the answer.
+  const usedPreview = finals.length === 0 && previewSet.length > 0;
+  return {
+    rows: usedPreview ? previewSet : finals,
+    stats: { lines, finalRows: finals.length, previewRows, usedPreview },
+  };
+}
+
+export function parseExportLines(body: string): Array<Record<string, unknown>> {
+  return parseExportStream(body).rows;
 }
 
 /** Timechart rows → points. Every non-underscore key is a series; empty/NaN cells are skipped, 0 is kept. */
@@ -296,6 +325,8 @@ export interface SplunkRequestOptions {
   fetchImpl?: typeof fetch;
   /** undici dispatcher from the org's proxy resolver, when the config has use_proxy. */
   dispatcher?: unknown;
+  /** Called after each export with the exact search sent and what came back, for debug logs. */
+  onSearch?: (search: string, stats: ExportStats, ms: number) => void;
 }
 
 function baseUrl(conn: SplunkConnection): string {
@@ -414,13 +445,16 @@ export async function splunkExport(
 ): Promise<Array<Record<string, unknown>>> {
   const app = encodeURIComponent(conn.splunkApp?.trim() || 'search');
   const body = new URLSearchParams({ search, output_mode: 'json' });
+  const started = Date.now();
   const text = await request(
     conn,
     `/servicesNS/-/${app}/search/v2/jobs/export`,
     { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
     opts,
   );
-  return parseExportLines(text);
+  const { rows, stats } = parseExportStream(text);
+  opts.onSearch?.(search, stats, Date.now() - started);
+  return rows;
 }
 
 export async function splunkTimechart(

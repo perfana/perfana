@@ -23,6 +23,9 @@ import { HEAVY_STAGES, HeavyStageMutex } from './HeavyStageMutex.js';
 import type { DsMetricCollectionStatus } from '@perfana/shared/entities';
 import { collectionSourceKey, getCollectableSplunkConfigIds, getConfiguredSourceKeys } from './collectable-sources.js';
 
+/** How long after a ticked run ends analyze still re-reads it from Splunk. */
+const SPLUNK_RECOLLECT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Pipeline Orchestrator - Coordinates the execution of pipeline stages
  * Implements the complex orchestration patterns from the Python implementation:
@@ -350,11 +353,12 @@ export class PipelineOrchestrator {
   }
 
   /**
-   * Full-path Splunk collection: only reached for a run with no incremental collection (a
-   * re-analysis of a run from before Splunk was configured, a SUT import), since a ticked run is
-   * gap-filled and this stage is skipped. One pass over the whole run per collectable connection,
-   * recorded as one collected range so coverage counts it. Splunk keeps the window as long as its
-   * index retention does, so an old run can return nothing; that is a success with 0 points.
+   * Whole-run Splunk collection, one pass per collectable connection. Runs on every analyze:
+   * for a run with no incremental collection (a re-analysis of a run from before Splunk was
+   * configured, a SUT import) it is the only collection; for a ticked run it re-reads the run
+   * after Splunk's indexing lag, which the ticks' 5 min lookback cannot cover. Recorded as one
+   * collected range so coverage counts it. Splunk keeps the window as long as its index
+   * retention does, so an old run can return nothing; that is a success with 0 points.
    */
   private async collectSplunkForWholeRun(testRunId: string): Promise<PipelineResult> {
     const startedAt = Date.now();
@@ -367,6 +371,13 @@ export class PipelineOrchestrator {
     // next analyze treat the run as incrementally collected and skip its Grafana and Dynatrace
     // stages, so the range is recorded only if some other writer created rows meanwhile.
     const hasStatusRows = (await this.databaseService.getAllCollectionStatuses(testRunId)).length > 0;
+    // A ticked run re-analysed long after it ended: its chunks may be compressed, and an upsert
+    // of every bucket into columnstore is the decompression-limit failure (root CLAUDE.md #23).
+    // The ticks' data stands; a force-refetch re-reads Splunk deliberately.
+    // ponytail: fixed 24 h, under ds_metrics' 2-day compress_after.
+    if (hasStatusRows && Date.now() - new Date(testRun.endTime).getTime() > SPLUNK_RECOLLECT_WINDOW_MS) {
+      return { success: true, stage: 'splunk-collection', duration: Date.now() - startedAt, data: { skipped: 'collected live; ended over 24 h ago (force-refetch to re-read Splunk)' } };
+    }
     let total = 0;
     const errors: string[] = [];
     for (const splunkConfigId of configIds) {
@@ -568,8 +579,13 @@ export class PipelineOrchestrator {
       // and rebuilds, which reads requests_raw in this database and preserves the other
       // sources' rows. Skipping it blindly made ADAPT compare per-minute error counts
       // against run totals (v0.2.95.22).
+      // splunk-collection is NOT skipped either: Splunk indexes events minutes late (forwarder
+      // and indexing lag), so the live ticks' 5 min lookback misses whatever lands later. One
+      // whole-run search per panel at analyze re-reads the run once everything has arrived and
+      // overwrites the tick buckets on the same grid. collectSplunkForWholeRun decides whether a
+      // ticked run is still recent enough for that.
       const skippableCollectionStages = metricCollectionStages.filter(
-        (stage) => stage !== 'performance-test-metrics'
+        (stage) => stage !== 'performance-test-metrics' && stage !== 'splunk-collection'
       );
 
       // Check if we should skip metric collection stages

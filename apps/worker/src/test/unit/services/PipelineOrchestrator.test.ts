@@ -749,6 +749,32 @@ describe('PipelineOrchestrator', () => {
       expect(result.success).toBe(true);
     });
 
+    it('still runs splunk-collection on a gap-filled run, so events Splunk indexed late are read', async () => {
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'splunk', source_id: 's1', is_complete: true },
+      ]);
+      mockGapService.isCollectionComplete.mockResolvedValue(true);
+      const splunk = vi.spyOn(orchestrator as unknown as { collectSplunkForWholeRun: () => Promise<unknown> }, 'collectSplunkForWholeRun')
+        .mockResolvedValue({ success: true, stage: 'splunk-collection', duration: 1 });
+
+      await orchestrator.executeSequentialPipeline('test-splunk-late', { stages: ['dynatrace-collection', 'splunk-collection'] });
+
+      expect(mockPipelines.dynatrace.execute).not.toHaveBeenCalled();
+      expect(splunk).toHaveBeenCalledWith('test-splunk-late');
+    });
+
+    it('leaves a ticked run that ended over 24 h ago to force-refetch', async () => {
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'splunk', source_id: 's1', is_complete: true },
+      ]);
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({
+        testRunId: 'old', startTime: new Date(Date.now() - 50 * 3600_000), endTime: new Date(Date.now() - 49 * 3600_000),
+      });
+      const result = await (orchestrator as unknown as { collectSplunkForWholeRun: (id: string) => Promise<{ data?: { skipped?: string } }> })
+        .collectSplunkForWholeRun('old');
+      expect(result.data?.skipped).toMatch(/over 24 h ago/);
+    });
+
     it('should run metric collection stages when incremental collection is not complete', async () => {
       // Arrange
       const testRunId = 'test-incremental-incomplete';

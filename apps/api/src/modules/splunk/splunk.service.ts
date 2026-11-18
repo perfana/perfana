@@ -440,7 +440,12 @@ export class SplunkService {
     const opts = await this.requestOptions(config.organizationId, config.useProxy);
     try {
       const [points, fields] = await Promise.all([
-        splunkTimechart(conn, { filter, from, to, bucketSeconds, aggregation: dto.aggregation, splitBy: dto.splitBy, maxSeries: dto.maxSeries }, opts),
+        splunkTimechart(conn, { filter, from, to, bucketSeconds, aggregation: dto.aggregation, splitBy: dto.splitBy, maxSeries: dto.maxSeries }, {
+          ...opts,
+          onSearch: (search, st, ms) => this.logger.debug(
+            `Splunk preview search (${ms}ms, ${st.lines} lines, ${st.finalRows} final rows, ${st.previewRows} preview rows${st.usedPreview ? ', used last preview set' : ''}): ${search}`,
+          ),
+        }),
         // Candidate split fields come from the mapped sources themselves, not the user's filter:
         // fields a rex/eval in the filter creates are known to whoever wrote it.
         splunkFieldSummary(conn, buildEntitiesClause(mappings) ?? filter, opts),
