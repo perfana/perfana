@@ -317,6 +317,16 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     ],
     "rls": true,
   },
+  "profile_series_grouping_rules": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_profile_series_grouping_rules_delete",
+      "INSERT:rls_profile_series_grouping_rules_insert",
+      "SELECT:rls_profile_series_grouping_rules_select",
+      "UPDATE:rls_profile_series_grouping_rules_update",
+    ],
+    "rls": true,
+  },
   "profiles": {
     "force": true,
     "policies": [

@@ -78,6 +78,7 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 | `Profile` | Named collection of dashboards + benchmarks |
 | `ProfileGrafanaDashboard` | Dashboard linked to profile |
 | `ProfileBenchmark` | Benchmark linked to profile |
+| `ProfileSeriesGroupingRule` | Series grouping rule on a profile dashboard (`profile_series_grouping_rules`, migration 1826); grafana-sync provisions it into `series_grouping_rules` |
 
 ### Data Science
 

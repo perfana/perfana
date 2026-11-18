@@ -10,12 +10,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import { ApplicationDashboard, SeriesGroupingRule } from '@perfana/shared/entities';
 import { OwnedResource } from '@perfana/shared';
-import {
-  compileSeriesGroupingRule,
-  normalizeAggregations,
-  type SeriesGroupingAggregation,
-  type SeriesGroupingPreset,
-} from '@perfana/shared/utils';
 import { getRequestEm, withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { Capability } from '../../constants/capabilities.constants';
@@ -28,6 +22,7 @@ import type {
   SeriesGroupingRuleResponseDto,
 } from './dto/series-grouping-rule-response.dto';
 import { DUPLICATE_SLOT_MESSAGE, isDuplicateSeriesGroupingSlot } from './duplicate-rule';
+import { normalizeRuleFields } from './rule-fields';
 
 /** Perf-test dashboards have stable series names and their own live statistics writer. */
 const PERF_TEST_DASHBOARD_UID_PREFIX = 'performance-test-metrics-';
@@ -37,14 +32,6 @@ export interface SeriesGroupingRuleQuery {
   environment?: string;
   workload?: string;
   applicationDashboardId?: string;
-}
-
-/** What makes a rule a rule: everything a recalculation depends on. */
-interface RuleFields {
-  preset: SeriesGroupingPreset;
-  pattern: string | null;
-  replacement: string;
-  aggregations: SeriesGroupingAggregation[];
 }
 
 /**
@@ -118,7 +105,7 @@ export class SeriesGroupingService {
     roles: string[],
     accessibleOrgIds: string[] | null,
   ): Promise<SeriesGroupingCreateResultDto> {
-    const fields = this.ruleFields(
+    const fields = normalizeRuleFields(
       dto.preset,
       dto.pattern ?? null,
       dto.replacement ?? null,
@@ -174,7 +161,7 @@ export class SeriesGroupingService {
     // is nullable, so both mean "leave it". The slot fields are not on the DTO and are never read.
     const preset = dto.preset ?? rule.preset;
     const switchingToCustom = preset === 'custom';
-    const fields = this.ruleFields(
+    const fields = normalizeRuleFields(
       preset,
       switchingToCustom ? (dto.pattern ?? rule.pattern) : null,
       switchingToCustom ? (dto.replacement ?? rule.replacement) : null,
@@ -198,32 +185,6 @@ export class SeriesGroupingService {
   }
 
   // ------------------------------------------------------------------------------------------
-
-  /**
-   * Normalise and validate the rule fields. A built-in preset carries its own regex, so a pattern
-   * or replacement sent with one is dropped (`ck_series_grouping_rules_custom_pattern` requires
-   * the pattern to be NULL there). A custom pattern must pass the same ReDoS guard the worker
-   * applies, or the worker would skip the rule with a warning nobody reads.
-   */
-  private ruleFields(
-    preset: SeriesGroupingPreset,
-    pattern: string | null,
-    replacement: string | null,
-    aggregations: SeriesGroupingAggregation[],
-  ): RuleFields {
-    // Canonicalised rather than stored as sent: the rule hash is taken over this list and decides
-    // whether a run reads as stale, so the order the checkboxes happened to be ticked in must not
-    // change it. The DTO already rejects an unknown value, a duplicate and an empty list.
-    const canonical = normalizeAggregations(aggregations);
-    if (canonical.length === 0) throw new BadRequestException('A series grouping rule needs at least one aggregation');
-    const fields: RuleFields =
-      preset === 'custom'
-        ? { preset, pattern: pattern || null, replacement: replacement ?? '', aggregations: canonical }
-        : { preset, pattern: null, replacement: '', aggregations: canonical };
-    const compiled = compileSeriesGroupingRule(fields);
-    if (!compiled.ok) throw new BadRequestException(compiled.error ?? 'Invalid series grouping rule');
-    return fields;
-  }
 
   private async loadAuthorized(id: string, accessibleOrgIds: string[] | null): Promise<SeriesGroupingRule> {
     const rule = await withRequestEm(this.ruleRepo).findOne({ where: { id } });
@@ -439,6 +400,7 @@ export class SeriesGroupingService {
       aggregations: rule.aggregations,
       enabled: rule.enabled,
       origin: rule.origin,
+      profileRuleId: rule.profileRuleId ?? null,
       createdBy: rule.createdBy,
       updatedBy: rule.updatedBy,
       createdAt: rule.createdAt,

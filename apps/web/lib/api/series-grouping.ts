@@ -18,7 +18,7 @@ import type {
 import { authenticatedFetch } from '@/lib/api';
 import { serverErrorMessage } from '@/lib/errors';
 
-export type SeriesGroupingRuleOrigin = 'manual' | 'suggestion' | 'copy';
+export type SeriesGroupingRuleOrigin = 'manual' | 'suggestion' | 'copy' | 'profile';
 
 export interface SeriesGroupingRuleResponse {
   id: string;
@@ -35,6 +35,8 @@ export interface SeriesGroupingRuleResponse {
   aggregations: SeriesGroupingAggregation[];
   enabled: boolean;
   origin: SeriesGroupingRuleOrigin;
+  /** The profile rule this one was provisioned from. It follows that rule while `updatedBy` is unset. */
+  profileRuleId: string | null;
   createdBy?: string;
   updatedBy?: string;
   createdAt: string;
@@ -201,6 +203,68 @@ export async function updateRule(
 
 export async function deleteRule(id: string): Promise<void> {
   const response = await authenticatedFetch(`/series-grouping-rules/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error(
+      await serverErrorMessage(response, `Failed to delete the series grouping rule (${response.status})`),
+    );
+  }
+}
+
+/** A rule on a profile dashboard; grafana-sync provisions it into each matching workload. */
+export interface ProfileSeriesGroupingRuleResponse extends SeriesGroupingRuleSpec {
+  id: string;
+  profileDashboardId: string;
+  panelId: number | null;
+  pattern: string | null;
+  replacement: string;
+  aggregations: SeriesGroupingAggregation[];
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateProfileSeriesGroupingRuleParams = SeriesGroupingRuleSpec & { panelId?: number | null; enabled?: boolean };
+
+const profileRulesPath = (profileId: string, profileDashboardId: string): string =>
+  `/profiles/${encodeURIComponent(profileId)}/dashboards/${encodeURIComponent(profileDashboardId)}/grouping-rules`;
+
+export async function listProfileRules(profileId: string, profileDashboardId: string): Promise<ProfileSeriesGroupingRuleResponse[]> {
+  const response = await authenticatedFetch(profileRulesPath(profileId, profileDashboardId));
+  return readJson(response, 'Failed to load series grouping rules');
+}
+
+export async function createProfileRule(
+  profileId: string,
+  profileDashboardId: string,
+  params: CreateProfileSeriesGroupingRuleParams,
+): Promise<ProfileSeriesGroupingRuleResponse> {
+  const response = await authenticatedFetch(profileRulesPath(profileId, profileDashboardId), {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(params),
+  });
+  return readJson(response, 'Failed to create the series grouping rule');
+}
+
+/** The panel cannot change; moving a rule is delete + create. */
+export async function updateProfileRule(
+  profileId: string,
+  profileDashboardId: string,
+  ruleId: string,
+  patch: UpdateSeriesGroupingRuleParams,
+): Promise<ProfileSeriesGroupingRuleResponse> {
+  const response = await authenticatedFetch(`${profileRulesPath(profileId, profileDashboardId)}/${encodeURIComponent(ruleId)}`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(patch),
+  });
+  return readJson(response, 'Failed to update the series grouping rule');
+}
+
+export async function deleteProfileRule(profileId: string, profileDashboardId: string, ruleId: string): Promise<void> {
+  const response = await authenticatedFetch(`${profileRulesPath(profileId, profileDashboardId)}/${encodeURIComponent(ruleId)}`, {
     method: 'DELETE',
   });
   if (!response.ok) {

@@ -1,4 +1,4 @@
-import { SERIES_GROUPING_AGGREGATION_VALUES } from './create-series-grouping-rule.dto';
+import { SERIES_GROUPING_AGGREGATION_VALUES, SERIES_GROUPING_PRESET_VALUES } from './create-series-grouping-rule.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { SeriesGroupingAggregation, SeriesGroupingPreset } from '@perfana/shared/utils';
 import type { SeriesGroupingRuleOrigin } from '@perfana/shared/entities';
@@ -11,13 +11,20 @@ export class SeriesGroupingRuleResponseDto {
   @ApiProperty() applicationDashboardId!: string;
   @ApiProperty({ nullable: true, type: Number, description: 'null = every panel on the dashboard' })
   panelId!: number | null;
-  @ApiProperty() preset!: SeriesGroupingPreset;
+  @ApiProperty({ enum: SERIES_GROUPING_PRESET_VALUES }) preset!: SeriesGroupingPreset;
   @ApiProperty({ nullable: true, type: String }) pattern!: string | null;
   @ApiProperty() replacement!: string;
   @ApiProperty({ enum: SERIES_GROUPING_AGGREGATION_VALUES, isArray: true })
   aggregations!: SeriesGroupingAggregation[];
   @ApiProperty() enabled!: boolean;
-  @ApiProperty({ enum: ['manual', 'suggestion', 'copy'] }) origin!: SeriesGroupingRuleOrigin;
+  @ApiProperty({ enum: ['manual', 'suggestion', 'copy', 'profile'] }) origin!: SeriesGroupingRuleOrigin;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'The profile rule this row was provisioned from. It follows that rule while `updatedBy` is null; any save here detaches it.',
+  })
+  profileRuleId!: string | null;
   @ApiPropertyOptional() createdBy?: string;
   @ApiPropertyOptional() updatedBy?: string;
   @ApiProperty() createdAt!: Date;

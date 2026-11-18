@@ -7,6 +7,10 @@ import { TestRunFinderService } from './test-run-finder.service';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
 import { BenchmarkProcessorService } from './benchmark-processor.service';
+import {
+  GroupingRuleProcessorService,
+  type ProfileGroupingRuleRow,
+} from './grouping-rule-processor.service';
 
 @Injectable()
 export class AutoConfigService {
@@ -19,6 +23,7 @@ export class AutoConfigService {
     private dashboardFinderService: DashboardFinderService,
     private dashboardConfiguratorService: DashboardConfiguratorService,
     private benchmarkProcessorService: BenchmarkProcessorService,
+    private groupingRuleProcessorService: GroupingRuleProcessorService,
   ) {
     const enabled = this.configService.get<boolean>('AUTO_CONFIG_ENABLED', true);
     this.logger.log(`AutoConfigService initialized - AUTO_CONFIG_ENABLED: ${enabled}`);
@@ -54,9 +59,9 @@ export class AutoConfigService {
       const context = await this.loadAutoConfigContext();
       if (!context) return;
 
-      const { testRuns, profiles, dashboards, benchmarks } = context;
+      const { testRuns, profiles, dashboards, benchmarks, groupingRules } = context;
       for (const testRun of testRuns) {
-        await this.processTestRun(testRun, profiles, dashboards, benchmarks);
+        await this.processTestRun(testRun, profiles, dashboards, benchmarks, groupingRules);
       }
     } finally {
       this.logger.log('AutoConfig processing end');
@@ -88,11 +93,12 @@ export class AutoConfigService {
     ] as string[];
     const orgFilter = orgIds.length > 0 ? orgIds : undefined;
 
-    // Load profiles, dashboards and benchmarks in parallel
-    const [profiles, dashboards, benchmarks] = await Promise.all([
+    // Load profiles, dashboards, benchmarks and series grouping rules in parallel
+    const [profiles, dashboards, benchmarks, groupingRules] = await Promise.all([
       this.testRunFinderService.findProfiles(orgFilter),
       this.dashboardFinderService.findAutoConfigGrafanaDashboards(orgFilter),
       this.testRunFinderService.findProfileBenchmarks(orgFilter),
+      this.groupingRuleProcessorService.findProfileGroupingRules(orgFilter),
     ]);
 
     if (profiles.length === 0) {
@@ -109,7 +115,7 @@ export class AutoConfigService {
       return null;
     }
 
-    return { testRuns, profiles, dashboards, benchmarks };
+    return { testRuns, profiles, dashboards, benchmarks, groupingRules };
   }
 
   /** Process a single test run */
@@ -118,6 +124,7 @@ export class AutoConfigService {
     profiles: any[],
     autoConfigDashboards: ProfileGrafanaDashboard[],
     profileBenchmarks: ProfileBenchmark[],
+    groupingRules: ProfileGroupingRuleRow[],
   ): Promise<void> {
     try {
       // Tags and organization, failing closed on a missing organization: one rule, shared with the
@@ -144,6 +151,15 @@ export class AutoConfigService {
           testRun,
           profileNames,
           profileBenchmarks,
+        );
+      }
+
+      // After the dashboards: a rule needs the application dashboard it sits on.
+      if (groupingRules.length > 0) {
+        await this.groupingRuleProcessorService.processProfileGroupingRules(
+          testRun,
+          profileNames,
+          groupingRules,
         );
       }
     } catch (error) {

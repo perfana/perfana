@@ -1,6 +1,8 @@
 'use client';
 
+import ProfileSeriesGroupingSection from '@/components/series-grouping/ProfileSeriesGroupingSection';
 import {
+  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -36,6 +38,7 @@ import {
 export default function DashboardFormDialog({
   open,
   mode,
+  profileId,
   dashboard,
   availableDashboards,
   availableInstances,
@@ -173,6 +176,19 @@ export default function DashboardFormDialog({
             }
             label="Read-only configuration"
           />
+
+          {/* Saved on its own, like the system page's section: a rule needs the saved dashboard's id. */}
+          {mode === 'edit' && profileId && dashboard?.id && (
+            <>
+              <Divider />
+              <ProfileSeriesGroupingSection
+                profileId={profileId}
+                profileDashboardId={dashboard.id}
+                dashboardUid={dashboard.dashboardUid}
+                grafanaInstanceId={availableInstances.find((i) => i.label === dashboard.grafanaLabel)?.id}
+              />
+            </>
+          )}
         </Box>
       </DialogContent>
 

@@ -6,6 +6,7 @@ import { TestRunFinderService } from './test-run-finder.service';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
 import { BenchmarkProcessorService } from './benchmark-processor.service';
+import { GroupingRuleProcessorService } from './grouping-rule-processor.service';
 import { VariableDiscoveryService } from './variable-discovery.service';
 import { VariableDetectorService } from './variable-detector.service';
 import { VariableMatcherService } from './variable-matcher.service';
@@ -52,6 +53,7 @@ import {
     DashboardFinderService,
     DashboardConfiguratorService,
     BenchmarkProcessorService,
+    GroupingRuleProcessorService,
     VariableDiscoveryService,
     VariableDetectorService,
     VariableMatcherService,

@@ -329,6 +329,54 @@ Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.m
 shipped all three stages in one release: PR A (the engine), PR B (the rules API) and PR C (the
 web), which were developed as separate versions on one branch and squash-merged together.
 
+### Profile series grouping rules: follow-ups from the v0.2.97.77 review
+
+**Priority:** P2 (items 1-3), P3 (the rest)
+
+v0.2.97.77 added rules on profile dashboards, provisioned by grafana-sync (`grouping-rule-processor.service.ts`)
+and followed by their unedited copies (`apps/api/src/modules/profiles/provisioned-grouping-rules.ts`). Three
+review/fix cycles closed the races that could leave orphan copies; these were deferred:
+
+1. **Provisioning recalculates nothing.** The first grouped runs of a newly provisioned workload have no group
+   baseline and read as incomparable until baseline runs are recalculated. Consider enqueueing the same
+   recalculation the system page's "Save and recalculate" runs (scope `recent`), once per newly provisioned
+   workload; it needs grafana-sync to reach the worker queue.
+2. **The template lookup ignores the Grafana instance** (`findApplicationDashboardsByTemplateDashboardUid`
+   matches on uid only; profile SLOs share it). A uid is unique only per instance (root CLAUDE.md #43), so a
+   rule can reach dashboards built from another instance's same-uid template. Select `d.grafana_label`, resolve
+   it inside the run's organization (labels are not unique across organizations, #60) and filter on
+   `grafana_instance_id`. The web panel picker has the same shape: `DashboardFormDialog` matches
+   `availableInstances` on label alone; filter by the profile's organization first.
+3. **`deleteDashboard` reads the rule ids one statement before the cascade.** A rule created in that
+   millisecond gap, and copied by a pass in the same gap, would be orphaned. Use
+   `DELETE FROM profile_series_grouping_rules WHERE profile_dashboard_id = $1 RETURNING id` before removing
+   the dashboard, as `deleteProfile` already does.
+4. **No DB-backed test of the provisioning SQL.** The upsert (`FOR SHARE`, `ON CONFLICT ... WHERE`,
+   `RETURNING (xmax = 0)`), the propagate and the delete were verified by hand against Postgres, including a
+   two-session race; every spec mocks `query()`. Add them to a PREPARE check like `check:grouped-sql`, or a
+   spec against a migrated database that seeds a slot four ways.
+5. **A label-only change counts as a re-point.** Correcting a profile dashboard's Grafana label after an
+   instance rename deletes its copies and disables its panel rules, though the template is the same. Compare
+   the resolved `grafana_dashboards` row before and after instead, and confirm in the dialog how many panel
+   rules will be disabled.
+6. **No audit rows for the bulk side effects**: the panel rules a re-point disables and the provisioned copies
+   the delete paths remove. `ProfileSeriesGroupingService` also logs its audit row before the write.
+7. **Under `DB_ENABLE_RLS_ROLE=true`, `can_modify_resource` may skip team-scoped copies** in the provisioned
+   delete, leaving them orphaned. Check it for org-admins and global admins, or compare the delete count with
+   a pre-count.
+8. **SUT transfer**: a bundle carrying `origin='profile'` rows fails `ck_series_grouping_rules_origin` (23514)
+   importing into an environment that has not run 1826; into one that has, the copies keep a
+   `profile_rule_id` that names nothing there, so the "comes back on the next run" advice is wrong for them.
+   Map them to `copy` with a NULL `profile_rule_id` on import.
+9. **Profiles key their dashboards on the profile name** with no FK: a rename leaves dashboards and their rules
+   under the old name (pre-existing), and a rule's `teamId` comes from the dashboard row while its
+   organization comes from the profile, which can disagree on an adopted dashboard.
+10. **Lock overhead**: the upsert takes a share lock on the rule and profile dashboard, and `ON CONFLICT`
+    locks the existing copy, on every 2-minute pass per run, rule and dashboard. Skip the INSERT when the slot
+    is already owned and identical if pass volume grows.
+11. **Shared helpers** (advisory): the unique-violation check, the rule table cells and the partial-update
+    merge are duplicated between profile and workload rules.
+
 ### The grouped statement sorts on a rows=1 estimate and spills
 
 **Priority:** P0

@@ -23,6 +23,7 @@ A profile is a reusable bundle of dashboards and SLOs. Create one so new test ru
 
 4. On the **Dashboards** tab, click **Add Dashboard** and add each dashboard you want runs to inherit.
    The dashboards appear in the list.
+   To group a dashboard's per-pod series (for example, `api-7d4f9c-x2k8p` and `api-7d4f9c-q9z1m` as one series `api`), open the dashboard again with the pencil and use **Series grouping** at the bottom of the dialog: **Add rule**, pick the panel (or **All panels**), a pattern and the series each group should produce. Perfana creates the rule on every system the profile applies to, for the workload of each matching run. Changing or deleting the rule here changes every copy nobody has edited on the system's own dashboard settings; a copy someone edited there is marked *From profile (edited)* and keeps their version. A rule takes effect the next time a run's statistics are calculated; nothing is recalculated for you, so use the anomaly card's recalculate notice if earlier runs should be compared with it. To keep a profile rule off one workload, disable it on the system's dashboard settings rather than deleting it: a deleted copy comes back on the profile's next matching run.
 
 5. On the **Service Level Objectives** tab, click **Add Service Level Objective** and add each check.
    The checks appear in the list. For how thresholds and Apdex work, see [Define SLOs](define-slos.md).

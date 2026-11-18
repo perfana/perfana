@@ -82,6 +82,8 @@ export interface DashboardFormData {
 export interface DashboardFormDialogProps {
   open: boolean;
   mode: 'create' | 'edit';
+  /** Enables the series grouping section in edit mode. */
+  profileId?: string;
   dashboard?: ProfileDashboard;
   availableDashboards: GrafanaDashboard[];
   availableInstances: GrafanaInstance[];

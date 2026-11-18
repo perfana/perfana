@@ -48,6 +48,7 @@ export * from './grafana-dashboard.entity';
 export * from './grafana-instance.entity';
 export * from './graph-preset.entity';
 export * from './series-grouping-rule.entity';
+export * from './profile-series-grouping-rule.entity';
 export * from './ds-metric-series-group.entity';
 export * from './organization.entity';
 export * from './profile.entity';

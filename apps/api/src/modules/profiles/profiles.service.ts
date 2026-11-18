@@ -29,6 +29,7 @@ import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/prof
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto, ProfileBenchmarkResponse } from './dto/profile-benchmark.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
+import { deleteOwnedProvisionedRules, profileRuleIdsOf } from './provisioned-grouping-rules';
 
 export interface ProfileResponse {
   id: string;
@@ -167,6 +168,30 @@ export class ProfilesService {
     if (!isOrgAdmin) {
       throw new ForbiddenException('Organization admin privileges required to manage profiles');
     }
+  }
+
+  /**
+   * A profile dashboard under a profile the caller may see, for the dashboard's series grouping
+   * rules (`ProfileSeriesGroupingService`). A missing or out-of-scope profile, and a dashboard of
+   * another profile, are both 404. With `write`, org-admin in the profile's organization is
+   * required too, checked after the scoping so a 403 only reaches someone who can see the profile.
+   */
+  async requireProfileDashboard(
+    profileId: string,
+    dashboardId: string,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+    write: boolean,
+  ): Promise<{ profile: Profile; dashboard: ProfileGrafanaDashboard }> {
+    const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
+    if (write) await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
+    const dashboard = await withRequestEm(this.profileDashboardRepo).findOne({
+      where: { id: dashboardId, profile: profile.name },
+    });
+    if (!dashboard) {
+      throw new NotFoundException(`Dashboard ${forLog(dashboardId)} not found for profile ${profile.name}`);
+    }
+    return { profile, dashboard };
   }
 
   /**
@@ -663,6 +688,11 @@ export class ProfilesService {
       }
 
       // Update the dashboard properties
+      // A uid is unique only within one Grafana (root CLAUDE.md #43), so a new instance label on the
+      // same uid points at another template as surely as a new uid does.
+      const retargeted =
+        (updateDto.dashboardUid !== undefined && updateDto.dashboardUid !== dashboard.dashboardUid) ||
+        (updateDto.grafanaLabel !== undefined && updateDto.grafanaLabel !== dashboard.grafanaLabel);
       if (updateDto.dashboardUid !== undefined) {
         dashboard.dashboardUid = updateDto.dashboardUid;
       }
@@ -717,6 +747,32 @@ export class ProfilesService {
       this.logger.debug(`[Service] About to update dashboard ${dashboard.id} with data: ${JSON.stringify(updateData, null, 2)}`);
 
       await withRequestEm(this.profileDashboardRepo).update(dashboard.id, updateData);
+
+      // Re-pointed at another template. The unedited copies its series grouping rules made sit on
+      // the OLD template's application dashboards, which this profile dashboard no longer stands
+      // for: remove them. A panel-scoped rule's panel id was picked from the old template and may
+      // name an unrelated panel on the new one, so it is disabled (as a retargeted profile SLO is),
+      // never provisioned blind; an all-panels rule stays valid and follows on the next matching run.
+      if (retargeted) {
+        const q = withRequestQuery(this.dataSource);
+        const unprovisioned = await deleteOwnedProvisionedRules(
+          q,
+          profile.organizationId,
+          await profileRuleIdsOf(q, [dashboard.id]),
+        );
+        const disabled = affectedCount(
+          await q.query(
+            `UPDATE profile_series_grouping_rules SET enabled = false, updated_by = $2, updated_at = now()
+              WHERE profile_dashboard_id = $1 AND panel_id IS NOT NULL AND enabled`,
+            [dashboard.id, userId],
+          ),
+        );
+        if (unprovisioned + disabled > 0) {
+          this.logger.log(
+            `Re-pointed profile dashboard ${forLog(dashboardId)}: deleted ${unprovisioned} provisioned series grouping rule(s), disabled ${disabled} panel rule(s)`,
+          );
+        }
+      }
 
       // Fetch the saved dashboard to return
       const savedDashboard = await withRequestEm(this.profileDashboardRepo).findOne({
@@ -813,8 +869,18 @@ export class ProfilesService {
         organizationIdOverride: dashboard.organizationId,
       });
 
+      // Its series grouping rules go with it (ON DELETE CASCADE). Their ids are collected first, the
+      // copies deleted by id after the cascade (see deleteOwnedProvisionedRules for why that order).
+      const q = withRequestQuery(this.dataSource);
+      const ruleIds = await profileRuleIdsOf(q, [dashboard.id]);
+
       // Delete the dashboard association
       await withRequestEm(this.profileDashboardRepo).remove(dashboard);
+
+      const unprovisioned = await deleteOwnedProvisionedRules(q, profile.organizationId, ruleIds);
+      if (unprovisioned > 0) {
+        this.logger.log(`Deleted ${unprovisioned} series grouping rule(s) provisioned from profile dashboard ${forLog(dashboardId)}`);
+      }
 
       this.logger.debug(`Deleted dashboard association ${forLog(dashboardId)} from profile ${profile.name}`);
     } catch (error) {
@@ -1561,6 +1627,32 @@ export class ProfilesService {
     this.auditService.logDelete(profile as unknown as OwnedResource, {
       organizationIdOverride: profile.organizationId,
     });
+
+    // Profile dashboards key on the profile's NAME with no foreign key, so they outlive the profile.
+    // Their series grouping rules must not: a profile created later under the same name (names are
+    // install-wide, so possibly in another organization) would otherwise inherit and provision them.
+    // The rules go first and their copies by id after (see deleteOwnedProvisionedRules).
+    const q = withRequestQuery(this.dataSource);
+    const dashboards = await withRequestEm(this.profileDashboardRepo).find({ where: { profile: profile.name }, select: { id: true } });
+    let removedRules: Array<{ id: string }> = [];
+    if (dashboards.length) {
+      // TypeORM's postgres driver answers a DELETE ... RETURNING with [rows, rowCount].
+      const res = (await q.query(
+        `DELETE FROM profile_series_grouping_rules WHERE profile_dashboard_id = ANY($1::uuid[]) RETURNING id`,
+        [dashboards.map((d) => d.id)],
+      )) as unknown[];
+      removedRules = (Array.isArray(res[0]) ? res[0] : res) as Array<{ id: string }>;
+    }
+    const unprovisioned = await deleteOwnedProvisionedRules(
+      q,
+      profile.organizationId,
+      removedRules.map((r) => r.id),
+    );
+    if (removedRules.length + unprovisioned > 0) {
+      this.logger.log(
+        `Profile '${profile.name}': deleted ${removedRules.length} series grouping rule(s) and ${unprovisioned} provisioned cop(ies)`,
+      );
+    }
 
     await withRequestEm(this.profileRepo).remove(profile);
     this.logger.log(`Profile '${profile.name}' deleted by ${userId}`);
