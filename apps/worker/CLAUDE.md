@@ -1718,3 +1718,44 @@ is never substitutable. Three things about where that value is applied:
 The symptom when none of this resolves is not an error: `/api/ds/query` answers
 `{"message":"Data source not found"}` per query and the run records nothing for that dashboard.
 The tell is the worker warning naming the panel and the unresolved variable.
+
+### `All` and Zabbix filters are substituted the way Grafana would
+
+The worker substitutes a panel's template variables itself (`createPanelDocuments` →
+`substituteVariablesInTarget`, `apps/worker/src/pipelines/panels/helpers.ts`) and posts the
+result to `/api/ds/query`. Anything a datasource plugin does to a variable **in the browser**
+does not happen on that path, so the worker has to do it. Four rules (v0.2.97.81):
+
+1. **"All" has two spellings and one value.** An application dashboard stores All as `All` or as
+   Grafana's `$__all` (`ALL_VALUE_SENTINELS`). Both resolve through `allValueFor` to the template
+   variable's custom `allValue` when the dashboard sets one, else `.*`. Before v0.2.97.81 only
+   `All` was recognised and it always became `.*`; `$__all` went out literally and matched
+   nothing. This applies to every datasource, so a dashboard with a custom All value other than
+   `.*` sends different queries for runs analysed after that version, and anomaly detection may
+   compare them against series collected the old way. Repeat-panel expansion follows the same
+   rule (`repeatTemplateVar`).
+2. **A Zabbix target's filters follow grafana-zabbix `replaceTemplateVars`.**
+   `substituteZabbixFilter` handles every `filter` and `*Filter` field of a target on
+   `alexanderzobnin-zabbix-datasource`: a concrete value is regex-escaped, an All value and a value
+   already written as a pattern (`/.../` or `.*`) go in raw, and a filter the substitution changed
+   is wrapped as `/^…$/` unless it already reads as `/.../`. Without it `$Group` reached the
+   plugin as `.*`, which it reads as an exact group name, and a composite filter such as
+   `$Disk: Disk read rate` could never match. The raw pass-through for pattern-shaped values is
+   deliberate: before this rule a regex typed into the application dashboard was the only way to
+   make a Zabbix filter work, and escaping those now would break them silently.
+3. **The choice is per target, not per panel.** `isZabbixTarget` reads the target's own
+   datasource type first and falls back to the panel's, because a Mixed panel's targets each name
+   their datasource. A datasource ref with no `type` is looked up by uid in the pre-flight
+   datasource map. A Grafana 8 datasource *name* misses that map (it is uid-keyed, and empty on a
+   Viewer token), so such a dashboard keeps the generic substitution; resolving names would need
+   the Admin-only datasource API (see "The Grafana service account needs Viewer" in the root
+   CLAUDE.md).
+4. **Variable names are escaped before they reach a `RegExp`.** Application-dashboard variable
+   names are free-form Perfana config, and a `(` in one used to throw and abort the dashboard.
+   `variableNamePattern` now guards both the generic and the Zabbix path.
+
+Known gaps are in TODOS.md under "Zabbix substitution follow-ups": All without a custom All value
+is `.*` rather than the variable's option list, a multi-select still sends only its first value,
+and substitution runs key by key rather than in one pass. A run that collected nothing for these
+panels is recovered with a force-refetch re-evaluate, not a plain re-analyse: its ranges were
+recorded as collected.
