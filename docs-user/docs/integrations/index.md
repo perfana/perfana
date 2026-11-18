@@ -1,6 +1,6 @@
 # Integrations
 
-<p class="pf-lead">Connect the observability tools Perfana pulls metrics, profiles, and traces from. Connect once at the organization level, then each system can use them.</p>
+<p class="pf-lead">Connect the observability tools Perfana pulls metrics, logs, profiles, and traces from. Connect once at the organization level, then each system can use them.</p>
 
 <div class="grid cards" markdown>
 
@@ -27,6 +27,14 @@
     Continuous profiling data.
 
     [:octicons-arrow-right-24: Connect Pyroscope](connect-pyroscope.md)
+
+-   :material-text-box-search-outline:{ .lg .middle } **Connect Splunk**
+
+    ---
+
+    Log events as metrics: error counts, exceptions by type.
+
+    [:octicons-arrow-right-24: Connect Splunk](connect-splunk.md)
 
 -   :material-transit-connection-variant:{ .lg .middle } **Connect distributed tracing**
 

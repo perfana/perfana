@@ -127,12 +127,26 @@ export function scopeSplFilter(
 export const ALLOWED_SPL_COMMANDS = ['search', 'where', 'rex', 'eval', 'fields', 'rename', 'regex', 'spath', 'fillnull'] as const;
 
 /**
+ * Time modifiers a filter may not carry: Perfana sends the run window as earliest_time/latest_time.
+ * Checked only when a filter is saved or previewed (`timeModifiers: true`), where the user's terms
+ * lead the search. At send time the filter sits after Perfana's own `<sources> | search`, where a
+ * modifier cannot widen the window, so a panel that already runs is never refused there.
+ * Only search segments (the leading terms and `| search`) count; `| eval endtime=...` is a field.
+ * Double-quoted text is skipped; a dotted or `$` name (`json.latest=`) is a field, not a modifier.
+ */
+const TIME_MODIFIER_RE =
+  /(?:^|[^\w.$])_?(?:index_)?(?:earliest|latest)\s*=|(?<![\w.$])(?:starttimeu?|endtimeu?|(?:start|end)?(?:days|hours|minutes|months)ago|searchtimespan(?:days|hours|minutes|months))\s*=/i;
+
+/**
  * Validate a user filter. Returns an error message, or null when it is acceptable.
  * Quote-aware: `|`, `[` and backticks inside a double-quoted string (a rex pattern) are literal.
  */
-export function validateSplFilter(spl: string): string | null {
+export function validateSplFilter(spl: string, opts: { timeModifiers?: boolean } = {}): string | null {
   const segments: string[] = [];
   let current = '';
+  // Each segment with its double-quoted strings blanked, for the time-modifier check.
+  const unquotedSegments: string[] = [];
+  let unquoted = '';
   let inQuote = false;
   let inSingle = false;
   for (let i = 0; i < spl.length; i++) {
@@ -145,6 +159,8 @@ export function validateSplFilter(spl: string): string | null {
         return 'A single-quoted field name may not contain quotes, pipes, brackets, backticks, $ or backslashes';
       }
       current += ch;
+      // A single-quoted name is not a literal: a modifier spelled inside one still counts.
+      unquoted += ch === "'" ? ' ' : ch;
       if (ch === "'") inSingle = false;
       continue;
     }
@@ -169,13 +185,16 @@ export function validateSplFilter(spl: string): string | null {
     } else if (ch === '"') {
       inQuote = true;
       current += ch;
+      unquoted += ' ';
     } else if (ch === "'") {
       inSingle = true;
       current += ch;
+      unquoted += ' ';
     } else if (ch === '$' && /^\$entities\[[^\]\s"'|`[$\\]+\]/.test(spl.slice(i))) {
       // A labelled reference is expanded by Perfana before the search runs; its brackets are not a subsearch.
       const token = /^\$entities\[[^\]\s"'|`[$\\]+\]/.exec(spl.slice(i))![0];
       current += token;
+      unquoted += ' ';
       i += token.length - 1;
     } else if (ch === '`') {
       return 'Search macros (backticks) are not allowed';
@@ -183,15 +202,28 @@ export function validateSplFilter(spl: string): string | null {
       return 'Subsearches ([ ... ]) are not allowed';
     } else if (ch === '|') {
       segments.push(current);
+      unquotedSegments.push(unquoted);
       current = '';
+      unquoted = '';
     } else {
       current += ch;
+      unquoted += ch;
     }
   }
   if (inQuote) return 'Unbalanced double quote';
   if (inSingle) return 'Unbalanced single quote';
   segments.push(current);
+  unquotedSegments.push(unquoted);
   if (!segments[0]!.trim()) return 'The filter must start with search terms, not a pipe';
+  const searchSegment = (i: number) => i === 0 || /^\s*search\b/i.test(segments[i]!);
+  for (let i = 0; opts.timeModifiers && i < unquotedSegments.length; i++) {
+    const m = searchSegment(i) ? TIME_MODIFIER_RE.exec(unquotedSegments[i]!) : null;
+    if (m) {
+      // Name the modifier the filter used: the regex accepts some 25 spellings.
+      const name = m[0].replace(/^[^\w]/, '').replace(/\s*=$/, '');
+      return `Leave out the time modifier "${name}": Perfana sets the time range from the test run`;
+    }
+  }
   for (const seg of segments.slice(1)) {
     const cmd = seg.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
     if (!(ALLOWED_SPL_COMMANDS as readonly string[]).includes(cmd)) {
@@ -216,23 +248,32 @@ export interface TimechartQuery {
 const AGGREGATION_RE = /^(count|(dc|avg|sum|min|max|median|p\d{1,2}|perc\d{1,2})\([A-Za-z_][\w.]*\))$/;
 const FIELD_RE = /^[A-Za-z_][\w.]*$/;
 
-/** Perfana owns the time bounds and bucketing; the user only ever writes `filter`. */
+/**
+ * The run window as the export endpoint's `earliest_time` / `latest_time` parameters, epoch seconds.
+ * Sent as parameters, never inline in the search: an inline `earliest=<epoch> latest=<epoch>` in a
+ * REST export returned no rows from a real Splunk while the same search over the same window, with
+ * the range in the time picker ("Open in Splunk"), showed data.
+ */
+export function timechartTimeRange(q: Pick<TimechartQuery, 'from' | 'to'>): { earliestTime: string; latestTime: string } {
+  return {
+    earliestTime: String(Math.floor(q.from.getTime() / 1000)),
+    latestTime: String(Math.ceil(q.to.getTime() / 1000)),
+  };
+}
+
+/** Perfana owns the time bounds and bucketing; the user only ever writes `filter`. The bounds travel separately, see timechartTimeRange. */
 export function buildTimechartSearch(q: TimechartQuery): string {
   const aggregation = q.aggregation?.trim() || 'count';
   if (!AGGREGATION_RE.test(aggregation)) throw new SplunkError(`Unsupported aggregation: ${aggregation}`);
   if (q.splitBy && !FIELD_RE.test(q.splitBy)) throw new SplunkError(`Invalid split-by field: ${q.splitBy}`);
   const span = Math.max(1, Math.round(q.bucketSeconds));
   const limit = Math.max(1, Math.min(100, q.maxSeries ?? 20));
-  const earliest = Math.floor(q.from.getTime() / 1000);
-  const latest = Math.ceil(q.to.getTime() / 1000);
   const by = q.splitBy ? ` by ${q.splitBy} limit=${limit} useother=t` : '';
   const filter = q.filter.trim().replace(/^search\s+/i, '');
   // Validate what is actually sent, after expansion — not only what was saved.
   const problem = validateSplFilter(filter);
   if (problem) throw new SplunkError(`Refusing to run the search: ${problem}`);
-  // The bounds go FIRST: after a filter that pipes (| rex ...) they would be read as the last
-  // command's arguments instead of bounding the search.
-  return `search earliest=${earliest} latest=${latest} ${filter} | timechart span=${span}s ${aggregation}${by}`;
+  return `search ${filter} | timechart span=${span}s ${aggregation}${by}`;
 }
 
 export interface TimechartPoint {
@@ -325,6 +366,9 @@ export interface SplunkRequestOptions {
   fetchImpl?: typeof fetch;
   /** undici dispatcher from the org's proxy resolver, when the config has use_proxy. */
   dispatcher?: unknown;
+  /** Search time range, as the export endpoint's earliest_time / latest_time (epoch seconds or relative, e.g. -1h). */
+  earliestTime?: string;
+  latestTime?: string;
   /** Called after each export with the exact search sent and what came back, for debug logs. */
   onSearch?: (search: string, stats: ExportStats, ms: number) => void;
 }
@@ -445,6 +489,8 @@ export async function splunkExport(
 ): Promise<Array<Record<string, unknown>>> {
   const app = encodeURIComponent(conn.splunkApp?.trim() || 'search');
   const body = new URLSearchParams({ search, output_mode: 'json' });
+  if (opts.earliestTime) body.set('earliest_time', opts.earliestTime);
+  if (opts.latestTime) body.set('latest_time', opts.latestTime);
   const started = Date.now();
   const text = await request(
     conn,
@@ -453,7 +499,9 @@ export async function splunkExport(
     opts,
   );
   const { rows, stats } = parseExportStream(text);
-  opts.onSearch?.(search, stats, Date.now() - started);
+  const bounds = [opts.earliestTime && `earliest_time=${opts.earliestTime}`, opts.latestTime && `latest_time=${opts.latestTime}`].filter(Boolean);
+  const range = bounds.length ? ` [${bounds.join(' ')}]` : '';
+  opts.onSearch?.(`${search}${range}`, stats, Date.now() - started);
   return rows;
 }
 
@@ -462,7 +510,7 @@ export async function splunkTimechart(
   q: TimechartQuery,
   opts: SplunkRequestOptions = {},
 ): Promise<TimechartPoint[]> {
-  return timechartRowsToPoints(await splunkExport(conn, buildTimechartSearch(q), opts));
+  return timechartRowsToPoints(await splunkExport(conn, buildTimechartSearch(q), { ...opts, ...timechartTimeRange(q) }));
 }
 
 export interface SplunkServerInfo {
@@ -514,8 +562,8 @@ export async function splunkFieldSummary(
   if (problem) throw new SplunkError(`Refusing to run the search: ${problem}`);
   const rows = await splunkExport(
     conn,
-    `search earliest=-1h ${filter} | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
-    opts,
+    `search ${filter} | head 2000 | fieldsummary maxvals=10 | where distinct_count <= 50 | table field distinct_count values`,
+    { ...opts, earliestTime: '-1h', latestTime: undefined },
   );
   return rows
     .filter((r) => typeof r.field === 'string' && !String(r.field).startsWith('_'))

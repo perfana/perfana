@@ -138,6 +138,37 @@ DynatraceCard (filters entities)
 - `fetchHostProblems(hostId, start, end, configId)` — Health issues
 - `storeHostProperties(hostId, testRunId, displayName, props)` — Auto-store to test_run_configs
 
+## Splunk
+
+Log events turned into time series per test run (v0.2.97.72), stored in `ds_metrics` like a
+Dynatrace metric, so they take part in ADAPT, SLOs, graphs and reports. Full design:
+[[Splunk Log Metrics (spec)]]; operator guide: `docs-user/docs/integrations/connect-splunk.md`.
+
+### Capabilities
+- **Log metrics** — counts (or `avg`/`p95`/`max`/`dc` of a field) per bucket, split by a field
+  such as the log level or host, per panel
+- **Starter panels** — log events by level, errors by host, exceptions by type
+- **Run card** — *Splunk Logs* in Root Cause Analysis, with an *Open in Splunk* link per panel
+
+### Configuration
+```
+Settings → Integrations → Splunk (splunk_configs, org-owned)
+  ├── Management URL (host): the REST port, usually 8089, never Splunk Web on 8000
+  ├── Splunk Web URL (client_url, optional): for Open in Splunk links; falls back to host
+  ├── Authentication token, or username + password (token wins)
+  ├── App (search namespace) and concurrent searches (keep under the role's quota)
+  └── Use proxy
+System config → Splunk tab (per environment/workload)
+  ├── Sources (splunk_entity_mappings): index / sourcetype / host pattern, at system,
+  │     environment or workload level, optional labels
+  └── Panels (splunk_queries): a filter that must use $entities, value, split field
+```
+
+Perfana owns the time range and the bucketing: the run window is sent as the export endpoint's
+`earliest_time`/`latest_time` parameters (v0.2.97.80), and saving or previewing a panel refuses a
+filter whose search terms carry their own time modifier. The Splunk role behind the token is the
+boundary for what can be read.
+
 ## Pyroscope
 
 Continuous profiling integration.
@@ -197,3 +228,4 @@ unchanged.
 - [[Grafana Sync Overview]] — Dashboard sync service
 - [[Data Flow]] — Data collection pipeline
 - [[Worker Overview]] — Metric collection pipelines
+- [[Splunk Log Metrics (spec)]] — Splunk log metrics design

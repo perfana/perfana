@@ -83,13 +83,17 @@ Users write the filter. Perfana owns the time bounds and the bucketing, so a que
 accidentally read outside the run or at the wrong resolution. Perfana sends:
 
 ```
-search earliest=<from epoch> latest=<to epoch> <mapped sources> | search <spl, expanded>
-| timechart span=<bucket>s <aggregation> by <split_by> limit=<max_series> useother=t
+search=search <mapped sources> | search <spl, expanded>
+       | timechart span=<bucket>s <aggregation> by <split_by> limit=<max_series> useother=t
+earliest_time=<from epoch>  latest_time=<to epoch>
 ```
 
 The mapped sources run first as their own search and the user's filter is piped after it, so a
 filter can only narrow the search (`$entities OR index=_audit` still reads only mapped sources).
-The time bounds go first because after a piped command they would be read as its arguments.
+The time range travels as the export endpoint's `earliest_time` / `latest_time` form parameters,
+never inline in the search text (v0.2.97.80): against a real Splunk an inline
+`earliest=<epoch> latest=<epoch>` returned no rows for a window that the same search showed in
+Splunk Web, where the range sits in the time picker. The mock in `perfana-demo` reads both shapes.
 
 `limit` + `useother=t` caps the number of series (log levels and hosts are free text, the same
 problem as `requests_error.response_code` / `MAX_CODE_SERIES`). The `OTHER` series is kept, so
@@ -312,7 +316,16 @@ or ADAPT will flag every run.
   macros. It is quote-aware: inside double quotes `|`, `[` and backticks are literal; a
   single-quoted field name may not contain quotes, pipes, brackets, backticks, `$` or backslashes,
   so it cannot desynchronise the tokenizer and hide a pipe. Placeholders belong outside quotes.
-  The check runs again on the expanded search before it is sent. It is a convenience, not the
+  With `timeModifiers: true` (the API's save and preview check) it also refuses time modifiers in
+  search segments (the leading terms and `| search`): `earliest`, `latest`,
+  `_index_earliest`/`_index_latest`, `starttime`/`endtime` (and the `u` forms), and the deprecated
+  `*ago` / `searchtimespan*` spellings (v0.2.97.80), naming the one it found. Double-quoted text is
+  a literal and is skipped; single-quoted names are checked; dotted or `$` names (`json.latest=`)
+  and `| eval endtime=...` are fields and are allowed. The send path (`buildTimechartSearch`,
+  `splunkFieldSummary`) runs the validator without that option: there the filter sits after
+  Perfana's own `<sources> | search`, where a modifier cannot widen the window, and refusing it
+  would stop a saved panel from collecting. Before v0.2.97.80 the save check refused only
+  `earliest`/`latest`, anywhere in the filter. It is a convenience, not the
   boundary; the Splunk role is.
 - No SPL reaches a URL; it goes in the POST body.
 - A failed connection answers with the network error code and a fixed hint only
@@ -342,8 +355,9 @@ the host only shows up once credentials are filled in.
 ## Troubleshooting empty panels
 
 With `LOG_LEVEL=debug` the worker logs every search it sends and what came back:
-`Splunk panel "<title>" search (<ms>ms, <n> lines, <n> final rows, <n> preview rows): <SPL>`.
-Paste the SPL into Splunk Web to compare. `0 lines` means Splunk returned nothing for that window;
+`Splunk panel "<title>" search (<ms>ms, <n> lines, <n> final rows, <n> preview rows): <SPL> [earliest_time=<epoch> latest_time=<epoch>]`.
+Paste the SPL into Splunk Web and set the bracketed range in the time picker to compare: since
+v0.2.97.80 the range is sent as parameters, not as part of the search text. `0 lines` means Splunk returned nothing for that window;
 `used last preview set` means the export sent no final rows (handled since v0.2.97.75). A panel
 whose search returns no points also logs its window and SPL at info level.
 
