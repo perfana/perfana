@@ -12,6 +12,9 @@
  * test/unit/pipelines/StatisticsPipeline.test.ts. Keep it that way: an edit here changes what
  * every analysis sends to Postgres, grouped or not.
  *
+ * The SLO checks reuse it too, read-only: `buildMemberStatisticsSelectSQL` runs the same chain over a
+ * grouped panel's raw series, so a change to the chain also changes those SLO verdicts.
+ *
  * The grouped statement (series-grouping-plan.ts) reuses the run scope and the statistics chain
  * over its own per-timestamp input, never `metrics_filtered`: referencing that CTE twice would
  * materialise the run's raw rows into a tuplestore.
@@ -365,5 +368,58 @@ export function buildStatisticsInsertSQL(placeholders: string, extraPredicate = 
     buildStatisticsCtes('metrics_filtered') +
     '\n\n' +
     STATISTICS_INSERT
+  );
+}
+
+/** The statistics columns an SLO reads, shared by its `ds_metric_statistics` read and the raw-series read. */
+export const SLO_STATISTIC_COLUMNS = `
+          metric_name,
+          mean, median, min_value, max_value,
+          std_dev, last_value, count,
+          trend_pct_per_hour, trend_corr,
+          q10, q25, q75, q90, q95, q99,
+          is_constant, all_missing, pct_missing,
+          dashboard_label`;
+
+/** The raw series of every series-grouped panel of one run (`$1` run). Small: one row per raw series. */
+export const RUN_SERIES_GROUP_MEMBERS_SQL = `
+      SELECT application_dashboard_id, panel_id, metric_name
+      FROM ds_metric_series_groups
+      WHERE test_run_id = $1`;
+
+/**
+ * Per-raw-series statistics of a run's series-grouped panels, computed on the fly from `ds_metrics`
+ * and returned, never written. An SLO judges the series the run recorded, while
+ * `ds_metric_statistics` holds only the group rows (`api (avg)`, `api (count)` …) for a grouped
+ * panel: those are ADAPT's, and a threshold meant for one pod is meaningless against a sum or a
+ * member count. Same CTE chain as the statistics INSERT, so the numbers are the ones an ungrouped
+ * panel would have stored.
+ *
+ * ONE statement for all of a run's grouped panels: `ds_metrics` is compressed with
+ * `segmentby = test_run_id`, so any read of the run decompresses the run's whole segment whatever
+ * panel it asks for. The caller (DataAggregator) runs it once per run and caches the rows.
+ * `$2`/`$3` bound the time so only the run's own chunks are locked and scanned (root CLAUDE.md
+ * issue #56); the caller pads them by a day, which costs nothing at 1-day chunk granularity.
+ * `$1` run, `$2` from, `$3` to, `$4` uuid[] dashboards paired with `$5` int[] panels.
+ * ponytail: one run-segment read per checks run; persist member statistics in StatisticsPipeline if
+ * that ever shows on the I/O profile.
+ */
+export function buildMemberStatisticsSelectSQL(): string {
+  const panelPredicate = `
+            AND m.time >= $2
+            AND m.time <= $3
+            AND (m.application_dashboard_id, m.panel_id) IN (
+                SELECT d, p FROM unnest($4::uuid[], $5::int[]) AS gp(d, p)
+            )`;
+  return (
+    buildRunScopeCtes('$1') +
+    buildMetricsFilteredCte('$1', panelPredicate) +
+    buildStatisticsCtes('metrics_filtered') +
+    `
+      SELECT
+          application_dashboard_id,
+          panel_id,${SLO_STATISTIC_COLUMNS}
+      FROM final_statistics
+    `
   );
 }

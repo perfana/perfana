@@ -679,6 +679,19 @@ rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/
    `backfillMissingSketches` regroups the runs first, so this happens only when that backfill failed;
    the result is `incomparable`, not a wrong verdict, and `ControlGroupStatisticsPipeline` logs it.
 
+8. **SLOs judge the raw series, never the groups.** A threshold meant for one pod is meaningless
+   against `api (sum)` or `api (count)`, and before this fix every grouped-panel SLO failed on exactly
+   those rows. `DataAggregator` reads the run's membership once (`RUN_SERIES_GROUP_MEMBERS_SQL`) and,
+   for an SLO on a grouped panel, takes per-raw-series statistics from `buildMemberStatisticsSelectSQL`:
+   the same CTE chain over the run's `ds_metrics`, returned and never written, so ADAPT's group rows
+   stay intact. Three rules hold it together. **One read per run**, cached on the aggregator for every
+   SLO on any grouped panel: `compress_segmentby = test_run_id` means any read decompresses the run's
+   whole segment, so a per-SLO read was N full-run scans. **Time-bounded** by the run window padded a
+   day, so only the run's own chunks are locked (issue #56). **A single-metric re-evaluate scoped to a
+   group series** (`pod: emc (avg)`; `ChecksPipeline`'s `metricFilter.metricName`) keeps reading the
+   stored group row: membership holds raw names only, so that name is not a member. The next full
+   re-evaluate judges the pods again (TODOS.md). Both statements are in `check:grouped-sql`'s SPEC.
+
 A rule takes effect on the next **statistics recalculation** — a plain re-evaluate does not run
 `StatisticsPipeline` (it is gated on `refreshMode` / `recalculateStatistics`). Recalculating fetches
 nothing from Grafana, so old baselines can be regrouped after their Prometheus retention expired.

@@ -20,6 +20,10 @@
       "apps/worker/src/test/unit/pipelines/MetricsPipeline.test.ts",
       "apps/worker/src/test/unit/pipelines/helpers/ds-metrics-columns.test.ts"
     ],
+    "apps/worker/src/pipelines/checks/DataAggregator.ts": [
+      "apps/worker/src/test/unit/pipelines/checks/DataAggregator.test.ts",
+      "apps/worker/src/test/unit/pipelines/ChecksPipeline.test.ts"
+    ],
     "apps/worker/src/pipelines/helpers/ds-metrics-columns.ts": [
       "apps/worker/src/test/unit/pipelines/helpers/ds-metrics-columns.test.ts",
       "apps/worker/src/test/unit/pipelines/helpers/incremental/metric-processor-upsert.test.ts",
@@ -31,6 +35,11 @@
     ],
     "apps/worker/src/pipelines/helpers/series-grouping-plan.ts": [
       "apps/worker/src/test/unit/pipelines/statistics-series-grouping.test.ts"
+    ],
+    "apps/worker/src/pipelines/helpers/statistics-sql.ts": [
+      "apps/worker/src/test/unit/pipelines/StatisticsPipeline.test.ts",
+      "apps/worker/src/test/unit/pipelines/statistics-series-grouping.test.ts",
+      "apps/worker/src/test/unit/pipelines/checks/DataAggregator.test.ts"
     ],
     "docs/**": [],
     "package-lock.json": [],

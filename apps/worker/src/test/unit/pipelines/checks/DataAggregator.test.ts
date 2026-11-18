@@ -3,6 +3,8 @@ import { DataAggregator } from '../../../../pipelines/checks/DataAggregator.js';
 import { DataAggregationError } from '../../../../pipelines/checks/BaseCheckService.js';
 import type { EntityManager } from 'typeorm';
 import type { TestRun, Benchmark } from '../../../../pipelines/checks/BenchmarkMatcher.js';
+import { RUN_SERIES_GROUP_MEMBERS_SQL, SLO_STATISTIC_COLUMNS } from '../../../../pipelines/helpers/statistics-sql.js';
+import { SERIES_GROUPING_TABLES_PROBE_SQL } from '../../../../pipelines/helpers/series-grouping-plan.js';
 
 // Mock logger
 const mockLogger = {
@@ -19,6 +21,15 @@ vi.mock('../../../../lib/utils/logger.js', () => ({
 describe('DataAggregator', () => {
   let aggregator: DataAggregator;
   let mockManager: any;
+  // The run's grouping membership is answered here, outside mockManager.query, so every test's
+  // call indices stay those of the statistics/rollup reads it asserts on.
+  let groupMembers: Array<{ application_dashboard_id: string; panel_id: number; metric_name: string }>;
+  let membershipCalls: unknown[][];
+  let groupingTablesPresent: boolean;
+  let membershipFailures: number;
+  let budgetCalls: unknown[][];
+  const groupPanel = (names: string[], dashboard = 'app-dash-1', panel = 1) =>
+    names.map((metric_name) => ({ application_dashboard_id: dashboard, panel_id: panel, metric_name }));
 
   const createMockTestRun = (overrides?: Partial<TestRun>): TestRun => ({
     test_run_id: 'test-run-1',
@@ -61,11 +72,251 @@ describe('DataAggregator', () => {
     mockManager = {
       query: vi.fn(),
     };
+    groupMembers = [];
+    membershipCalls = [];
+    groupingTablesPresent = true;
+    membershipFailures = 0;
+    budgetCalls = [];
+    const manager = {
+      query: (sql: string, params?: unknown[]) => {
+        if (sql === SERIES_GROUPING_TABLES_PROBE_SQL) return Promise.resolve([{ present: groupingTablesPresent }]);
+        if (sql === 'SELECT set_config($1, $2, true)') { budgetCalls.push(params ?? []); return Promise.resolve([]); }
+        if (sql !== RUN_SERIES_GROUP_MEMBERS_SQL) return mockManager.query(sql, params);
+        membershipCalls.push(params ?? []);
+        if (membershipFailures > 0) { membershipFailures--; return Promise.reject(new Error('transient')); }
+        return Promise.resolve(groupMembers);
+      },
+    };
 
-    aggregator = new DataAggregator(mockLogger as any, mockManager as EntityManager);
+    aggregator = new DataAggregator(mockLogger as any, manager as unknown as EntityManager);
   });
 
   describe('aggregateMetricsForBenchmark', () => {
+    const podRow = (metric_name: string, mean: number, dashboard = 'app-dash-1', panel = 1) =>
+      ({ application_dashboard_id: dashboard, panel_id: panel, metric_name, mean, is_constant: false, count: 50 });
+
+    it('judges the raw series of a grouped panel, never its group rows', async () => {
+      groupMembers = groupPanel(['pod: emc-a', 'pod: emc-b']);
+      mockManager.query.mockResolvedValueOnce([podRow('pod: emc-a', 0.2), podRow('pod: emc-b', 0.15)]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), createMockBenchmark());
+
+      const [sql] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('FROM ds_metrics m');
+      expect(sql).not.toContain('FROM ds_metric_statistics');
+      expect(result.targets.map((t) => t.target)).toEqual(['pod: emc-a', 'pod: emc-b']);
+    });
+
+    // protects=  the raw-series read is ONE run-scoped, time-bounded, tenant-scoped read over the
+    //            run's grouped panels, bound with exactly 5 params, and never writes
+    // fails_when= the time bound is dropped (every chunk locked, CLAUDE.md #56), the panel pairing or
+    //            allowed_dashboards scope is lost, a $6 appears, or the read reuses the INSERT path
+    // why_new=   check:grouped-sql PREPAREs without param types, so a stray placeholder still
+    //            prepares; nothing else asserts the bound or the pairing
+    // seam=none  no_claim= that the SQL resolves against the schema (check:grouped-sql does that)
+    it('reads the run once, bounded by the padded run window and scoped to its grouped panels', async () => {
+      groupMembers = [...groupPanel(['pod: emc-a']), ...groupPanel(['pod: emc-a name: global'], 'app-dash-1', 132)];
+      mockManager.query.mockResolvedValueOnce([podRow('pod: emc-a', 0.2)]);
+
+      await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun({ organization_id: 'org-1' } as Partial<TestRun>), createMockBenchmark());
+
+      expect(membershipCalls).toEqual([['test-run-1']]);
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('m.time >= $2');
+      expect(sql).toContain('m.time <= $3');
+      expect(sql).toContain('unnest($4::uuid[], $5::int[])');
+      // Tenant scope: the run's org decides which dashboards count, as on the ungrouped path.
+      expect(sql).toContain('m.application_dashboard_id IN (SELECT id FROM allowed_dashboards)');
+      expect(sql).not.toMatch(/\$6\b/);
+      expect(sql).not.toMatch(/\b(INSERT|DELETE|UPDATE)\b/i);
+      expect(params).toEqual([
+        'test-run-1',
+        new Date('2023-12-31T12:00:00Z'),
+        new Date('2024-01-02T13:00:00Z'),
+        ['app-dash-1', 'app-dash-1'],
+        [1, 132],
+      ]);
+    });
+
+    // protects=  every SLO on a run's grouped panels shares one ds_metrics read (the whole run's
+    //            segment is decompressed by any read, compress_segmentby = test_run_id)
+    // fails_when= the cache is dropped and each grouped-panel SLO re-reads the run (N+1 full scans)
+    // why_new=   no other test runs two benchmarks through one aggregator
+    // seam=none  no_claim= the real cost of the read (no database here)
+    it('shares one raw-series read across the SLOs on a run\'s grouped panels', async () => {
+      groupMembers = [...groupPanel(['pod: emc-a']), ...groupPanel(['pod: emc-a name: global'], 'app-dash-1', 132)];
+      mockManager.query.mockResolvedValueOnce([
+        podRow('pod: emc-a', 0.2),
+        podRow('pod: emc-a name: global', 0.03, 'app-dash-1', 132),
+      ]);
+      const testRun = createMockTestRun();
+
+      const cpu = await aggregator.aggregateMetricsForBenchmark(testRun, createMockBenchmark());
+      const gc = await aggregator.aggregateMetricsForBenchmark(
+        testRun, createMockBenchmark({ id: 'benchmark-2', configuration: { id: 132 } }));
+
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+      expect(membershipCalls).toHaveLength(1);
+      expect(cpu.targets.map((t) => t.target)).toEqual(['pod: emc-a']);
+      expect(gc.targets.map((t) => t.target)).toEqual(['pod: emc-a name: global']);
+    });
+
+    it('applies a raw-series metric filter to the raw rows', async () => {
+      groupMembers = groupPanel(['pod: emc-a', 'pod: emc-b']);
+      mockManager.query.mockResolvedValueOnce([podRow('pod: emc-a', 0.2), podRow('pod: emc-b', 0.15)]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(), createMockBenchmark(), 'pod: emc-b');
+
+      expect(mockManager.query.mock.calls[0][0]).toContain('FROM ds_metrics m');
+      expect(result.targets.map((t) => t.target)).toEqual(['pod: emc-b']);
+    });
+
+    // protects=  an SLO whose metric filter names a GROUP series (offered by the pickers) keeps
+    //            judging that stored group row
+    // fails_when= a group-name filter is sent to the raw read, finds nothing, and the SLO silently
+    //            reads as no data / the artificial default
+    // why_new=   the other grouped tests filter by a raw name or not at all
+    // seam=none  no_claim= none beyond protects
+    it('keeps reading the stored group row when the metric filter names a group series', async () => {
+      groupMembers = groupPanel(['pod: emc-a', 'pod: emc-b']);
+      mockManager.query.mockResolvedValueOnce([{ metric_name: 'pod: emc (avg)', mean: 0.18, is_constant: false, count: 50 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(), createMockBenchmark(), 'pod: emc (avg)');
+
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expect(sql).toContain('FROM ds_metric_statistics');
+      expect(params).toEqual(['test-run-1', 'app-dash-1', 1, 'pod: emc (avg)']);
+      expect(result.targets.map((t) => t.target)).toEqual(['pod: emc (avg)']);
+    });
+
+    // protects=  a grouped panel with no raw points in the window takes the same no-data branch as
+    //            an ungrouped one (null result, or the artificial default when configured)
+    // fails_when= a grouped panel absent from the raw rows throws, or falls back to the group rows
+    // why_new=   every existing no-data test runs on an ungrouped panel
+    // seam=none  no_claim= what ADAPT does with the artificial row (unchanged by this branch)
+    it('treats a grouped panel with no raw points as no data', async () => {
+      groupMembers = groupPanel(['pod: emc-a']);
+      mockManager.query.mockResolvedValueOnce([podRow('pod: emc-z', 1, 'app-dash-1', 999)]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), createMockBenchmark());
+
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ panel_average: null, targets: [] });
+    });
+
+    // protects=  an SLO on an ungrouped panel does not depend on series grouping: a database before
+    //            migration 1819 (no ds_metric_series_groups) and a transient membership failure
+    //            both leave the ds_metric_statistics path working for later benchmarks
+    // fails_when= the to_regclass probe is dropped (42P01 on every SLO) or a rejected membership
+    //            read stays cached and fails every later SLO of the run
+    // why_new=   no other test drives the grouping read's failure or absence
+    // seam=none  no_claim= real savepoint behaviour (ChecksPipeline owns it; no database here)
+    it('never reads the membership table when it does not exist', async () => {
+      groupingTablesPresent = false;
+      mockManager.query.mockResolvedValueOnce([{ metric_name: 'cpu', mean: 1, is_constant: false, count: 50 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), createMockBenchmark());
+
+      expect(membershipCalls).toHaveLength(0);
+      expect(mockManager.query.mock.calls[0][0]).toContain('FROM ds_metric_statistics');
+      expect(result.targets.map((t) => t.target)).toEqual(['cpu']);
+    });
+
+    it('retries the membership read after a transient failure instead of replaying it', async () => {
+      membershipFailures = 1;
+      const testRun = createMockTestRun();
+      await expect(aggregator.aggregateMetricsForBenchmark(testRun, createMockBenchmark())).rejects.toThrow();
+
+      mockManager.query.mockResolvedValueOnce([{ metric_name: 'cpu', mean: 1, is_constant: false, count: 50 }]);
+      const result = await aggregator.aggregateMetricsForBenchmark(testRun, createMockBenchmark());
+
+      expect(membershipCalls).toHaveLength(2);
+      expect(result.targets.map((t) => t.target)).toEqual(['cpu']);
+    });
+
+    // protects=  a failed raw-series read (the whole run's segment) is not re-issued for every
+    //            grouped-panel SLO of the run
+    // fails_when= the rejection is evicted and each SLO re-runs the read, N x statement_timeout
+    // why_new=   the retry test above covers the cheap membership read only
+    // seam=none  no_claim= real timeout behaviour (no database here)
+    it('does not re-issue a failed raw-series read for the next grouped-panel SLO', async () => {
+      groupMembers = [...groupPanel(['pod: emc-a']), ...groupPanel(['pod: emc-a name: global'], 'app-dash-1', 132)];
+      mockManager.query.mockRejectedValueOnce(new Error('canceling statement due to statement timeout'));
+      const testRun = createMockTestRun();
+
+      await expect(aggregator.aggregateMetricsForBenchmark(testRun, createMockBenchmark())).rejects.toThrow();
+      await expect(aggregator.aggregateMetricsForBenchmark(
+        testRun, createMockBenchmark({ id: 'benchmark-2', configuration: { id: 132 } }))).rejects.toThrow();
+
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+    });
+
+    // protects=  the whole-run raw read runs under the aggregation budget (statement_timeout below
+    //            the client's 600 s query_timeout, work_mem for the sketches), set before the read
+    // fails_when= the budget is dropped, so a slow read hits the client timeout, the socket is torn
+    //            down and every later SLO of the run fails on a dead connection
+    // why_new=   nothing else asserts the checks transaction's timeout around this read
+    // seam=none  no_claim= that Postgres honours set_config (StatisticsPipeline relies on the same)
+    it('sets the aggregation budget before the raw-series read', async () => {
+      groupMembers = groupPanel(['pod: emc-a']);
+      mockManager.query.mockResolvedValueOnce([podRow('pod: emc-a', 0.2)]);
+
+      await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), createMockBenchmark());
+
+      expect(budgetCalls.map(([name]) => name)).toEqual(['statement_timeout', 'work_mem']);
+      expect(Number(budgetCalls[0][1])).toBeLessThan(600000);
+    });
+
+    // protects=  a one-pod grouped panel whose value never moved keeps its pod name as the target
+    // fails_when= the single-constant-series shortcut relabels it `default` / artificial
+    // why_new=   the shortcut was only reachable from ds_metric_statistics rows before
+    // seam=none  no_claim= none beyond protects
+    it('keeps the pod name of a constant single-pod grouped series', async () => {
+      groupMembers = groupPanel(['pod: emc-a']);
+      mockManager.query.mockResolvedValueOnce([{ ...podRow('pod: emc-a', 0), is_constant: true }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), createMockBenchmark());
+
+      expect(result.targets).toEqual([{ target: 'pod: emc-a', value: 0, isArtificial: true }]);
+    });
+
+    // protects=  the no-data default on a grouped panel is returned but never written into
+    //            ds_metric_statistics, where ADAPT would compare it beside the group rows
+    // fails_when= createArtificialMetricStatistic runs on the raw path (an INSERT after the read)
+    // why_new=   every artificial-default test runs on an ungrouped panel
+    // seam=none  no_claim= none beyond protects
+    it('returns the no-data default on a grouped panel without writing it to ADAPT\'s table', async () => {
+      groupMembers = groupPanel(['pod: emc-a']);
+      mockManager.query.mockResolvedValueOnce([]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        createMockBenchmark({ validate_with_default_if_no_data: true, validate_with_default_if_no_data_value: 5 }));
+
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ panel_average: 5, targets: [{ target: 'default', value: 5, isArtificial: true }] });
+    });
+
+    it('selects the same statistics columns on both reads', async () => {
+      mockManager.query.mockResolvedValueOnce([]);
+      await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), createMockBenchmark());
+      expect(mockManager.query.mock.calls[0][0]).toContain(SLO_STATISTIC_COLUMNS);
+
+      groupMembers = groupPanel(['pod: emc-a']);
+      const grouped = new DataAggregator(mockLogger as any, {
+        query: (sql: string, params?: unknown[]) =>
+          sql === SERIES_GROUPING_TABLES_PROBE_SQL ? Promise.resolve([{ present: true }])
+            : sql === 'SELECT set_config($1, $2, true)' ? Promise.resolve([])
+            : sql === RUN_SERIES_GROUP_MEMBERS_SQL ? Promise.resolve(groupMembers) : mockManager.query(sql, params),
+      } as unknown as EntityManager);
+      mockManager.query.mockResolvedValueOnce([]);
+      await grouped.aggregateMetricsForBenchmark(createMockTestRun(), createMockBenchmark());
+      expect(mockManager.query.mock.calls[1][0]).toContain(SLO_STATISTIC_COLUMNS);
+    });
+
     it('should aggregate metrics using mean evaluation type', async () => {
       // Arrange
       const testRun = createMockTestRun();
