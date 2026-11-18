@@ -552,6 +552,55 @@ different batches. `npx typeorm migration:run -d ormconfig.js -t each` completes
 both runners agree on `'each'` (or make 1799 savepoint only inside a transaction), and correct the
 comments in 1799 and in "The consolidated schema's policy loops…" below that assume `'each'`.
 
+### The resolver logs ERROR once per call when its lookup fails persistently (P2)
+
+**Priority:** P2
+**Origin:** v0.2.97.76 adversarial review. `SeriesGroupResolver.guarded` now logs a failed lookup at
+ERROR with the panel reference, but with no latch: `groupsForPanel` runs per chart read and
+`loadRun` per picker open, so a persistent failure (schema drift, a revoked grant) writes one ERROR
+line per chart, ~20 per dashboard page view. Latch the first ERROR per distinct message per process
+(like `tablesPresent`), log later ones at debug.
+
+### A non-uuid `applicationDashboardId` reaches the resolver's SQL as a 22P02 (P3)
+
+**Priority:** P3
+**Origin:** v0.2.97.76 adversarial review. `metrics.controller.ts` takes `applicationDashboardId` as a
+plain string (no `ParseUUIDPipe`) on the routes around lines 105, 161 and 249. A non-uuid reaches
+`g.application_dashboard_id = $2` and Postgres raises `invalid input syntax for type uuid`. Since
+v0.2.97.76 that degrades cleanly (SAVEPOINT) but still logs at ERROR, and any signed-in caller can
+repeat it. Not verified whether an earlier statement on those routes rejects it first. Validate the
+id at the controller, or treat a non-uuid as "no panel address" in `panelPredicates`.
+
+### The resolver's rule fallback is never run against Postgres (P3)
+
+**Priority:** P3
+**Origin:** v0.2.97.76. `src/test/rls/series-group-resolver-sql.spec.ts` runs the membership and rule
+lookups against the real schema, but with a run id that matches nothing, so
+`applyRulesToStoredNames` (the `SELECT DISTINCT panel_id, metric_name FROM ds_metrics` fallback for a
+live or unrecalculated run) never executes there. Seed one enabled `series_grouping_rules` row and a
+`test_runs` row in a rolled-back transaction and assert the fallback runs without an error. The same
+gap covers the other hand-written grouped SQL in `metrics.service.ts` (`readGroupedPanel`) and
+`report-data-fetcher.service.ts` (`getAvailableMetricsPanels`), which only mocked specs exercise.
+
+### A resolver ROLLBACK TO can undo a concurrent sibling's statements (P4)
+
+**Priority:** P4
+**Origin:** v0.2.97.76 adversarial review. `SeriesGroupResolver.guarded` serialises its own lookups
+per request transaction, but other code can still run on that transaction between its SAVEPOINT and
+a ROLLBACK TO, and the rollback reverts that work too (writes, `set_config(..., true)` GUCs). A
+sibling read that lands between a failed lookup statement and its ROLLBACK TO gets 25P02 instead
+(the Comparisons section's `Promise.all`, `comparisons-renderer.ts:171`). Every current caller only
+reads and a lookup fails only on a real query error, so there is no live data loss. Revisit if a resolver caller ever shares a
+transaction with concurrent writes.
+
+### A failed grouping lookup is indistinguishable from "nothing grouped" (P3)
+
+**Priority:** P3
+**Origin:** v0.2.97.76 adversarial review. `groupsForPanel` / `loadRun` return the same value for "no
+rule" and "lookup failed", so a caller cannot choose to degrade differently (a report could refuse
+rather than print raw pod names that have no statistics). Return a discriminated result or a
+`degraded` flag the response can carry.
+
 ---
 
 ## Profiles
