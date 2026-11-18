@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.77] - 2026-11-18
+
+### Added
+- **Series grouping rules on a profile.** A profile dashboard now has a *Series grouping* section, like a system's Grafana dashboard: pick a panel (or all panels), a pattern and the series each group should produce. Perfana creates the rule on every system the profile applies to, for the workload of each matching run, so per-pod series line up across deployments without setting up each system by hand.
+- **Profile rules stay in step with their copies.** Editing, disabling or deleting a profile rule changes every copy nobody has edited on the system's own dashboard settings. A copy someone edited there keeps their version and is marked *From profile (edited)*; an untouched one is marked *From profile*. A rule already on a panel, made by hand or by another profile, is never replaced.
+- **Re-pointing a profile dashboard at another Grafana dashboard** (or the same dashboard on another Grafana instance) removes the copies its rules made and disables its single-panel rules, whose panel ids came from the old dashboard. Re-enable each after checking its panel.
+- `GET/POST/PUT/DELETE /api/profiles/:id/dashboards/:dashboardId/grouping-rules`, for provisioning rules from CI. Writes need org-admin in the profile's organization.
+
+### Changed
+- **Deleting a profile now also deletes its dashboards' series grouping rules**, so a profile created later under the same name starts without them.
+
+### Notes
+- Run the database migration before rolling out the API: an API on this version fails the series grouping endpoints until migration 1826 has run.
+- A profile rule applies from each run's next analysis, and nothing is recalculated for you; use the anomaly card's recalculate notice if earlier runs should be compared with it. To keep a profile rule off one workload, disable its copy rather than deleting it: a deleted copy comes back on the profile's next matching run.
+
 ## [0.2.97.76] - 2026-11-18
 
 ### Fixed
