@@ -210,7 +210,9 @@ export class SeriesGroupResolver {
       }
       return await this.applyRulesToStoredNames(q, ref, grouping.rules);
     } catch (error) {
-      this.logger.warn(`Series grouping unavailable, reading ungrouped: ${(error as Error).message}`);
+      // ERROR, not WARN: a missing table never gets here (ensureTables answers it), so this is a
+      // real query failure, and every grouped series silently degrades to raw pods because of it.
+      this.logger.error(`Series grouping unavailable, reading ungrouped: ${(error as Error).message}`);
       return [];
     }
   }
@@ -238,7 +240,7 @@ export class SeriesGroupResolver {
       if (!(await this.ensureTables(q))) return EMPTY_GROUPING;
       return await this.load(q, { testRunId });
     } catch (error) {
-      this.logger.warn(`Series grouping unavailable, listing ungrouped: ${(error as Error).message}`);
+      this.logger.error(`Series grouping unavailable, listing ungrouped: ${(error as Error).message}`);
       return EMPTY_GROUPING;
     }
   }
@@ -305,8 +307,7 @@ export class SeriesGroupResolver {
               g.dashboard_label::text AS dashboard_label, g.panel_title::text AS panel_title,
               g.metric_name::text AS metric_name, g.group_name::text AS group_name,
               g.aggregations::text[] AS aggregations,
-              NULL::text AS preset, NULL::text AS pattern, NULL::text AS replacement,
-
+              NULL::text AS preset, NULL::text AS pattern, NULL::text AS replacement
          FROM ds_metric_series_groups g
         WHERE g.test_run_id = $1 AND ${membershipWhere}
        UNION ALL

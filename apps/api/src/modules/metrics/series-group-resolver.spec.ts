@@ -85,6 +85,9 @@ describe('SeriesGroupResolver', () => {
       expect(q.calls[1]!.sql).toContain('FROM ds_metric_series_groups g');
       expect(q.calls[1]!.sql).toContain('FROM series_grouping_rules r');
       expect(q.calls[1]!.params).toEqual([RUN, DASH, 201]);
+      // v0.2.97.44 left a comma before FROM; the catch read the syntax error as "ungrouped"
+      // and every picker listed raw pods. A mock cannot parse SQL, so pin that shape at least.
+      expect(q.calls[1]!.sql).not.toMatch(/,\s*FROM\b/);
     });
 
     it('remembers that the tables exist, so later lookups are one statement', async () => {
