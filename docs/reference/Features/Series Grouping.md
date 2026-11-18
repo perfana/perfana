@@ -60,9 +60,10 @@ no edit ever changes what an existing series measures. A series the rule does no
 alone entirely and keeps its own name, because a group of one has nothing to combine.
 
 **Unticking a box is not free.** The series disappears on the next recalculation. Anomaly detection
-drops its own results, but an SLO, a saved graph preset or a report section pointing at `api (sum)`
-will stop matching it — and an SLO that matches nothing records no verdict rather than failing. The
-dialog warns when a saved rule loses a series this way.
+drops its own results, but a saved graph preset or a report section pointing at `api (sum)` will
+stop matching it. An SLO is not affected: it judges the pods, not the group series (see
+[When a rule takes effect](#when-a-rule-takes-effect)). The dialog warns when a saved rule loses a
+series this way.
 
 Each box multiplies the number of series on the panel, so a dashboard-wide rule with all four is
 four series per group. The dialog prints the total before you save.
@@ -72,7 +73,7 @@ A total and a pod count are both replica-count dependent: scale a Deployment fro
 four and each doubles, which is a scale-out and not a regression. So Perfana gives those two an
 *unclassified* comparison setting, which means anomaly detection reports a change in them as a
 difference and never as a
-regression — it cannot turn a run red on its own. The plain group series keeps whatever
+regression — it cannot turn a run red on its own. The average and the highest keep whatever
 classification the panel has. If you do want a derived series judged, set a comparison
 classification on it explicitly and Perfana will leave your setting alone.
 
@@ -159,6 +160,15 @@ rewritten. It applies to a run the next time its statistics are calculated — o
 or when you choose **Save and recalculate** (the run and its baseline runs) or **Recalculate** on
 the stale notice. Until baseline runs are recalculated, a group has no baseline in them. Charts,
 saved graph presets and reports holding a group name draw it by combining its members.
+
+A rule changes what **anomaly detection** compares, not what an **SLO** judges (v0.2.97.78). An
+SLO on a grouped panel is evaluated against each raw series (each pod), computed during the SLO
+check from the run's `ds_metrics`, exactly as on an ungrouped panel; a threshold meant for one pod
+would be meaningless against `api (sum)` or `api (count)`. The one exception is a re-evaluate
+scoped to a single group series (`api (avg)`), which judges that series; the next full re-evaluate
+judges the pods again. A match pattern written
+against group names (`\(avg\)$`) therefore matches nothing and reads as "could not be evaluated".
+Stored SLO results change only when the run is evaluated again.
 
 ## Permissions
 
