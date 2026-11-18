@@ -18,7 +18,7 @@ import {
   type Route,
 } from '../../test/series-grouping-insights-helpers';
 
-const K8S_AVG = { preset: 'k8s-pod', aggregation: 'avg', trackMemberCount: false } as const;
+const K8S_AVG = { preset: 'k8s-pod', aggregations: ['avg'] } as const;
 
 const body = (overrides: Record<string, unknown> = {}) =>
   ({ testRunId: 'run-001', applicationDashboardId: DASHBOARD.id, panelId: 1, rule: K8S_AVG, ...overrides }) as never;
@@ -191,29 +191,39 @@ describe('SeriesGroupingInsightsService.preview', () => {
       config_title: 'API response time',
       panel_title: 'Response time',
       match_pattern: null,
-      config_match_pattern: '^api-',
+      config_match_pattern: '^api$',
       invert_match_pattern: null,
       panel_key: '1',
       ...overrides,
     });
 
-    it('warns when an SLO pattern matches raw names but no group name', async () => {
+    // Since v0.2.97.78 an SLO on a grouped panel judges each raw series, so the pattern that
+    // breaks is one written against the rule's group names: it matches no pod.
+    it('warns when an SLO pattern matches a group name but no raw name', async () => {
       const { service } = makeService(baselineRoutes(podNames, [[/sg:benchmarks/, () => [benchmark()]]]));
 
       const { sloWarnings } = await service.preview(body(), [ORG_A]);
 
-      expect(sloWarnings).toEqual([{ benchmarkId: 'bm-1', name: 'API response time', matchPattern: '^api-' }]);
+      expect(sloWarnings).toEqual([{ benchmarkId: 'bm-1', name: 'API response time', matchPattern: '^api$' }]);
     });
 
-    it('does not warn when the pattern still matches a group name', async () => {
+    it('warns when an SLO pattern matches only a derived series such as `api (avg)`', async () => {
       const { service } = makeService(
-        baselineRoutes(podNames, [[/sg:benchmarks/, () => [benchmark({ config_match_pattern: '^api' })]]]),
+        baselineRoutes(podNames, [[/sg:benchmarks/, () => [benchmark({ config_match_pattern: '\\(avg\\)$' })]]]),
+      );
+
+      expect((await service.preview(body(), [ORG_A])).sloWarnings.map((w) => w.benchmarkId)).toEqual(['bm-1']);
+    });
+
+    it('does not warn when the pattern matches a pod: the SLO keeps judging it after grouping', async () => {
+      const { service } = makeService(
+        baselineRoutes(podNames, [[/sg:benchmarks/, () => [benchmark({ config_match_pattern: '^api-' })]]]),
       );
 
       expect((await service.preview(body(), [ORG_A])).sloWarnings).toEqual([]);
     });
 
-    it('does not warn about an SLO whose pattern matched nothing to begin with', async () => {
+    it('does not warn about a pattern that matches neither a pod nor a group', async () => {
       const { service } = makeService(
         baselineRoutes(podNames, [[/sg:benchmarks/, () => [benchmark({ config_match_pattern: '^nothing' })]]]),
       );
@@ -227,8 +237,8 @@ describe('SeriesGroupingInsightsService.preview', () => {
           [
             /sg:benchmarks/,
             () => [
-              benchmark({ id: 'col', config_match_pattern: null, match_pattern: '^api-' }),
-              benchmark({ id: 'both', config_match_pattern: '^api', match_pattern: '^api-' }),
+              benchmark({ id: 'col', config_match_pattern: null, match_pattern: '^api$' }),
+              benchmark({ id: 'both', config_match_pattern: '^api-', match_pattern: '^api$' }),
             ],
           ],
         ]),
@@ -259,11 +269,10 @@ describe('SeriesGroupingInsightsService.preview', () => {
     });
 
     it('honours an inverted pattern: it names the series to EXCLUDE', async () => {
-      // Inverted `^api-`: judged = names that do NOT match. Raw pod names all match, so nothing
-      // was judged before; the group `api` does not match, so it is judged after. No warning.
+      // Inverted `\(avg\)$`: judged = names that do NOT end in (avg), which is every pod. No warning.
       const { service } = makeService(
         baselineRoutes(podNames, [
-          [/sg:benchmarks/, () => [benchmark({ invert_match_pattern: 'true' })]],
+          [/sg:benchmarks/, () => [benchmark({ config_match_pattern: '\\(avg\\)$', invert_match_pattern: 'true' })]],
         ]),
       );
 

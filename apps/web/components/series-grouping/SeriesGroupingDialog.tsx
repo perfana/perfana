@@ -672,7 +672,8 @@ export default function SeriesGroupingDialog({
             ) : (
               preview.sloWarnings.map((w) => (
                 <Alert key={w.benchmarkId} severity="warning">
-                  SLO &quot;{w.name}&quot; matches <code>{w.matchPattern}</code> and will match nothing after grouping.
+                  SLO &quot;{w.name}&quot; matches <code>{w.matchPattern}</code>, which selects only group names. SLOs judge each
+                  individual series, so it will judge nothing: change the pattern to match the series names.
                 </Alert>
               ))
             )}
