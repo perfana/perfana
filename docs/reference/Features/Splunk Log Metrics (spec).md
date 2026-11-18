@@ -339,6 +339,21 @@ perfana-api, and the dialog shows the code:
 "has neither a token nor a username and password" is raised before any network call, so a typo in
 the host only shows up once credentials are filled in.
 
+## Troubleshooting empty panels
+
+With `LOG_LEVEL=debug` the worker logs every search it sends and what came back:
+`Splunk panel "<title>" search (<ms>ms, <n> lines, <n> final rows, <n> preview rows): <SPL>`.
+Paste the SPL into Splunk Web to compare. `0 lines` means Splunk returned nothing for that window;
+`used last preview set` means the export sent no final rows (handled since v0.2.97.75). A panel
+whose search returns no points also logs its window and SPL at info level.
+
+The card-level **Open in Splunk** link searches only the mapped sources. Each panel's own link runs
+that panel's search, so use it to check a filter.
+
+Analysis re-reads Splunk once for a run collected live, if the run ended in the last 24 hours, to
+pick up events Splunk indexed after the live ticks' 5-minute lookback. Recover an older run with a
+force re-fetch.
+
 ## Docs
 
 - `docs-user/docs/integrations/connect-splunk.md`: token creation, the Splunk role, Splunk Cloud
