@@ -488,13 +488,14 @@ describe('SeriesGroupingDialog', () => {
       [`POST ${PREVIEW_URL}`]: preview(
         [{ ...podPanel, baselineNames: [...podPanel.baselineNames, 'api'] }],
         {
-          sloWarnings: [{ benchmarkId: 'b-1', name: 'API pod CPU < 80%', matchPattern: '^api-' }],
+          sloWarnings: [{ benchmarkId: 'b-1', name: 'API pod CPU < 80%', matchPattern: '^api$' }],
           alignment: [{ panelId: 4, group: 'worker', members: 3, avgMembers: 1 }],
         },
       ),
     });
     renderDialog();
     expect(await screen.findByText(/API pod CPU < 80%/)).toBeInTheDocument();
+    expect(screen.getByText(/selects only group names/)).toBeInTheDocument();
     expect(screen.getByText(/is also a series name in a baseline run/)).toBeInTheDocument();
     expect(screen.getByText(/report at different\s+timestamps/)).toBeInTheDocument();
   });

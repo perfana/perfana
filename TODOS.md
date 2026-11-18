@@ -329,18 +329,6 @@ Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.m
 shipped all three stages in one release: PR A (the engine), PR B (the rules API) and PR C (the
 web), which were developed as separate versions on one branch and squash-merged together.
 
-### The series grouping dialog's SLO warning is inverted since v0.2.97.78
-
-**Priority:** P1
-
-The rule dialog warns that an SLO whose match pattern selects pods "will match nothing after
-grouping" (`findSloWarnings` in `apps/api/src/modules/series-grouping/series-grouping-insights.service.ts`,
-shown by `apps/web/components/series-grouping/SeriesGroupingDialog.tsx`, described in
-`docs/reference/Features/Series Grouping.md`). Since v0.2.97.78 SLOs judge the raw series, so that
-warning is false, and the case that now breaks, a pattern written against group names (`\(avg\)$`)
-that matches no pod, goes unwarned. Invert the check, update its 8 preview specs, the dialog text
-and the doc, and check the dialog in a browser.
-
 ### SLOs on grouped panels: follow-ups from the v0.2.97.78 review
 
 **Priority:** P2 (item 1), P3 (the rest)

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.79] - 2026-11-18
+
+### Fixed
+- **The series grouping dialog warns about the right SLOs.** Since v0.2.97.78 SLOs on a grouped panel judge each pod, so the dialog's warning that an SLO matching pods "will match nothing after grouping" was false. It now warns about the SLOs that do break: a match pattern that selects only group names, such as `^api$` or `\(avg\)$`, which matches no pod and judges nothing.
+
 ## [0.2.97.78] - 2026-11-18
 
 ### Fixed
