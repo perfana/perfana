@@ -1353,6 +1353,58 @@ preset=… matched <b>% -> <a>% incomparable=<n>`) and rules carry `origin`; tog
 helper for the insights specs lives in `src/test/`, which the build excludes — beside the module it
 was compiled into `dist`.
 
+### A profile series grouping rule is provisioned per workload and followed while unedited
+
+`/profiles/:id/dashboards/:dashboardId/grouping-rules` (v0.2.97.75, `profile-series-grouping.*` in
+`modules/profiles/`) stores rules on a profile dashboard in `profile_series_grouping_rules`
+(migration 1826). grafana-sync's `GroupingRuleProcessorService` writes them into
+`series_grouping_rules` per application dashboard built from the template (`template_dashboard_uid`,
+the same lookup profile SLOs use) and per run workload. Five things to keep:
+
+1. **Ownership is `updated_by IS NULL`**, the profile-SLO rule. Provisioned rows are written with
+   `created_by = 'system:profile'` and no `updated_by`; every save through `/series-grouping-rules`
+   stamps the user, which detaches the row for good. Do not key ownership on `origin = 'profile'`:
+   origin stays `profile` after a hand edit, which is how the system page labels it *edited*.
+2. **`profile_rule_id` has no foreign key on purpose.** A SUT export carries the column; an FK would
+   reject the import wherever that profile rule does not exist. The API therefore deletes owned rows
+   itself — on a rule delete, a profile-dashboard delete and a profile delete (profile dashboards
+   key on the profile's NAME with no FK and outlive it) — always BEFORE the profile rows go, because
+   `deleteOwnedProvisionedRules` finds them through `profile_series_grouping_rules`.
+3. **Both sides write.** The API carries an edit immediately (`propagateToProvisionedRules`), and
+   every auto-config pass re-syncs owned rows from the profile rule with an `ON CONFLICT ... DO
+   UPDATE WHERE profile_rule_id = EXCLUDED.profile_rule_id AND updated_by IS NULL`, so an edit the
+   API's statement missed still lands. Both write only a difference.
+4. **A slot is never taken over.** A hand-made rule, or another profile's rule, already on the slot
+   wins; with two profile rules for one slot the first provisioned keeps it rather than the two
+   taking turns on every pass.
+5. **Both write paths pin the organization**, even though grafana-sync already only matches a
+   profile inside its own organization: `profile_rule_id` is not trustworthy on its own once a SUT
+   import has carried it across environments.
+
+6. **grafana-sync writes the rule's fields from the table, never from its pass-start copy, and the API
+   deletes rules before their copies.** The upsert is `INSERT ... SELECT ... FROM
+   profile_series_grouping_rules r JOIN profile_grafana_dashboards d ... WHERE r.id = $5 AND r.enabled
+   AND d.dashboard_uid = $9 FOR SHARE OF r, d`; every API delete path removes the profile rules first
+   and then their copies `WHERE profile_rule_id = ANY(<ids collected beforehand>)`. Together that closes
+   the race: a racing insert waits on the locked rule and then copies nothing, or committed first and
+   is seen by the later DELETE (verified with two live sessions: the insert blocked ~4 s, wrote 0 rows,
+   left 0 copies). Reverse either half and a pass can create a copy whose `profile_rule_id` no delete
+   finds again (no FK), still applied by the worker. `d.dashboard_uid = $9` also drops a rule re-pointed
+   after the pass looked its template up, and `r.enabled` keeps a disabled rule from taking slots.
+7. **Roll the migration out before the API.** `SeriesGroupingRule` now declares `profile_rule_id`, so an
+   API on this version against a database without 1826 fails every `/series-grouping-rules` read with
+   `column "profile_rule_id" does not exist` (same shape as #63). grafana-sync tolerates the missing
+   table (42P01 reads as "no rules"); the API does not.
+
+A profile rule's panel is fixed after create, like a workload rule's slot. Re-pointing its profile
+dashboard at another template (`updateDashboard` with a new `dashboardUid` **or `grafanaLabel`**, since
+a uid is unique only within one Grafana) deletes its unedited
+copies and **disables its panel-scoped rules**: their ids were picked from the old template, and
+provisioning them blind would group an unrelated panel on the new one (as a retargeted profile SLO is
+disabled). All-panels rules stay enabled. Changing a rule changes no
+stored statistics: a run reads as stale in its anomaly card and is regrouped on its next
+recalculation, exactly as after a hand edit.
+
 ### `hasData` probes one index per dashboard, and that inverted when the index landed
 
 `filterToDashboardsWithData` narrows a page of application dashboards to the ones

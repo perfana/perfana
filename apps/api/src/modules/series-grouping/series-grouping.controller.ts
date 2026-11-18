@@ -121,7 +121,9 @@ export class SeriesGroupingController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete a series grouping rule',
-    description: "Runs analysed under the rule keep their grouped statistics until they are recalculated; their membership rows lose the rule reference, which the status endpoint reports as stale.",
+    description:
+      "Runs analysed under the rule keep their grouped statistics until they are recalculated; their membership rows lose the rule reference, which the status endpoint reports as stale. " +
+      "A rule a profile created (origin 'profile', not edited since) comes back on the profile's next matching run; to opt a workload out, disable it instead, or delete the rule on the profile.",
   })
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 204 })

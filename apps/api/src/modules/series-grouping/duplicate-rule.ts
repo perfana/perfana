@@ -6,8 +6,10 @@ export const SERIES_GROUPING_SLOT_INDEX = 'uq_series_grouping_rules_slot';
  *
  * Reads `code`/`constraint` both off the error and off a nested `driverError`, because TypeORM's
  * `QueryFailedError` and a rethrown driver error carry them in different places (same reasoning
- * as `isDuplicateSloTargetError` in `@perfana/shared/utils`). Only the API writes this table, so
- * the helper stays here (apps/api/CODING_RULES.md, "Turning a constraint violation into a 409").
+ * as `isDuplicateSloTargetError` in `@perfana/shared/utils`). grafana-sync writes this table too
+ * (profile provisioning, migration 1826), but upserts with `ON CONFLICT ON CONSTRAINT
+ * uq_series_grouping_rules_slot` and never raises the error, so the helper stays here; a rename of
+ * the constraint has to change that statement as well (apps/api/CODING_RULES.md, "Turning a constraint violation into a 409").
  */
 export function isDuplicateSeriesGroupingSlot(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;

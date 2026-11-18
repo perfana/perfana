@@ -732,6 +732,46 @@ describe('ProfilesService', () => {
       );
     });
 
+    // Value: protects=re-pointing a profile dashboard at another template removes the unedited grouping
+    //   rules it provisioned on the old template's dashboards, and only then; fails_when=the cleanup is
+    //   dropped, or fires on an edit that keeps the template; why_new=updateDashboard had no provisioned-rule
+    //   case; seam=none; no_claim=the DELETE against Postgres (query mocked)
+    it('removes the series grouping rules it provisioned when re-pointed at another template, and only then', async () => {
+      const deletes = () =>
+        dbQuery.mock.calls.filter(([sql]) => String(sql).includes('DELETE FROM series_grouping_rules'));
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileDashboardRepo.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
+      grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+      grafanaDashboardRepo.findOne.mockResolvedValue(mockGrafanaDashboard);
+
+      dbQuery.mockImplementation(async (sql: string) =>
+        String(sql).includes('SELECT id FROM profile_series_grouping_rules') ? [{ id: 'psr-1' }] : [[], 0],
+      );
+      profileDashboardRepo.findOne.mockResolvedValue({ ...mockProfileDashboard });
+      await service.updateDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', updateDto, mockUserId, mockOrgScope);
+      expect(deletes()).toHaveLength(0);
+
+      profileDashboardRepo.findOne.mockResolvedValue({ ...mockProfileDashboard });
+      await service.updateDashboard(
+        'profile-uuid-1', 'profile-dashboard-uuid-1', { dashboardUid: 'another-template' }, mockUserId, mockOrgScope,
+      );
+      expect(deletes()).toHaveLength(1);
+      expect(deletes()[0][1]).toEqual([['psr-1'], mockProfile.organizationId]);
+      // Its panel-scoped rules name panels of the old template: disabled, never provisioned blind.
+      const disables = dbQuery.mock.calls.filter(([sql]) => String(sql).includes('UPDATE profile_series_grouping_rules'));
+      expect(disables).toHaveLength(1);
+      expect(String(disables[0][0])).toContain('panel_id IS NOT NULL');
+      expect(disables[0][1]).toEqual(['profile-dashboard-uuid-1', mockUserId]);
+
+      // The same uid on another Grafana instance is another template too (root CLAUDE.md #43).
+      dbQuery.mockClear();
+      profileDashboardRepo.findOne.mockResolvedValue({ ...mockProfileDashboard });
+      await service.updateDashboard(
+        'profile-uuid-1', 'profile-dashboard-uuid-1', { grafanaLabel: 'OtherGrafana' }, mockUserId, mockOrgScope,
+      );
+      expect(deletes()).toHaveLength(1);
+    });
+
     it('should throw NotFoundException when profile does not exist', async () => {
       // Arrange
       profileRepo.findOne.mockResolvedValue(null);
@@ -2007,8 +2047,23 @@ describe('ProfilesService', () => {
       it('logs DELETE before remove on deleteProfile()', async () => {
         profileRepo.findOne.mockResolvedValue(ownedProfile);
         profileRepo.remove.mockResolvedValue(ownedProfile);
+        profileDashboardRepo.find.mockResolvedValue([{ id: 'pd-1' }] as never);
+        dbQuery.mockImplementation(async (sql: string) =>
+          String(sql).includes('DELETE FROM profile_series_grouping_rules') ? [[{ id: 'psr-1' }], 1] : [[], 0],
+        );
 
         await service.deleteProfile('profile-uuid-1', mockUserId, mockOrgScope);
+
+        // Its dashboards' series grouping rules go with it (a later profile of the same name must not
+        // inherit them), and then the copies those rules provisioned, by rule id.
+        expect(dbQuery).toHaveBeenCalledWith(
+          expect.stringContaining('DELETE FROM profile_series_grouping_rules'),
+          [['pd-1']],
+        );
+        expect(dbQuery).toHaveBeenCalledWith(
+          expect.stringContaining('DELETE FROM series_grouping_rules'),
+          [['psr-1'], 'org-1'],
+        );
 
         expect(auditService.logDelete).toHaveBeenCalledTimes(1);
         expect(auditService.logDelete).toHaveBeenCalledWith(
@@ -2210,6 +2265,16 @@ describe('ProfilesService', () => {
         'profile-uuid-1', 'benchmark-uuid-1', { requirementValue: 1 } as UpdateProfileBenchmarkDto, mockUserId, scope,
       )],
       ['deleteBenchmark', (scope) => service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, scope)],
+      // Value: protects=the profile series grouping routes get the profile's 404-then-403 scoping;
+      // fails_when=requireProfileDashboard skips requireScopedProfile or the write org-admin check;
+      // why_new=ProfileSeriesGroupingService spec mocks this method; seam=none;
+      // no_claim=controller wiring (unit only, repos mocked)
+      ['findGroupingRuleScope (requireProfileDashboard, read)', (scope) => service.requireProfileDashboard(
+        'profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, scope, false,
+      )],
+      ['requireProfileDashboard (write)', (scope) => service.requireProfileDashboard(
+        'profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, scope, true,
+      )],
     ];
 
     const expectNothingWritten = () => {
@@ -2290,6 +2355,23 @@ describe('ProfilesService', () => {
         expect(profileRepo.remove).toHaveBeenCalledWith(profileInA);
       });
 
+      // Value: protects=a profile dashboard delete removes the unedited workload rules it provisioned, before the row;
+      // fails_when=the deleteOwnedProvisionedRules call is dropped, mis-scoped, or moved after remove (join no longer resolves);
+      // why_new=deleteProfile's assertion does not reach deleteDashboard; seam=none;
+      // no_claim=the SQL's semantics against Postgres (query mocked; unit only)
+      it('deletes the series grouping rules its dashboard provisioned, by rule id, in the profile org, after the dashboard', async () => {
+        dbQuery.mockImplementation(async (sql: string) =>
+          String(sql).includes('SELECT id FROM profile_series_grouping_rules') ? [{ id: 'psr-1' }] : [[], 0],
+        );
+        await service.deleteDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, [ORG_A]);
+
+        const call = dbQuery.mock.calls.findIndex(([sql]) => String(sql).includes('DELETE FROM series_grouping_rules'));
+        expect(call).toBeGreaterThanOrEqual(0);
+        expect(dbQuery.mock.calls[call]![1]).toEqual([['psr-1'], ORG_A]);
+        // After the cascade removed the rules: a racing grafana-sync insert waits on them and then copies nothing.
+        expect(dbQuery.mock.invocationCallOrder[call]!).toBeGreaterThan(profileDashboardRepo.remove.mock.invocationCallOrder[0]!);
+      });
+
       it('deletes its dashboard and its benchmark', async () => {
         await service.deleteDashboard('profile-uuid-1', 'profile-dashboard-uuid-1', mockUserId, [ORG_A]);
         await service.deleteBenchmark('profile-uuid-1', 'benchmark-uuid-1', mockUserId, [ORG_A]);
@@ -2348,6 +2430,10 @@ describe('ProfilesService', () => {
           service.updateDashboard('profile-uuid-1', 'dash-b', { readOnly: true } as UpdateProfileDashboardDto, mockUserId, [ORG_A]),
         ).rejects.toThrow(NotFoundException);
         await expect(service.deleteDashboard('profile-uuid-1', 'dash-b', mockUserId, [ORG_A])).rejects.toThrow(NotFoundException);
+        // The grouping-rule routes resolve the dashboard the same way, so another profile's is a 404 there too.
+        await expect(
+          service.requireProfileDashboard('profile-uuid-1', 'dash-b', mockUserId, [ORG_A], true),
+        ).rejects.toThrow(NotFoundException);
         expectNothingWritten();
       });
 

@@ -154,6 +154,27 @@ const ENTITY_FIXTURES: Record<string, FixtureFn> = {
     );
     return { id: rows[0].id };
   },
+
+  // Profile series grouping rules (migration 1826): a rule hangs off a profile dashboard in the
+  // same organization. The parent is left behind, like the series_grouping_rules fixture's.
+  profile_series_grouping_rules: async (ds, orgId) => {
+    const suffix = `${orgId}-${Date.now()}-${Math.random()}`;
+    const dashboard = await ds.query(
+      `INSERT INTO profile_grafana_dashboards
+         (id, profile, dashboard_name, dashboard_uid, organization_id, created_by)
+       VALUES (gen_random_uuid(), $1, $1, 'uid', $2, 'fixture-creator')
+       RETURNING id`,
+      [`rls-fixture-psgr-${suffix}`, orgId],
+    );
+    const rows = await ds.query(
+      `INSERT INTO profile_series_grouping_rules
+         (id, profile_dashboard_id, panel_id, preset, organization_id, created_by)
+       VALUES (gen_random_uuid(), $1, 7, 'k8s-pod', $2, 'fixture-creator')
+       RETURNING id`,
+      [dashboard[0].id, orgId],
+    );
+    return { id: rows[0].id };
+  },
 };
 
 const TABLES = Object.keys(ENTITY_FIXTURES);
