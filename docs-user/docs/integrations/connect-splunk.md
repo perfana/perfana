@@ -44,7 +44,7 @@ To change the connection later, open the Splunk card and click **Settings**.
 5. Under **Panels**, click **Add starter panels**, enter the **Field that holds the log level** (often `log_level`, `level` or `severity`), and click **Add panels**.
    Perfana adds three panels: **Log events by level**, **Errors by host** and **Exceptions by type**.
 6. Optional: click **Add panel** to write your own. A panel has:
-   - **Filter (SPL)** — start from `$entities`, which stands for the sources mapped above (`$entities[backend]` keeps only sources labelled `backend`). Perfana adds the run's time window and the `timechart` itself, so leave out `earliest`, `latest` and `| timechart`.
+   - **Filter (SPL)** — start from `$entities`, which stands for the sources mapped above (`$entities[backend]` keeps only sources labelled `backend`). Perfana adds the run's time window and the `timechart` itself, so leave out time modifiers (`earliest`, `latest`, `starttime`, `endtime`) and `| timechart`. A filter that contains one is refused.
    - **Value** — `count`, or `avg(field)`, `p95(field)`, `max(field)`, `dc(field)`.
    - **One series per** — a field to split on, such as `log_level` or `host`.
    - **Max series** — series beyond this number are added up into `OTHER`, so totals stay correct.

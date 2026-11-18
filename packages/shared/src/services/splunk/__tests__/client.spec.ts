@@ -114,6 +114,22 @@ describe('splunkTimechart', () => {
   });
 });
 
+describe('splunkTimechart send-time guard', () => {
+  // Value: protects=an expanded, scoped filter carrying a time modifier is refused before any request leaves,
+  // on the path the worker and the API preview both use; fails_when=buildTimechartSearch stops validating the
+  // expanded filter; why_new=the validator cases call validateSplFilter directly; seam=none; no_claim=none beyond protects
+  it('refuses a scoped filter with a time modifier and sends nothing', async () => {
+    const fetchImpl = jest.fn();
+    const filter = scopeSplFilter('$entities earliest=-30d', [{ indexName: 'a' }])!;
+    await expect(splunkTimechart(
+      { host: 'https://s:8089', apiToken: 't' },
+      { filter, from: new Date('2026-11-17T10:00:00Z'), to: new Date('2026-11-17T11:00:00Z'), bucketSeconds: 60 },
+      { fetchImpl },
+    )).rejects.toThrow('time modifiers');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
 describe('splunkTimechart window precedence', () => {
   // Value: protects=the collection window always comes from the run, whatever a caller passes in opts;
   // fails_when=the spread in splunkTimechart is reversed so a stray earliestTime/latestTime replaces it;
@@ -162,6 +178,10 @@ describe('validateSplFilter', () => {
     expect(validateSplFilter('$entities my_earliest_value=3 latest_build=7')).toBeNull();
   });
 
+  it('allows a field named like a modifier outside search segments', () => {
+    expect(validateSplFilter('$entities | eval endtime=_time+5 | where starttime>0')).toBeNull();
+  });
+
   it.each([
     ['index=x | outputlookup foo.csv', 'outputlookup'],
     ['index=x | inputlookup users.csv', 'inputlookup'],
@@ -177,6 +197,8 @@ describe('validateSplFilter', () => {
     ['$entities _index_earliest=-1d', 'time modifiers'],
     ['$entities starttime=11/18/2026:00:00:00', 'time modifiers'],
     ['$entities endtimeu=1795007111', 'time modifiers'],
+    ['$entities hoursago=48', 'time modifiers'],
+    ["$entities | search 'a earliest=-1y'", 'time modifiers'],
     ['index=x "unclosed', 'Unbalanced'],
     ['index=x \\" | outputlookup foo "', 'backslash'],
     ['$entities "x $testRunId | outputlookup y"', 'outside a quoted string'],

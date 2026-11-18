@@ -128,10 +128,13 @@ export const ALLOWED_SPL_COMMANDS = ['search', 'where', 'rex', 'eval', 'fields',
 
 /**
  * Time modifiers a filter may not carry: Perfana sends the run window as earliest_time/latest_time,
- * and an inline modifier would replace it. Matched outside quoted strings only, so a search for the
- * literal text "earliest=" still works. Covers the index-time and legacy spellings too.
+ * and an inline modifier would replace it. Checked only in search segments (the leading terms and
+ * `| search`), where Splunk reads them as modifiers; `| eval endtime=...` is an ordinary field.
+ * Double-quoted text is skipped, so a search for the literal text "earliest=" still works.
+ * Covers the index-time and legacy spellings too.
  */
-const TIME_MODIFIER_RE = /(?:^|[^\w])_?(?:index_)?(?:earliest|latest)\s*=|\b(?:starttime|endtime|starttimeu|endtimeu)\s*=/i;
+const TIME_MODIFIER_RE =
+  /(?:^|[^\w])_?(?:index_)?(?:earliest|latest)\s*=|\b(?:starttimeu?|endtimeu?|(?:start|end)?(?:days|hours|minutes|months)ago|searchtimespan(?:days|hours|minutes|months))\s*=/i;
 
 /**
  * Validate a user filter. Returns an error message, or null when it is acceptable.
@@ -140,7 +143,8 @@ const TIME_MODIFIER_RE = /(?:^|[^\w])_?(?:index_)?(?:earliest|latest)\s*=|\b(?:s
 export function validateSplFilter(spl: string): string | null {
   const segments: string[] = [];
   let current = '';
-  // The filter with every quoted string removed, for the time-modifier check.
+  // Each segment with its double-quoted strings blanked, for the time-modifier check.
+  const unquotedSegments: string[] = [];
   let unquoted = '';
   let inQuote = false;
   let inSingle = false;
@@ -154,6 +158,8 @@ export function validateSplFilter(spl: string): string | null {
         return 'A single-quoted field name may not contain quotes, pipes, brackets, backticks, $ or backslashes';
       }
       current += ch;
+      // A single-quoted name is not a literal: a modifier spelled inside one still counts.
+      unquoted += ch === "'" ? ' ' : ch;
       if (ch === "'") inSingle = false;
       continue;
     }
@@ -182,10 +188,12 @@ export function validateSplFilter(spl: string): string | null {
     } else if (ch === "'") {
       inSingle = true;
       current += ch;
+      unquoted += ' ';
     } else if (ch === '$' && /^\$entities\[[^\]\s"'|`[$\\]+\]/.test(spl.slice(i))) {
       // A labelled reference is expanded by Perfana before the search runs; its brackets are not a subsearch.
       const token = /^\$entities\[[^\]\s"'|`[$\\]+\]/.exec(spl.slice(i))![0];
       current += token;
+      unquoted += ' ';
       i += token.length - 1;
     } else if (ch === '`') {
       return 'Search macros (backticks) are not allowed';
@@ -193,8 +201,9 @@ export function validateSplFilter(spl: string): string | null {
       return 'Subsearches ([ ... ]) are not allowed';
     } else if (ch === '|') {
       segments.push(current);
+      unquotedSegments.push(unquoted);
       current = '';
-      unquoted += ' ';
+      unquoted = '';
     } else {
       current += ch;
       unquoted += ch;
@@ -203,8 +212,10 @@ export function validateSplFilter(spl: string): string | null {
   if (inQuote) return 'Unbalanced double quote';
   if (inSingle) return 'Unbalanced single quote';
   segments.push(current);
+  unquotedSegments.push(unquoted);
   if (!segments[0]!.trim()) return 'The filter must start with search terms, not a pipe';
-  if (TIME_MODIFIER_RE.test(unquoted)) {
+  const searchSegment = (i: number) => i === 0 || /^\s*search\b/i.test(segments[i]!);
+  if (unquotedSegments.some((seg, i) => searchSegment(i) && TIME_MODIFIER_RE.test(seg))) {
     return 'Leave out time modifiers (earliest, latest, starttime, endtime): Perfana sets the time range from the test run';
   }
   for (const seg of segments.slice(1)) {

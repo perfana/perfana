@@ -316,6 +316,13 @@ or ADAPT will flag every run.
   macros. It is quote-aware: inside double quotes `|`, `[` and backticks are literal; a
   single-quoted field name may not contain quotes, pipes, brackets, backticks, `$` or backslashes,
   so it cannot desynchronise the tokenizer and hide a pipe. Placeholders belong outside quotes.
+  It also refuses time modifiers in search segments (the leading terms and `| search`): `earliest`,
+  `latest`, `_index_earliest`/`_index_latest`, `starttime`/`endtime` (and the `u` forms), and the
+  deprecated `*ago` / `searchtimespan*` spellings (v0.2.97.79), because Perfana sends the run window
+  as `earliest_time`/`latest_time` and an inline modifier would replace it. Double-quoted text is a
+  literal and is skipped; single-quoted names are checked. `| eval endtime=...` is an ordinary field
+  and is allowed. The check runs at save, at preview and again on every send, in the API and the
+  worker; before v0.2.97.79 only the API's save check refused `earliest`/`latest`.
   The check runs again on the expanded search before it is sent. It is a convenience, not the
   boundary; the Splunk role is.
 - No SPL reaches a URL; it goes in the POST body.
