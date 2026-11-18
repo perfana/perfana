@@ -232,6 +232,12 @@ export class SplunkCollector {
               { dispatcher },
             ),
           );
+          if (points.length === 0) {
+            // The only trace of an empty search: say what was asked, so it can be pasted into Splunk.
+            this.logger.info(
+              `Splunk panel "${q.panel_title}" returned no data for ${from.toISOString()}..${to.toISOString()} (earliest=${Math.floor(from.getTime() / 1000)} latest=${Math.ceil(to.getTime() / 1000)}): ${filter}`,
+            );
+          }
           documents.push({
             testRunId,
             applicationDashboardId: q.application_dashboard_id,
