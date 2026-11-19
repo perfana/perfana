@@ -291,6 +291,8 @@ export interface ExportStats {
   /** Rows actually returned, and the columns of the first one (for "rows but no series" diagnosis). */
   rows: number;
   columns: string[];
+  /** `_time` of the first row, raw, so an unparseable timestamp can be named in the log. */
+  firstTime?: string;
 }
 
 /**
@@ -299,7 +301,12 @@ export interface ExportStats {
  * instead of the bare "no data". Returns null when that is not the case.
  */
 export function explainEmptyTimechart(stats: ExportStats | undefined, splitBy?: string | null): string | null {
-  if (!stats || stats.rows === 0 || stats.columns.some((k) => !k.startsWith('_'))) return null;
+  if (!stats || stats.rows === 0) return null;
+  if (stats.columns.some((k) => !k.startsWith('_'))) {
+    // Value columns but no points: every row's _time failed to parse.
+    return parseSplunkTime(stats.firstTime) ? null
+      : `Splunk returned ${stats.rows} rows with columns ${stats.columns.join(', ')}, but _time "${stats.firstTime ?? ''}" is not a timestamp Perfana can read.`;
+  }
   const field = splitBy?.trim();
   return `Splunk returned ${stats.rows} rows with only the columns ${stats.columns.join(', ') || '(none)'}, so there is nothing to plot`
     + (field
@@ -348,7 +355,7 @@ export function parseExportStream(body: string): { rows: Array<Record<string, un
   const rows = usedPreview ? previewSet : finals;
   return {
     rows,
-    stats: { lines, finalRows: finals.length, previewRows, usedPreview, rows: rows.length, columns: Object.keys(rows[0] ?? {}).slice(0, 25) },
+    stats: { lines, finalRows: finals.length, previewRows, usedPreview, rows: rows.length, columns: Object.keys(rows[0] ?? {}).slice(0, 25), firstTime: rows[0]?._time === undefined ? undefined : String(rows[0]._time) },
   };
 }
 
@@ -356,12 +363,24 @@ export function parseExportLines(body: string): Array<Record<string, unknown>> {
   return parseExportStream(body).rows;
 }
 
+/**
+ * `_time` as Splunk sends it. The export asks for epoch seconds (`output_time_format=%s`); without
+ * that Splunk formats it per the user's locale/prefs (e.g. `2026-11-18 14:05:30.000 CET`), which
+ * `Date` cannot parse, and every row was silently dropped. ISO is still accepted.
+ */
+export function parseSplunkTime(raw: unknown): Date | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const s = String(raw).trim();
+  const time = /^\d+(\.\d+)?$/.test(s) ? new Date(Number(s) * 1000) : new Date(s);
+  return Number.isNaN(time.getTime()) ? null : time;
+}
+
 /** Timechart rows → points. Every non-underscore key is a series; empty/NaN cells are skipped, 0 is kept. */
 export function timechartRowsToPoints(rows: Array<Record<string, unknown>>): TimechartPoint[] {
   const points: TimechartPoint[] = [];
   for (const row of rows) {
-    const time = new Date(String(row._time));
-    if (Number.isNaN(time.getTime())) continue;
+    const time = parseSplunkTime(row._time);
+    if (!time) continue;
     for (const [key, raw] of Object.entries(row)) {
       if (key.startsWith('_')) continue;
       if (raw === null || raw === undefined || raw === '') continue;
@@ -506,7 +525,8 @@ export async function splunkExport(
   opts: SplunkRequestOptions = {},
 ): Promise<Array<Record<string, unknown>>> {
   const app = encodeURIComponent(conn.splunkApp?.trim() || 'search');
-  const body = new URLSearchParams({ search, output_mode: 'json' });
+  // Epoch _time regardless of the Splunk user's locale/time-format prefs; see parseSplunkTime.
+  const body = new URLSearchParams({ search, output_mode: 'json', output_time_format: '%s' });
   if (opts.earliestTime) body.set('earliest_time', opts.earliestTime);
   if (opts.latestTime) body.set('latest_time', opts.latestTime);
   const started = Date.now();

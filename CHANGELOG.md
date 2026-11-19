@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.85] - 2026-11-19
+
+### Fixed
+- **A Splunk panel whose search returns rows now plots them, whatever format Splunk would otherwise send its timestamps in.** Perfana read each timechart row's `_time` as Splunk formatted it, and dropped every row whose timestamp it could not parse. A panel could therefore get hundreds of rows back from Splunk, collect nothing, and log only `returned no data`. Perfana now asks Splunk for `_time` as epoch seconds on every search, and still reads an ISO timestamp. A run that collected nothing for such a panel needs a force-refetch re-evaluate while Splunk still holds the data.
+- **When Splunk's `_time` still cannot be read, the log says so.** If a Splunk instance ignores the requested time format, the worker warning and the Splunk tab preview now quote the `_time` value Perfana could not read, instead of reporting an empty window.
+
 ## [0.2.97.84] - 2026-11-19
 
 ### Fixed

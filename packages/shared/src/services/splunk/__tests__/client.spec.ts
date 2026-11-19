@@ -12,6 +12,7 @@ import {
   splunkFieldSummary,
   explainEmptyTimechart,
   parseExportStream,
+  parseSplunkTime,
   splunkTimechart,
   SplunkError,
   timechartRowsToPoints,
@@ -114,6 +115,23 @@ describe('splunkTimechart', () => {
     expect(body.get('latest_time')).toBe('1794913201');
     expect(body.get('search')).not.toMatch(/earliest|latest/);
   });
+  // Value: protects=rows with a value column become points whatever the Splunk user's time-format prefs;
+  // fails_when=output_time_format is no longer sent, or an epoch _time is dropped as unparseable;
+  // why_new=a real Splunk returned 485 `_time,count,_span` rows and the worker logged "returned no data"
+  it('asks for epoch _time and parses it, and names an unreadable _time instead of "no data"', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(new Response('{"preview":false,"result":{"_time":"1795007130","count":"7","_span":"30"}}\n'));
+    const points = await splunkTimechart(
+      { host: 'https://s:8089', apiToken: 't' },
+      { filter: 'index=web', from: new Date('2026-11-18T13:05:00Z'), to: new Date('2026-11-18T14:05:00Z'), bucketSeconds: 30 },
+      { fetchImpl },
+    );
+    expect(new URLSearchParams(String(fetchImpl.mock.calls[0][1].body)).get('output_time_format')).toBe('%s');
+    expect(points).toEqual([{ time: new Date(1795007130 * 1000), series: 'count', value: 7 }]);
+
+    const { rows, stats } = parseExportStream('{"preview":false,"result":{"_time":"2026-11-18 14:05:30.000 CET","count":"7"}}\n');
+    expect(timechartRowsToPoints(rows)).toEqual([]);
+    expect(explainEmptyTimechart(stats, null)).toContain('_time "2026-11-18 14:05:30.000 CET" is not a timestamp');
+  });
 });
 
 describe('a timechart whose split field the events lack', () => {
@@ -135,8 +153,36 @@ describe('a timechart whose split field the events lack', () => {
 
   it('says nothing when there are no rows, or when a value column exists', () => {
     expect(explainEmptyTimechart(parseExportStream('').stats, 'log_level')).toBeNull();
+    expect(explainEmptyTimechart(undefined, 'log_level')).toBeNull();
     const withValues = parseExportStream('{"preview":false,"result":{"_time":"2026-11-18T14:05:00Z","NULL":"0"}}\n').stats;
     expect(explainEmptyTimechart(withValues, 'log_level')).toBeNull();
+    // Value: protects=an epoch _time (what every export now asks for) is not reported as unreadable when the
+    // cells are merely empty, and a row with no _time at all is named rather than printed as "undefined";
+    // fails_when=explainEmptyTimechart judges firstTime with `new Date()` instead of parseSplunkTime, or drops the
+    // `?? ''`; why_new=the case above uses an ISO _time, which both parsers accept; seam=none;
+    // no_claim=that Splunk ever sends value columns without _time (a non-timechart search could)
+    const epochEmptyCells = parseExportStream('{"preview":false,"result":{"_time":"1795007130","NULL":""}}\n').stats;
+    expect(epochEmptyCells.firstTime).toBe('1795007130');
+    expect(explainEmptyTimechart(epochEmptyCells, 'log_level')).toBeNull();
+    const noTime = parseExportStream('{"preview":false,"result":{"count":"7"}}\n').stats;
+    expect(noTime.firstTime).toBeUndefined();
+    expect(explainEmptyTimechart(noTime, null)).toBe('Splunk returned 1 rows with columns count, but _time "" is not a timestamp Perfana can read.');
+  });
+});
+
+describe('parseSplunkTime', () => {
+  // Value: protects=the accepted _time shapes — epoch seconds with a fractional part (Splunk's %s with subseconds),
+  // surrounding whitespace, ISO — and that empty/absent/garbage read as null rather than a 1970 or Invalid Date;
+  // fails_when=the epoch pattern drops the fraction arm, the trim goes, or '' / null slip through as epoch 0;
+  // why_new=the regression test pins only an integer epoch and one locale string; seam=none;
+  // no_claim=that every Splunk time format is covered (only the export's %s and ISO are promised)
+  it('reads epoch seconds (with a fraction) and ISO, and returns null for empty or unreadable values', () => {
+    expect(parseSplunkTime('1795007130.250')).toEqual(new Date(1795007130250));
+    expect(parseSplunkTime(' 1795007130 ')).toEqual(new Date(1795007130000));
+    expect(parseSplunkTime('2026-11-18T14:05:30.000+01:00')).toEqual(new Date('2026-11-18T13:05:30Z'));
+    for (const raw of [null, undefined, '', '   ', 'NaN', '2026-11-18 14:05:30.000 CET']) {
+      expect(parseSplunkTime(raw)).toBeNull();
+    }
   });
 });
 
@@ -307,7 +353,7 @@ describe('splunkExport', () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('https://s:8089/servicesNS/-/perf%20app/search/v2/jobs/export');
     expect(init.headers.Authorization).toBe('Bearer t');
-    expect(String(init.body)).toBe('search=search+index%3Dx&output_mode=json');
+    expect(String(init.body)).toBe('search=search+index%3Dx&output_mode=json&output_time_format=%25s');
     expect(init.redirect).toBe('error');
   });
 
