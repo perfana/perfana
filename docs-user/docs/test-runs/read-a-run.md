@@ -3,9 +3,11 @@
 Open a single test run and find your way around its tabs to understand how the test performed.
 
 **Before you start**
+
 - You need at least one test run in the list. See [Find and filter test runs](find-and-filter-runs.md).
 
 **Steps**
+
 1. From the **Test Runs** list, click the run you want to open.
    You see the test run detail page with a details card and three tabs.
    ![The test run detail page header with the Results, Root Cause Analysis, and Reporting tabs](../assets/run-detail-top.png)
@@ -13,13 +15,13 @@ Open a single test run and find your way around its tabs to understand how the t
 2. Read the **details card** for the run's metadata (system, environment, workload, timing). Use it to edit the run's **tags** and **annotations**.
    Your tags and notes are saved to the run for later reference.
 3. Open the **Results** tab to review what happened. It groups several sections:
-   - **Configuration comparison** — what changed versus a previous run.
-   - **Dashboards** — the Grafana dashboards captured for the run.
-   - **Deep Links** — shortcuts out to related external tools.
-   - **Performance Analysis** — per-transaction statistics, including Apdex; drill into tracing or Dynatrace from here.
-   - **Service Level Objectives** — the pass/fail checks and metric series.
-   - **Anomaly Detection** — the ADAPT regression verdicts.
-   - **Events** — notable events during the run.
+    - **Configuration comparison** — what changed versus a previous run.
+    - **Dashboards** — the Grafana dashboards captured for the run.
+    - **Deep Links** — shortcuts out to related external tools.
+    - **Performance Analysis** — per-transaction statistics, including Apdex; drill into tracing or Dynatrace from here.
+    - **Service Level Objectives** — the pass/fail checks and metric series.
+    - **Anomaly Detection** — the ADAPT regression verdicts.
+    - **Events** — notable events during the run.
    ![The Results tab cards, including Performance Analysis and Service Level Objectives](../assets/run-performance.png)
    *Figure: the Results tab - overview cards for the run.*
 4. Open the **Root Cause Analysis** tab when you need to dig into why something happened. It has Dynatrace, Distributed Tracing, Pyroscope, and AWR Report cards.
@@ -35,6 +37,7 @@ You can read a run's metadata, move between the Results, Root Cause Analysis, an
 
 **While the test is still running**
 Expand **Performance Analysis** to see its live controls, in a row under the card title with the **LIVE** badge:
+
 - **Time window** — show the whole test so far, or only the last 1, 5, 15 or 30 minutes.
 - **Refresh** — how often the figures update: **Off**, **10s**, **30s** (the default), **1m** or **5m**. A rate you pick is remembered in this browser for later runs; **Off** applies only until you leave the page.
 - **Updated** — the time the figures were last fetched, so you can see a refresh happened even when the numbers did not change.
@@ -44,6 +47,7 @@ Expand **Performance Analysis** to see its live controls, in a row under the car
 When the test finishes, the card fetches its final figures once and the live controls disappear.
 
 **Related**
+
 - [Check SLO results](slo-check-results.md)
 - [Understand ADAPT verdicts](understand-adapt.md)
 - [Concepts](../concepts.md)

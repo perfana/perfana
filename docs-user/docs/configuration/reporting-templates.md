@@ -3,10 +3,12 @@
 A reporting template defines what a generated report contains and how it is laid out. Manage templates per system so your reports follow a consistent structure every time.
 
 **Before you start**
+
 - You have a [system under test](create-system-under-test.md).
 - The Reporting integration is connected (the **Reporting Templates** tab appears only when it is).
 
 **Steps**
+
 1. Open the system from **Systems Under Test** (`/systems`) using its **Edit Config** button.
    You see the system's configuration page.
 
@@ -25,5 +27,6 @@ A reporting template defines what a generated report contains and how it is laid
 The system has one or more reporting templates. When you generate a report for a run, you can apply a template so the output follows the structure you defined — see [Generate a report](../test-runs/generate-report.md).
 
 **Related**
+
 - [Generate a report](../test-runs/generate-report.md)
 - [Create a system under test](create-system-under-test.md)

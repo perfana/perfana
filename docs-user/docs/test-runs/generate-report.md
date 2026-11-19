@@ -3,6 +3,7 @@
 This lets you turn a test run into a shareable HTML report and send it to people who do not log in to Perfana — stakeholders, developers, managers. Use it to communicate results after a run.
 
 **Before you start**
+
 - A test run to report on. Open it at `/test-runs/[id]` and go to the **Reporting** tab.
 
 **Steps**
@@ -22,15 +23,18 @@ This lets you turn a test run into a shareable HTML report and send it to people
 You have an HTML report for the run and a link you can send to others.
 
 **What the recipient sees**
+
 - The report opens at `/reports/share/[shareId]` with no login required.
 - They can **Refresh** to pull the latest data, **Print** the report, and expand sections.
 - Charts answer the pointer: hovering a chart shows the time and every series' value at that point, and hovering a row in the table below a chart fades the other lines so one series is easy to follow. A printed report and a PDF have neither, since paper has no pointer.
 - Share links can **expire** — if a recipient reports a dead link, generate and share a fresh one.
 
 **Troubleshooting**
+
 - *Recipient gets "link expired" or "not found"* — the share link has expired. Generate the report again and send the new link.
 
 **Related**
+
 - [Customize report content](../configuration/reporting-templates.md)
 - [Compare test runs](compare-runs.md)
 - [Investigate root cause](root-cause-analysis.md)

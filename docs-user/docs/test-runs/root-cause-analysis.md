@@ -3,6 +3,7 @@
 This lets you go from "a run regressed" to "here is where it went wrong" by digging into server-side evidence for a single run. Use it after a comparison or a failed check tells you something slowed down.
 
 **Before you start**
+
 - A test run to investigate. Open it at `/test-runs/[id]` and go to the **Root Cause Analysis** tab.
 - The relevant integration connected. Some cards only appear when their integration is set up for your system — see the links below.
 
@@ -29,10 +30,12 @@ This lets you go from "a run regressed" to "here is where it went wrong" by digg
 You have pinpointed where the regression comes from — application, a downstream service, code hot spots, or the database — instead of just knowing that the run was slow.
 
 **Troubleshooting**
+
 - *A card you expected is missing* — that integration is not connected for this system. Cards appear only when their source is configured. Follow the relevant integration guide linked above.
 - *A card is empty* — the integration is connected but returned no data for this run's window. Check that the time range and service filters match the test.
 
 **Related**
+
 - [Compare test runs](compare-runs.md)
 - [Generate and share a report](generate-report.md)
 - [Key concepts](../concepts.md)

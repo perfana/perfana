@@ -3,9 +3,11 @@
 Review who changed what and when across Perfana. Use audit logs to investigate a change, confirm an action took place, or track activity for a system or organization. This page appears only if your account has audit access.
 
 **Before you start**
+
 - Your account must be granted audit access. If you don't have it, the **Audit Logs** entry won't appear in the navigation.
 
 **Steps**
+
 1. In the sidebar, open **Audit Logs**.
    The audit table opens with columns for Timestamp, Actor, Action, Resource, System under test, and Org.
    ![The Audit Logs page with the filter bar and the audit table](../assets/audit-logs.png)
@@ -21,6 +23,7 @@ Review who changed what and when across Perfana. Use audit logs to investigate a
 
 **Result**
 You can see the audit events that match your filters. Each column tells you part of the story:
+
 - **Timestamp** — when the event happened.
 - **Actor** — the user or API key that performed the action.
 - **Action** — what was done (for example create, update, delete).
@@ -29,5 +32,6 @@ You can see the audit events that match your filters. Each column tells you part
 - **Org** — the organization the event belongs to.
 
 **Related**
+
 - [Manage organizations](organizations.md)
 - [Create an API key](api-keys.md)

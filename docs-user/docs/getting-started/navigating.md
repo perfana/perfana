@@ -3,9 +3,11 @@
 Learn where everything lives so you can get to the task you want quickly.
 
 **Before you start**
+
 - You need to be signed in to Perfana.
 
 **Steps**
+
 1. Look at the **sidebar** on the left. This is the main menu and is collapsible.
    You see grouped links and, at the top, an **Organization** selector.
    ![The Perfana sidebar with the Organization selector and the Overview and Configuration nav groups](../assets/home.png)
@@ -27,8 +29,10 @@ Learn where everything lives so you can get to the task you want quickly.
 You can move between monitoring (Overview) and setup (Configuration), switch organizations, and sign out.
 
 **Troubleshooting**
+
 - *A page says you need to select an organization* — pick one from the **Organization** selector at the top of the sidebar before continuing.
 
 **Related**
+
 - [Find and filter test runs](../test-runs/find-and-filter-runs.md)
 - [Read a test run](../test-runs/read-a-run.md)

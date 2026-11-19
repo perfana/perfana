@@ -3,9 +3,11 @@
 Create and manage organizations, their members, and their teams. An organization is the top tenancy boundary in Perfana — everything (systems, integrations, runs) belongs to one. This page is available to global admins only.
 
 **Before you start**
+
 - You must be a global admin. Non-admins won't see the **Organizations** entry in the navigation.
 
 **Steps**
+
 1. In the sidebar, open **Organizations** (under Settings).
    The Organizations page opens with "Manage your organizations and their members".
    ![The Organizations page with the Create Organization button](../assets/organizations.png)
@@ -27,5 +29,6 @@ Create and manage organizations, their members, and their teams. An organization
 The organization exists with the members and roles you set. Its members can now work with the systems and integrations that belong to it.
 
 **Related**
+
 - [Manage teams](teams.md)
 - [Key concepts](../concepts.md)

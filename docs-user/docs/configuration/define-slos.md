@@ -3,10 +3,12 @@
 Service Level Objectives (SLOs) are the checks Perfana evaluates against each test run. Define them so every run gets a clear pass/fail result instead of you reading raw graphs.
 
 **Before you start**
+
 - You have a [system under test](create-system-under-test.md).
 - You know the metric and threshold you want to enforce (for example, p95 response time under 500 ms).
 
 **Steps**
+
 1. Open the system from **Systems Under Test** (`/systems`) using its **Edit Config** button.
    You see the system's configuration page.
 
@@ -31,6 +33,7 @@ The system has one or more SLOs. After a run completes, each check shows as pass
 To reuse the same checks across many systems, define them in a [profile](create-profile.md) instead and let runs inherit them.
 
 **Related**
+
 - [SLO and check results](../test-runs/slo-check-results.md)
 - [Create a profile](create-profile.md)
 - [Concepts](../concepts.md)

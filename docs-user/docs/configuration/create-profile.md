@@ -3,10 +3,12 @@
 A profile is a reusable bundle of dashboards and SLOs. Create one so new test runs inherit a standard set of dashboards and checks automatically, instead of you configuring each system from scratch.
 
 **Before you start**
+
 - Select your active organization in the sidebar.
 - Know which dashboards and SLOs you want every run to inherit.
 
 **Steps**
+
 1. Go to **Profiles** (`/settings/profiles`).
    You see a table of existing profiles.
    ![The Profiles list with the Add Profile button](../assets/profiles.png)
@@ -47,5 +49,6 @@ The **name** is read-only when editing. A profile's dashboards and deep links re
 Profiles can also be provisioned from CI, so your standard set of dashboards and checks can be created as code.
 
 **Related**
+
 - [Define SLOs](define-slos.md)
 - [Concepts](../concepts.md)

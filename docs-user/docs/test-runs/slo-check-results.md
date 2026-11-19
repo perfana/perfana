@@ -3,10 +3,12 @@
 See whether a test run met the thresholds you set, using pass/fail check results, the Apdex score, and metric series.
 
 **Before you start**
+
 - You need an open test run. See [Read a test run](read-a-run.md).
 - SLOs must be defined for the system or workload. See [Define SLOs](../configuration/define-slos.md).
 
 **Steps**
+
 1. On the test run, open the **Results** tab.
    You see the run's result sections.
 2. Go to the **Service Level Objectives** section.
@@ -30,6 +32,7 @@ You know which targets the run met or missed, its Apdex score, and how each meas
 - *A check on a panel with series grouping could not be evaluated* — SLOs judge each individual series (for example each pod), not the grouped series anomaly detection compares. A match pattern written for group names, such as `\(avg\)$`, matches nothing; change it to match the pod names. Re-evaluate the run to replace results stored before this behaviour.
 
 **Related**
+
 - [Define SLOs](../configuration/define-slos.md)
 - [Understand ADAPT verdicts](understand-adapt.md)
 - [Concepts](../concepts.md)

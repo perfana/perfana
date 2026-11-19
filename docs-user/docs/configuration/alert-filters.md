@@ -3,10 +3,12 @@
 Alert filters control which incoming alerts Perfana ignores and which can abort a test run. Set them up to silence known-noisy alerts, or to stop a run automatically when a critical alert fires.
 
 **Before you start**
+
 - Select your active organization in the sidebar.
 - Know the alert source and the scope (system, environment, workload) the filter should apply to.
 
 **Steps**
+
 1. Open the **Settings** hub (`/settings`), then go to **Alert Filters** (`/settings/alert-filters`).
    You see a table of existing filters, subtitled "Configure how alerts from Grafana and Alertmanager are processed". Columns are Alert Source, System, Environment, Test Type, Tag Key, and Tag Value.
    ![The Alert Filters page with the Add Filter button](../assets/alert-filters.png)
@@ -24,6 +26,7 @@ Alert filters control which incoming alerts Perfana ignores and which can abort 
    It appears in the table and applies to matching alerts on future runs.
 
 **Understanding the scope fields**
+
 - **Alert Source** — which integration the alert comes from.
 - **System / Environment / Test Type** — which system, environment, and workload the filter applies to. Leave a field broad to match more runs, or set it to narrow the match.
 - **Tag Key / Tag Value** — match only alerts carrying this tag, for fine-grained control.
@@ -35,4 +38,5 @@ On the filter's row, choose **Delete**. The filter is removed and no longer affe
 Matching alerts are either omitted from results or used to abort a run, depending on the filter. Your runs stay focused on alerts that matter.
 
 **Related**
+
 - [Concepts](../concepts.md)

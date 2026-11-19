@@ -5,6 +5,7 @@ Connect Splunk so Perfana can turn your log events into metrics per test run: er
 Setting Splunk up has two parts: connect it once for the organization, then choose which log sources and panels each system uses.
 
 **Before you start**
+
 - Select your active organization in the sidebar (**Configuration** group).
 - Have the Splunk **management URL**: the REST API address, usually port **8089**. Splunk Web on port 8000 does not work here.
 - Have a Splunk **authentication token**, or a username and password. Perfana only sees the indexes that account's role is allowed to search.
@@ -22,8 +23,8 @@ Setting Splunk up has two parts: connect it once for the organization, then choo
    This is the address your browser opens for **Open in Splunk** links. Leave it empty and links use the management URL.
 6. Enter an **Authentication token**, or a **Username** and **Password**. When a token is set, it is used instead of the username and password.
 7. Check the two advanced fields:
-   - **App** — the search namespace, usually `search`.
-   - **Concurrent searches** — how many searches Perfana runs at once. Keep it below the search quota of the token's role; Splunk refuses searches over that limit.
+    - **App** — the search namespace, usually `search`.
+    - **Concurrent searches** — how many searches Perfana runs at once. Keep it below the search quota of the token's role; Splunk refuses searches over that limit.
 8. If your organization reaches Splunk through a proxy, turn on **Connect through the organization proxy**.
 9. Click **Test connection**.
    Perfana confirms it can reach Splunk with these credentials, or says why it could not.
@@ -44,12 +45,12 @@ To change the connection later, open the Splunk card and click **Settings**.
 5. Under **Panels**, click **Add starter panels**, enter the **Field that holds the log level** (often `log_level`, `level` or `severity`), and click **Add panels**.
    Perfana adds three panels: **Log events by level**, **Errors by host** and **Exceptions by type**.
 6. Optional: click **Add panel** to write your own. A panel has:
-   - **Filter (SPL)** — start from `$entities`, which stands for the sources mapped above (`$entities[backend]` keeps only sources labelled `backend`). Perfana adds the run's time window and the `timechart` itself, so leave out time modifiers (`earliest`, `latest`, `starttime`, `endtime`) and `| timechart`. Saving a filter whose search terms set a time range is refused.
-   - **Value** — `count`, or `avg(field)`, `p95(field)`, `max(field)`, `dc(field)`.
-   - **One series per** — a field to split on, such as `log_level` or `host`.
-   - **Max series** — series beyond this number are added up into `OTHER`, so totals stay correct.
+    - **Filter (SPL)** — start from `$entities`, which stands for the sources mapped above (`$entities[backend]` keeps only sources labelled `backend`). Perfana adds the run's time window and the `timechart` itself, so leave out time modifiers (`earliest`, `latest`, `starttime`, `endtime`) and `| timechart`. Saving a filter whose search terms set a time range is refused.
+    - **Value** — `count`, or `avg(field)`, `p95(field)`, `max(field)`, `dc(field)`.
+    - **One series per** — a field to split on, such as `log_level` or `host`.
+    - **Max series** — series beyond this number are added up into `OTHER`, so totals stay correct.
 
-   The panel preview shows the search Perfana sends, the series it returns with their totals, and the fields your logs have. An empty preview while the source tree shows events usually means the log-level field has a different name; click a field in the preview to use it.
+    The panel preview shows the search Perfana sends, the series it returns with their totals, and the fields your logs have. An empty preview while the source tree shows events usually means the log-level field has a different name; click a field in the preview to use it.
 
 ## Result
 
