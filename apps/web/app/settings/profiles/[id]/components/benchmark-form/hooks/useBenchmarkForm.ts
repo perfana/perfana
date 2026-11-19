@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { fetchGrafanaDashboardByUid } from '@/lib/grafana-dashboards';
+import { fetchSplunkPanelTitles } from '@/lib/splunk';
 import { getUnit } from '@/lib/units';
 import {
   CreateProfileBenchmarkData,
@@ -9,8 +10,10 @@ import {
   ProfileBenchmark,
   PERF_TEST_PROFILE_DASHBOARD,
   DYNATRACE_HOSTS_PROFILE_DASHBOARD,
+  SPLUNK_PROFILE_DASHBOARD,
   isPerfTestProfileDashboard,
   isDynatraceHostsProfileDashboard,
+  isSplunkProfileDashboard,
 } from '@/lib/profile-benchmarks';
 import {
   PERF_TEST_PROFILE_SOURCE,
@@ -18,6 +21,8 @@ import {
   DYNATRACE_HOSTS_PROFILE_SOURCE,
   DYNATRACE_BENCHMARK_SOURCE,
   DYNATRACE_HOST_PROFILE_PANELS,
+  SPLUNK_PROFILE_SOURCE,
+  SPLUNK_BENCHMARK_SOURCE,
 } from '@perfana/shared/constants';
 import { ProfileDashboard } from '@/lib/profiles';
 import {
@@ -72,6 +77,7 @@ export function useBenchmarkForm({
 
   // Available options
   const [availablePanels, setAvailablePanels] = useState<GrafanaPanel[]>([]);
+
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>('');
 
@@ -87,6 +93,22 @@ export function useBenchmarkForm({
     // ids are synthetic (a host's real panel id differs per host); grafana-sync resolves them.
     if (isDynatraceHostsProfileDashboard(dashboard)) {
       setAvailablePanels(DYNATRACE_HOST_PROFILE_PANELS.map((p) => ({ ...p, type: DYNATRACE_BENCHMARK_SOURCE })));
+      return;
+    }
+    // Splunk panels are user-authored per workload, so the list is every panel title in use (plus
+    // the starter panels). The SLO is matched on the title; these ids only key the picker.
+    if (isSplunkProfileDashboard(dashboard)) {
+      try {
+        setPanelsLoading(true);
+        const titles = await fetchSplunkPanelTitles();
+        setAvailablePanels(
+          titles.map((t, i) => ({ id: i + 1, title: t.panelTitle, type: SPLUNK_BENCHMARK_SOURCE, yAxesFormat: t.metricUnit })),
+        );
+      } catch {
+        setAvailablePanels([]);
+      } finally {
+        setPanelsLoading(false);
+      }
       return;
     }
     const dashboardUid = dashboard.dashboardUid;
@@ -159,11 +181,20 @@ export function useBenchmarkForm({
         ? { ...PERF_TEST_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || PERF_TEST_PROFILE_DASHBOARD.dashboardUid }
         : benchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE
           ? { ...DYNATRACE_HOSTS_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || DYNATRACE_HOSTS_PROFILE_DASHBOARD.dashboardUid }
-          : profileDashboards.find(d => d.id === benchmark.profileDashboardId);
+          : benchmark.source === SPLUNK_PROFILE_SOURCE
+            ? { ...SPLUNK_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || SPLUNK_PROFILE_DASHBOARD.dashboardUid }
+            : profileDashboards.find(d => d.id === benchmark.profileDashboardId);
+      const isSplunk = benchmark.source === SPLUNK_PROFILE_SOURCE;
 
       setFormData({
         selectedDashboard: dashboard || null,
-        selectedPanel: benchmark.panelId ? {
+        // A Splunk panel SLO stores no panel id: the picker matches it on the title.
+        selectedPanel: isSplunk && benchmark.panelTitle ? {
+          id: 0,
+          title: benchmark.panelTitle,
+          type: SPLUNK_BENCHMARK_SOURCE,
+          yAxesFormat: benchmark.metricUnit || null,
+        } : benchmark.panelId ? {
           id: benchmark.panelId,
           title: benchmark.panelTitle || '',
           type: benchmark.panelType || '',
@@ -279,15 +310,23 @@ export function useBenchmarkForm({
 
       const isPerfTest = isPerfTestProfileDashboard(formData.selectedDashboard);
       const isDynatraceHosts = isDynatraceHostsProfileDashboard(formData.selectedDashboard);
-      const isPattern = isPerfTest || isDynatraceHosts;
+      const isSplunk = isSplunkProfileDashboard(formData.selectedDashboard);
+      const isPattern = isPerfTest || isDynatraceHosts || isSplunk;
       const payload: CreateProfileBenchmarkData | UpdateProfileBenchmarkData = {
         profileDashboardId: isPattern ? undefined : formData.selectedDashboard!.id,
         workloadPattern: formData.workloadPattern,
-        source: isPerfTest ? PERF_TEST_PROFILE_SOURCE : isDynatraceHosts ? DYNATRACE_HOSTS_PROFILE_SOURCE : 'grafana',
+        source: isPerfTest
+          ? PERF_TEST_PROFILE_SOURCE
+          : isDynatraceHosts
+            ? DYNATRACE_HOSTS_PROFILE_SOURCE
+            : isSplunk
+              ? SPLUNK_PROFILE_SOURCE
+              : 'grafana',
         grafanaInstance: isPattern ? undefined : formData.selectedDashboard!.grafanaLabel,
-        // For perf-test / Dynatrace hosts this is the uid regex grafana-sync fans out over, not a dashboard uid.
+        // For perf-test / Dynatrace hosts / Splunk this is the uid regex grafana-sync fans out over, not a dashboard uid.
         dashboardUid: formData.selectedDashboard!.dashboardUid,
-        panelId: formData.selectedPanel?.id,
+        // A Splunk panel SLO is keyed on panelTitle; the picker's id is not a panel id.
+        panelId: isSplunk ? undefined : formData.selectedPanel?.id,
         panelTitle: formData.selectedPanel?.title || '',
         panelType: formData.selectedPanel?.type || '',
         panelDescription: formData.selectedPanel?.description || '',

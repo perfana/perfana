@@ -325,6 +325,32 @@ export class SplunkService {
   // Queries
   // ---------------------------------------------------------------------------
 
+  /**
+   * The panel titles a profile's "Splunk — all panels" SLO can target: the starter panels, plus
+   * every distinct title of a Splunk query in the caller's organizations, with the unit of its
+   * most recently updated query. Titles only — the profile SLO is matched on the title per
+   * workload, because a panel's id is assigned per workload.
+   */
+  async listPanelTitles(userId: string, roles: string[]): Promise<Array<{ panelTitle: string; metricUnit: string }>> {
+    const byTitle = new Map<string, string>(STARTER_PANELS.map((p) => [p.panelTitle, 'short']));
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    if (orgIds === null || orgIds.length > 0) {
+      const qb = withRequestEm(this.queryRepo)
+        .createQueryBuilder('q')
+        .select('DISTINCT ON (q.panel_title) q.panel_title', 'panelTitle')
+        .addSelect('q.metric_unit', 'metricUnit')
+        .orderBy('q.panel_title', 'ASC')
+        .addOrderBy('q.updated_at', 'DESC');
+      if (orgIds !== null) qb.where('q.organization_id IN (:...orgIds)', { orgIds });
+      for (const row of await qb.getRawMany<{ panelTitle: string; metricUnit: string }>()) {
+        byTitle.set(row.panelTitle, row.metricUnit);
+      }
+    }
+    return [...byTitle.entries()]
+      .map(([panelTitle, metricUnit]) => ({ panelTitle, metricUnit }))
+      .sort((a, b) => a.panelTitle.localeCompare(b.panelTitle));
+  }
+
   async listQueries(scope: ScopeRef, userId: string, roles: string[]): Promise<SplunkQuery[]> {
     await this.loadSut(scope.systemUnderTestId, userId, roles, 'read');
     return withRequestEm(this.queryRepo).find({

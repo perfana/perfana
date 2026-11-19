@@ -24,6 +24,8 @@ import { isDuplicateSloTargetError } from '@perfana/shared/utils';
 import {
   DYNATRACE_HOSTS_PROFILE_SOURCE,
   DYNATRACE_BENCHMARK_SOURCE,
+  SPLUNK_PROFILE_SOURCE,
+  SPLUNK_BENCHMARK_SOURCE,
   PROVISIONED_SLO_AUTO_DISABLED_KEY,
 } from '@perfana/shared/constants';
 import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
@@ -412,6 +414,14 @@ export class AutoConfigUpdatesService {
       });
 
       const isDynatraceHosts = profileBenchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE;
+      const isSplunk = profileBenchmark.source === SPLUNK_PROFILE_SOURCE;
+      // The `benchmarks.source` a provisioned SLO is stored with, when it differs from the
+      // profile row's: a host / Splunk SLO is an ordinary Dynatrace / Splunk SLO from here on.
+      const provisionedSource = isDynatraceHosts
+        ? DYNATRACE_BENCHMARK_SOURCE
+        : isSplunk
+          ? SPLUNK_BENCHMARK_SOURCE
+          : undefined;
       const panelId = panel?.panelId ?? profileBenchmark.panel_id;
       const panelTitle = panel?.panelTitle ?? profileBenchmark.panel_title;
 
@@ -420,6 +430,8 @@ export class AutoConfigUpdatesService {
       if (isDynatraceHosts) {
         // What the SUT SLO dialog stores for a hand-made Dynatrace SLO.
         grafanaInstanceValue = 'Dynatrace';
+      } else if (isSplunk) {
+        grafanaInstanceValue = 'Splunk';
       } else if (typeof applicationDashboard.grafanaInstance === 'string') {
         grafanaInstanceValue = applicationDashboard.grafanaInstance;
       } else if (applicationDashboard.grafanaInstance) {
@@ -440,7 +452,7 @@ export class AutoConfigUpdatesService {
         workload: testRun.workload,
         // A provisioned host SLO is an ordinary Dynatrace SLO from here on, so the run view
         // and the SUT edit dialog treat it like one made by hand.
-        source: isDynatraceHosts ? DYNATRACE_BENCHMARK_SOURCE : profileBenchmark.source,
+        source: provisionedSource ?? profileBenchmark.source,
         grafana_instance: grafanaInstanceValue,
         dashboard_label: applicationDashboard.dashboardLabel,
         dashboard_id: applicationDashboard.dashboardId,
@@ -451,13 +463,13 @@ export class AutoConfigUpdatesService {
         configuration: {
           id: panelId?.toString(),
           dashboardUid: applicationDashboard.dashboardUid,
-          type: isDynatraceHosts ? DYNATRACE_BENCHMARK_SOURCE : profileBenchmark.panel_type,
+          type: provisionedSource ?? profileBenchmark.panel_type,
           // A hand-made Dynatrace SLO is titled '<dashboard label> - <panel title>' and the SUT
           // edit dialog finds its dashboard and panel by splitting on ' - ', so match that shape.
           title: isDynatraceHosts
             ? `${applicationDashboard.dashboardLabel} - ${panelTitle}`
             : panelTitle,
-          ...(isDynatraceHosts ? { yAxesFormat: profileBenchmark.metric_unit ?? null } : {}),
+          ...(provisionedSource ? { yAxesFormat: profileBenchmark.metric_unit ?? null } : {}),
           evaluateType: profileBenchmark.evaluate_type,
           requirement: {
             operator: profileBenchmark.requirement_operator,

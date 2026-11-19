@@ -1302,6 +1302,53 @@ describe('ProfilesService', () => {
       ).rejects.toThrow(/dashboardUid must be a valid regex/);
     });
 
+    it('should create a splunk-panels benchmark keyed on its title, with no panel id and the default Splunk uid regex', async () => {
+      const dto: CreateProfileBenchmarkDto = {
+        source: 'splunk-panels',
+        panelId: 3, // the picker's key, not a panel id: dropped
+        panelTitle: '  Errors by host ',
+        panelType: 'splunk',
+        requirementOperator: 'lt',
+        requirementValue: 10,
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.create.mockReturnValue(mockProfileBenchmark as any);
+      profileBenchmarkRepo.save.mockResolvedValue(mockProfileBenchmark as any);
+
+      await service.createBenchmark('profile-uuid-1', dto, mockUserId, mockOrgScope);
+
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile_dashboard_id: null,
+          source: 'splunk-panels',
+          grafana_instance: undefined,
+          dashboard_uid: '^splunk-',
+          panel_id: undefined,
+          panel_title: 'Errors by host',
+        })
+      );
+    });
+
+    it('should reject a splunk-panels benchmark with no panel title', async () => {
+      const dto: CreateProfileBenchmarkDto = { source: 'splunk-panels', panelTitle: '  ' };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      await expect(
+        service.createBenchmark('profile-uuid-1', dto, mockUserId, mockOrgScope)
+      ).rejects.toThrow(/panelTitle is required/);
+      expect(profileBenchmarkRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject a splunk-panels benchmark whose dashboardUid is not a valid regex', async () => {
+      const dto: CreateProfileBenchmarkDto = { source: 'splunk-panels', dashboardUid: '^splunk-(', panelTitle: 'Errors by host' };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      await expect(
+        service.createBenchmark('profile-uuid-1', dto, mockUserId, mockOrgScope)
+      ).rejects.toThrow(/dashboardUid must be a valid regex/);
+    });
+
     it('should keep a caller-supplied uid regex on a performance-metrics benchmark', async () => {
       // Arrange
       const perfTestDto: CreateProfileBenchmarkDto = {
@@ -1454,6 +1501,49 @@ describe('ProfilesService', () => {
       await expect(
         service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { panelId: 105 } as any, mockUserId, mockOrgScope),
       ).rejects.toThrow(/not a Dynatrace host panel/);
+      expect(profileBenchmarkRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('switching a grafana benchmark to splunk-panels drops the template and the panel id', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue({
+        ...mockProfileBenchmark,
+        source: 'grafana',
+        profile_dashboard_id: 'pd-1',
+        grafana_instance: 'main',
+        dashboard_uid: 'tmpl-uid',
+        panel_id: 7,
+      } as any);
+      profileBenchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+      await service.updateBenchmark(
+        'profile-uuid-1', 'benchmark-uuid-1', { source: 'splunk-panels', panelTitle: 'Errors by host' } as any, mockUserId, mockOrgScope,
+      );
+
+      expect(profileBenchmarkRepo.save).toHaveBeenCalledWith(expect.objectContaining({
+        source: 'splunk-panels',
+        profile_dashboard_id: null,
+        grafana_instance: null,
+        dashboard_uid: '^splunk-',
+        panel_id: null,
+        panel_title: 'Errors by host',
+      }));
+    });
+
+    it('rejects a PUT that blanks the title of a splunk-panels benchmark', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue({
+        ...mockProfileBenchmark,
+        source: 'splunk-panels',
+        profile_dashboard_id: null,
+        dashboard_uid: '^splunk-',
+        panel_id: null,
+        panel_title: 'Errors by host',
+      } as any);
+
+      await expect(
+        service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { panelTitle: ' ' } as any, mockUserId, mockOrgScope),
+      ).rejects.toThrow(/panelTitle is required/);
       expect(profileBenchmarkRepo.save).not.toHaveBeenCalled();
     });
 
@@ -1887,6 +1977,23 @@ describe('ProfilesService', () => {
       expect(sqls()[1]).toMatch(/SET enabled = false/);
       expect(sqls()[1]).toMatch(/panel_title IS DISTINCT FROM \$2::text/);
       expect(dbQuery.mock.calls[1][1]).toEqual(['benchmark-uuid-1', 'Memory Usage', 'autoDisabled', 'org-a']);
+    });
+
+    it("a panel change on a splunk-panels SLO reads each workload's panel id from splunk_queries", async () => {
+      profileBenchmarkRepo.findOne.mockResolvedValue(base({
+        source: 'splunk-panels', profile_dashboard_id: undefined, grafana_instance: undefined,
+        dashboard_uid: '^splunk-', panel_id: null, panel_title: 'Errors by host',
+      }));
+
+      await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { panelTitle: 'Exceptions by type' } as any, mockUserId, mockOrgScope);
+
+      expect(sqls()).toHaveLength(2);
+      expect(sqls()[0]).toMatch(/FROM splunk_queries dq/);
+      expect(sqls()[0]).toMatch(/jsonb_build_object\('id', dq\.panel_id::text, 'title', \$2::text\)/);
+      expect(sqls()[0]).toMatch(/dq\.workload = b\.workload AND dq\.panel_title = \$2::text AND dq\.enabled/);
+      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'Exceptions by type', 'org-a']);
+      expect(sqls()[1]).toMatch(/SET enabled = false/);
+      expect(dbQuery.mock.calls[1][1]).toEqual(['benchmark-uuid-1', 'Exceptions by type', 'autoDisabled', 'org-a']);
     });
 
     it('a move onto a panel that already has an enabled SLO is a 409 and the profile row is not saved', async () => {

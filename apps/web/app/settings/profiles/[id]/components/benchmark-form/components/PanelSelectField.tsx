@@ -18,6 +18,8 @@ interface PanelSelectFieldProps {
   loading: boolean;
   error?: string;
   dashboardName?: string;
+  /** Match the selected panel by title, for a pseudo-dashboard whose panels have no stable id (Splunk). */
+  matchByTitle?: boolean;
 }
 
 export function PanelSelectField({
@@ -27,13 +29,14 @@ export function PanelSelectField({
   loading,
   error,
   dashboardName,
+  matchByTitle = false,
 }: PanelSelectFieldProps) {
   return (
     <Grid size={{ xs: 12 }}>
       <Autocomplete
         options={panels}
         getOptionLabel={(option) => option.title}
-        isOptionEqualToValue={(option, value) => option.id === value.id}
+        isOptionEqualToValue={(option, value) => (matchByTitle ? option.title === value.title : option.id === value.id)}
         value={selectedPanel}
         onChange={(_, newValue) => onSelect(newValue)}
         loading={loading}
@@ -67,7 +70,7 @@ export function PanelSelectField({
               <Box>
                 <Typography variant="body1">{option.title}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Type: {option.type} • ID: {option.id}
+                  {matchByTitle ? `Type: ${option.type}` : `Type: ${option.type} • ID: ${option.id}`}
                 </Typography>
               </Box>
             </Box>

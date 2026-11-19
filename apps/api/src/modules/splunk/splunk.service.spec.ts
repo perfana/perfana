@@ -26,6 +26,7 @@ function build(opts: { canModify?: boolean; canAccess?: boolean; caps?: string[]
   const sutRepo = repo();
   const authz = {
     getAccessibleOrganizations: jest.fn(async () => [ORG_A]),
+    isGlobalAdmin: jest.fn(() => false),
     getCapabilities: jest.fn(async () => opts.caps ?? Object.values(Capability)),
     canAccessResource: jest.fn(async () => ({ allowed: opts.canAccess ?? true })),
     canModifyResource: jest.fn(async () => ({ allowed: opts.canModify ?? true })),
@@ -146,6 +147,41 @@ describe('SplunkService mappings and queries', () => {
     await expect(
       service.createQuery({ splunkConfigId: CFG, systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load', panelTitle: 'p', panelId: 1, spl }, 'u', []),
     ).rejects.toThrow(word);
+  });
+});
+
+describe('SplunkService listPanelTitles', () => {
+  function qb(rows: Array<{ panelTitle: string; metricUnit: string }>) {
+    const b: Record<string, jest.Mock> = {};
+    for (const m of ['select', 'addSelect', 'orderBy', 'addOrderBy', 'where']) b[m] = jest.fn(() => b);
+    b.getRawMany = jest.fn(async () => rows);
+    return b;
+  }
+
+  it('merges the starter panels with the titles in the caller organizations, scoped and sorted', async () => {
+    const { service, queryRepo } = build();
+    const b = qb([{ panelTitle: 'Slow requests', metricUnit: 'ms' }, { panelTitle: 'Errors by host', metricUnit: 'none' }]);
+    queryRepo.createQueryBuilder.mockReturnValue(b);
+
+    const titles = await service.listPanelTitles('u', []);
+
+    expect(b.where).toHaveBeenCalledWith('q.organization_id IN (:...orgIds)', { orgIds: [ORG_A] });
+    expect(titles).toEqual([
+      { panelTitle: 'Errors by host', metricUnit: 'none' },
+      { panelTitle: 'Exceptions by type', metricUnit: 'short' },
+      { panelTitle: 'Log events by level', metricUnit: 'short' },
+      { panelTitle: 'Slow requests', metricUnit: 'ms' },
+    ]);
+  });
+
+  it('returns only the starter panels for a caller with no organization, without querying', async () => {
+    const { service, queryRepo, authz } = build();
+    authz.getAccessibleOrganizations.mockResolvedValue([]);
+
+    const titles = await service.listPanelTitles('u', []);
+
+    expect(queryRepo.createQueryBuilder).not.toHaveBeenCalled();
+    expect(titles.map((t) => t.panelTitle)).toEqual(['Errors by host', 'Exceptions by type', 'Log events by level']);
   });
 });
 

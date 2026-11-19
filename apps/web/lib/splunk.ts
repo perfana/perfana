@@ -150,6 +150,10 @@ export function fetchSplunkQueries(scope: SplunkScope) {
   return call<SplunkQuery[]>(`/splunk/queries?${p}`, 'Failed to fetch Splunk panels');
 }
 
+/** Distinct Splunk panel titles in the caller's organizations plus the starter panels (profile SLO picker). */
+export const fetchSplunkPanelTitles = () =>
+  call<Array<{ panelTitle: string; metricUnit: string }>>('/splunk/queries/panel-titles', 'Failed to fetch Splunk panel titles');
+
 export type SplunkQueryInput = SplunkScope & {
   splunkConfigId: string;
   panelTitle: string;

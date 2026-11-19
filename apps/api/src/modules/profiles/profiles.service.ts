@@ -20,13 +20,15 @@ import {
   DYNATRACE_HOSTS_PROFILE_SOURCE,
   DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
   DYNATRACE_HOST_PROFILE_PANELS,
+  SPLUNK_PROFILE_SOURCE,
+  SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT,
   PROVISIONED_SLO_AUTO_DISABLED_KEY,
   dynatraceHostPanelTitle,
 } from '@perfana/shared/constants';
 import { validateRegexPattern, isDuplicateSloTargetError, DUPLICATE_TARGET_MESSAGE } from '@perfana/shared/utils';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
-import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto, ProfileBenchmarkResponse } from './dto/profile-benchmark.dto';
+import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto, ProfileBenchmarkResponse, PATTERN_PROFILE_BENCHMARK_SOURCES } from './dto/profile-benchmark.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
 import { deleteOwnedProvisionedRules, profileRuleIdsOf } from './provisioned-grouping-rules';
@@ -964,7 +966,7 @@ export class ProfilesService {
    */
   private async resolveDashboardColumns(
     source: string,
-    dto: { profileDashboardId?: string; grafanaInstance?: string; dashboardUid?: string; panelId?: number },
+    dto: { profileDashboardId?: string; grafanaInstance?: string; dashboardUid?: string; panelId?: number; panelTitle?: string },
     profileName: string,
   ): Promise<{
     profile_dashboard_id: string | null;
@@ -995,6 +997,20 @@ export class ProfilesService {
       }
       if (dto.panelId !== undefined && !DYNATRACE_HOST_PROFILE_PANELS.some((p) => p.id === dto.panelId)) {
         throw new BadRequestException(`panelId ${dto.panelId} is not a Dynatrace host panel`);
+      }
+      return { profile_dashboard_id: null, grafana_instance: null, dashboard_uid: pattern };
+    }
+    // And for the Splunk dashboards. Splunk panels are user-authored per workload, so there is no
+    // fixed panel list to check an id against: the title is the key, and grafana-sync reads each
+    // workload's panel id from its splunk_queries row with that title.
+    if (source === SPLUNK_PROFILE_SOURCE) {
+      const pattern = dto.dashboardUid || SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT;
+      const check = validateRegexPattern(pattern, { maxLength: 255 });
+      if (!check.safe) {
+        throw new BadRequestException(`dashboardUid must be a valid regex: ${check.error}`);
+      }
+      if (!dto.panelTitle?.trim()) {
+        throw new BadRequestException('panelTitle is required for a Splunk panel SLO');
       }
       return { profile_dashboard_id: null, grafana_instance: null, dashboard_uid: pattern };
     }
@@ -1060,8 +1076,9 @@ export class ProfilesService {
         // An insert writes NULL for undefined; only update needs the explicit null.
         grafana_instance: dashboardColumns.grafana_instance ?? undefined,
         dashboard_uid: dashboardColumns.dashboard_uid ?? undefined,
-        panel_id: createDto.panelId,
-        panel_title: createDto.panelTitle,
+        // A Splunk panel SLO is keyed on its title; an id would name one workload's panel only.
+        panel_id: source === SPLUNK_PROFILE_SOURCE ? undefined : createDto.panelId,
+        panel_title: source === SPLUNK_PROFILE_SOURCE ? createDto.panelTitle?.trim() : createDto.panelTitle,
         panel_type: createDto.panelType,
         panel_description: createDto.panelDescription,
         evaluate_type: createDto.evaluateType,
@@ -1190,12 +1207,13 @@ export class ProfilesService {
           grafanaInstance: updateDto.grafanaInstance ?? benchmark.grafana_instance,
           dashboardUid: updateDto.dashboardUid ?? benchmark.dashboard_uid,
           panelId: updateDto.panelId ?? benchmark.panel_id,
+          panelTitle: updateDto.panelTitle ?? benchmark.panel_title,
         };
         // A stored uid regex is not a Grafana template uid and vice versa: drop it on a switch.
         if (updateDto.source !== undefined && updateDto.source !== benchmark.source) {
           merged.dashboardUid = updateDto.dashboardUid;
           merged.grafanaInstance = updateDto.grafanaInstance;
-          if (updateDto.source === PERF_TEST_PROFILE_SOURCE || updateDto.source === DYNATRACE_HOSTS_PROFILE_SOURCE) {
+          if (PATTERN_PROFILE_BENCHMARK_SOURCES.includes(updateDto.source)) {
             merged.profileDashboardId = undefined;
           }
         }
@@ -1216,6 +1234,16 @@ export class ProfilesService {
       }
       if (updateDto.panelType !== undefined) {
         benchmark.panel_type = updateDto.panelType;
+      }
+      // A Splunk panel SLO is keyed on its title (see resolveDashboardColumns), which a PUT
+      // sending only `panelTitle` never reaches; any id is dropped (null: save() skips undefined).
+      if (benchmark.source === SPLUNK_PROFILE_SOURCE) {
+        const title = benchmark.panel_title?.trim();
+        if (!title) {
+          throw new BadRequestException('panelTitle is required for a Splunk panel SLO');
+        }
+        benchmark.panel_title = title;
+        benchmark.panel_id = null as unknown as undefined;
       }
       if (updateDto.panelDescription !== undefined) {
         benchmark.panel_description = updateDto.panelDescription;
@@ -1374,15 +1402,28 @@ export class ProfilesService {
 
     const em = withRequestQuery(this.dataSource);
     try {
-      if (panelChanged && after.source === DYNATRACE_HOSTS_PROFILE_SOURCE) {
-        const title = dynatraceHostPanelTitle(after.panel_id) ?? after.panel_title ?? '';
+      const perDashboardPanel =
+        after.source === DYNATRACE_HOSTS_PROFILE_SOURCE
+          ? {
+              table: 'dynatrace_queries',
+              title: dynatraceHostPanelTitle(after.panel_id) ?? after.panel_title ?? '',
+              // The '<dashboard label> - <panel>' shape the SUT edit dialog matches a Dynatrace SLO on.
+              configTitle: `b.dashboard_label || ' - ' || $2::text`,
+            }
+          : after.source === SPLUNK_PROFILE_SOURCE
+            ? { table: 'splunk_queries', title: after.panel_title ?? '', configTitle: '$2::text' }
+            : null;
+      if (panelChanged && perDashboardPanel) {
+        // A host's (or a workload's Splunk) panel id differs per dashboard: read it from that
+        // dashboard's query row with the new title. `table` and `configTitle` are constants above.
+        const { table, title, configTitle } = perDashboardPanel;
         await em.query(
           `UPDATE benchmarks b
               SET panel_title = $2::text,
                   configuration = b.configuration
-                    || jsonb_build_object('id', dq.panel_id::text, 'title', b.dashboard_label || ' - ' || $2::text),
+                    || jsonb_build_object('id', dq.panel_id::text, 'title', ${configTitle}),
                   updated_at = now()
-             FROM dynatrace_queries dq
+             FROM ${table} dq
             WHERE b.generic_check_id = $1 AND b.organization_id = $3 AND b.updated_by IS NULL
               AND dq.application_dashboard_id = b.application_dashboard_id
               AND dq.system_under_test_id = b.system_under_test_id
@@ -1391,7 +1432,7 @@ export class ProfilesService {
               AND dq.panel_title = $2::text AND dq.enabled`,
           [after.id, title, after.organizationId],
         );
-        // Hosts without the new panel kept the old title: nothing left for them to judge.
+        // Dashboards without the new panel kept the old title: nothing left for them to judge.
         await em.query(
           `UPDATE benchmarks
               SET enabled = false,

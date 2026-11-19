@@ -729,6 +729,65 @@ describe('AutoConfigUpdatesService', () => {
         );
       });
 
+      it("writes a splunk-panels profile SLO as a Splunk SLO on the workload's own panel", async () => {
+        const profileBenchmark: any = {
+          id: 'pb-splunk',
+          source: 'splunk-panels',
+          dashboard_uid: '^splunk-',
+          panel_id: null,
+          panel_title: 'Errors by host',
+          panel_type: 'splunk',
+          metric_unit: 'short',
+          requirement_operator: 'lt',
+          requirement_value: 10,
+          tags: [],
+          metadata: {},
+          read_only: false,
+        };
+        const testRun: any = {
+          testRunId: 'test-1',
+          systemUnderTest: { name: 'shop' },
+          testEnvironment: 'acc',
+          workload: 'load',
+          organizationId: 'org-1',
+        };
+        const applicationDashboard = {
+          id: 'ad-splunk',
+          dashboardLabel: 'Splunk logs',
+          dashboardUid: 'splunk-splunk-logs',
+        } as any;
+
+        systemUnderTestRepo.findOne.mockResolvedValue({ id: 'sut-1' });
+        benchmarkRepo.create.mockReturnValue({});
+        benchmarkRepo.save.mockResolvedValue({ id: 'b-1' });
+
+        await service.insertBenchmarkBasedOnProfileBenchmark(
+          profileBenchmark,
+          testRun,
+          applicationDashboard,
+          {
+            panelId: 2,
+            panelTitle: 'Errors by host',
+          },
+        );
+
+        expect(benchmarkRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            source: 'splunk',
+            grafana_instance: 'Splunk',
+            application_dashboard_id: 'ad-splunk',
+            generic_check_id: 'pb-splunk',
+            panel_title: 'Errors by host',
+            configuration: expect.objectContaining({
+              id: '2',
+              type: 'splunk',
+              title: 'Errors by host',
+              yAxesFormat: 'short',
+            }),
+          }),
+        );
+      });
+
       it('should handle grafana instance from applicationDashboard object', async () => {
         // Arrange
         const mockSut = { id: 'sut-1' };

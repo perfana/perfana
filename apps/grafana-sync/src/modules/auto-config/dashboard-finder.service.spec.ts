@@ -99,6 +99,7 @@ describe('DashboardFinderService.findDynatraceHostPanelsByUidPattern', () => {
     Object.assign(ctx.qb, {
       addSelect: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
       getRawAndEntities: jest.fn().mockResolvedValue({ raw, entities }),
     });
     return ctx;
@@ -187,5 +188,76 @@ describe('DashboardFinderService.findDynatraceHostPanelsByUidPattern', () => {
       { applicationDashboard: a, panelId: 41234 },
       { applicationDashboard: b, panelId: 7 },
     ]);
+  });
+});
+
+describe('DashboardFinderService.findSplunkPanelsByUidPattern', () => {
+  function buildSplunk(raw: unknown[], entities: unknown[]) {
+    const ctx = build();
+    Object.assign(ctx.qb, {
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawAndEntities: jest.fn().mockResolvedValue({ raw, entities }),
+    });
+    return ctx;
+  }
+
+  it('scopes to Splunk dashboards, the run workload and enabled queries with that title', async () => {
+    const { service, qb } = buildSplunk([], []);
+
+    // A bare '.' must still be confined to the Splunk set by the LIKE guard.
+    await service.findSplunkPanelsByUidPattern(
+      '.',
+      'Errors by host',
+      'SHOP',
+      'acc',
+      'load',
+      'org-1',
+    );
+
+    expect(qb.innerJoin).toHaveBeenCalledWith(
+      'splunk_queries',
+      'dq',
+      'dq.application_dashboard_id = ad.id AND dq.system_under_test_id = sut.id',
+    );
+    expect(qb.where).toHaveBeenCalledWith("ad.dashboardUid LIKE 'splunk-%'");
+    expect(qb.andWhere).toHaveBeenCalledWith('ad.dashboardUid ~ :uidPattern', { uidPattern: '.' });
+    expect(qb.andWhere).toHaveBeenCalledWith('dq.workload = :workload', { workload: 'load' });
+    expect(qb.andWhere).toHaveBeenCalledWith('dq.panel_title = :panelTitle', {
+      panelTitle: 'Errors by host',
+    });
+    expect(qb.andWhere).toHaveBeenCalledWith('dq.enabled = true');
+    expect(qb.addOrderBy).toHaveBeenCalledWith('dq.panel_id');
+  });
+
+  it('keeps the first (lowest) panel id when two panels of one dashboard share a title', async () => {
+    const a = { id: 'ad-a' };
+    const { service } = buildSplunk(
+      [
+        { ad_id: 'ad-a', dq_panel_id: 2 },
+        { ad_id: 'ad-a', dq_panel_id: 5 },
+      ],
+      [a],
+    );
+
+    const result = await service.findSplunkPanelsByUidPattern(
+      '^splunk-',
+      'Errors by host',
+      'SHOP',
+      'acc',
+      'load',
+      'org-1',
+    );
+
+    expect(result).toEqual([{ applicationDashboard: a, panelId: 2 }]);
+  });
+
+  it('fails closed without an organization', async () => {
+    const { service, applicationDashboardRepo } = buildSplunk([], []);
+    expect(
+      await service.findSplunkPanelsByUidPattern('^splunk-', 'x', 'SHOP', 'acc', 'load', undefined),
+    ).toEqual([]);
+    expect(applicationDashboardRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 });
