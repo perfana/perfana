@@ -74,6 +74,21 @@ describe('SplunkCollector', () => {
     expect(docs[0].data.map((d: { metricName: string; value: number }) => [d.metricName, d.value])).toEqual([['ERROR', 2], ['OTHER', 0]]);
   });
 
+  // Value: protects=a search that returned rows but no series is logged as a warning naming the split field;
+  // fails_when=the collector stops reading onSearch's stats or drops the explanation; why_new=the info line was the
+  // only trace and did not say why 485 rows produced nothing; seam=none; no_claim=the real Splunk row shape
+  it('warns, naming the split field, when rows come back with no value column', async () => {
+    (logger as unknown as { warn: ReturnType<typeof vi.fn> }).warn.mockClear();
+    splunkTimechart.mockImplementation(async (_c: unknown, _q: unknown, opts: { onSearch?: (s: string, st: unknown, ms: number) => void }) => {
+      opts.onSearch?.('search x', { lines: 485, finalRows: 485, previewRows: 0, usedPreview: false, rows: 485, columns: ['_time', '_span'] }, 1);
+      return [];
+    });
+    const { collector } = makeCollector();
+    await collector.collect('run-1', liveRun, undefined, from, to);
+    const warned = (logger as unknown as { warn: ReturnType<typeof vi.fn> }).warn.mock.calls.map((c) => String(c[0]));
+    expect(warned.some((m) => m.includes('485 rows with only the columns _time, _span'))).toBe(true);
+  });
+
   it('does not look back on a completed run', async () => {
     const { collector } = makeCollector();
     await collector.collect('run-1', { ...liveRun, completed: true }, undefined, from, to);

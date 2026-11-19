@@ -600,8 +600,8 @@ function PreviewResult({ preview, onPickField }: { preview: SplunkPreview; onPic
       <Typography variant="caption" color="text.secondary">Search sent</Typography>
       <Typography sx={{ ...MONO, mb: 1.5, wordBreak: 'break-word' }}>{preview.search}</Typography>
       {preview.series.length === 0 ? (
-        <Alert severity="info">
-          No events in the last hour. If the sources have events, the filter or the field names may not match.
+        <Alert severity={preview.message ? 'warning' : 'info'}>
+          {preview.message ?? 'No events in the last hour. If the sources have events, the filter or the field names may not match.'}
         </Alert>
       ) : (
         <>

@@ -288,6 +288,23 @@ export interface ExportStats {
   previewRows: number;
   /** True when Splunk sent no final (preview:false) row and the last preview set was used. */
   usedPreview: boolean;
+  /** Rows actually returned, and the columns of the first one (for "rows but no series" diagnosis). */
+  rows: number;
+  columns: string[];
+}
+
+/**
+ * Rows came back but none carries a value column: a timechart `by <field>` over events that do not
+ * have that field returns one row per bucket with only `_time`/`_span`. Say so, naming the field,
+ * instead of the bare "no data". Returns null when that is not the case.
+ */
+export function explainEmptyTimechart(stats: ExportStats | undefined, splitBy?: string | null): string | null {
+  if (!stats || stats.rows === 0 || stats.columns.some((k) => !k.startsWith('_'))) return null;
+  const field = splitBy?.trim();
+  return `Splunk returned ${stats.rows} rows with only the columns ${stats.columns.join(', ') || '(none)'}, so there is nothing to plot`
+    + (field
+      ? `: no event in the window has the field "${field}". Check the field name (the Splunk tab preview lists the fields your events have) or the connection's App, where search-time field extractions live.`
+      : '.');
 }
 
 /**
@@ -328,9 +345,10 @@ export function parseExportStream(body: string): { rows: Array<Record<string, un
   // Some Splunk versions mark every row of a reporting search's export as preview, the final set
   // included. Dropping all of them read as "no data" with no error; the last set is the answer.
   const usedPreview = finals.length === 0 && previewSet.length > 0;
+  const rows = usedPreview ? previewSet : finals;
   return {
-    rows: usedPreview ? previewSet : finals,
-    stats: { lines, finalRows: finals.length, previewRows, usedPreview },
+    rows,
+    stats: { lines, finalRows: finals.length, previewRows, usedPreview, rows: rows.length, columns: Object.keys(rows[0] ?? {}).slice(0, 25) },
   };
 }
 
