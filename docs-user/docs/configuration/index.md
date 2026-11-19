@@ -52,4 +52,12 @@
 
     [:octicons-arrow-right-24: Reporting templates](reporting-templates.md)
 
+-   :material-bell-ring:{ .lg .middle } **Send notifications**
+
+    ---
+
+    Post run results to Slack, Teams or Mattermost.
+
+    [:octicons-arrow-right-24: Notifications](notifications.md)
+
 </div>

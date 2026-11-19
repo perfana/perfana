@@ -6,11 +6,11 @@ import { MASKED_WEBHOOK_URL } from '../notifications.constants';
 export class UpdateNotificationChannelDto {
   @ApiPropertyOptional({
     description: 'Notification channel type',
-    enum: ['slack', 'teams'],
+    enum: ['slack', 'teams', 'mattermost'],
     example: 'slack',
   })
   @IsOptional()
-  @IsIn(['slack', 'teams'])
+  @IsIn(['slack', 'teams', 'mattermost'])
   type?: NotificationChannelType;
 
   @ApiPropertyOptional({

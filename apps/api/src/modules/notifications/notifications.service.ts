@@ -15,13 +15,14 @@ import {
   ResourceNotFoundException,
   DatabaseException,
 } from '../../common/exceptions/business.exception';
-import { validateWebhookUrl } from '../../common/security';
+import { parseAllowedHosts, validateWebhookUrl } from '../../common/security';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { Capability } from '../../constants/capabilities.constants';
 import { CreateNotificationChannelDto, UpdateNotificationChannelDto } from './dto';
-import { SlackMessageBuilder, TeamsMessageBuilder } from './message-builders';
+import { MattermostMessageBuilder, SlackMessageBuilder, TeamsMessageBuilder } from './message-builders';
 import { MASKED_WEBHOOK_URL } from './notifications.constants';
+import { checkWebhookTarget, postJsonGuarded } from './webhook-target-guard';
 
 /**
  * Service responsible for managing notification channels.
@@ -37,6 +38,12 @@ import { MASKED_WEBHOOK_URL } from './notifications.constants';
  * - The webhook URL is a bearer credential. It is never returned (`MASKED_WEBHOOK_URL`)
  *   and is encrypted at rest by the entity's column transformer.
  *
+ * Mattermost is self-hosted, so its URL may name any host. The URL must be a Mattermost
+ * hook (`/hooks/<key>`), and the address the host resolves to must be public unless the
+ * operator listed the host in `NOTIFICATION_WEBHOOK_ALLOWED_HOSTS`. That is checked on
+ * save (for immediate feedback) and again at connect time on every send
+ * (`webhook-target-guard.ts`), which is the check that counts.
+ *
  * There is no RLS backstop on a default deploy (`DB_ENABLE_RLS_ROLE` defaults to false),
  * so these checks are the whole protection.
  */
@@ -46,6 +53,9 @@ export class NotificationsService {
   private readonly perfanaUrl: string;
   private readonly slackBuilder: SlackMessageBuilder;
   private readonly teamsBuilder: TeamsMessageBuilder;
+  private readonly mattermostBuilder: MattermostMessageBuilder;
+  /** Operator allowlist for self-hosted webhook hosts; never settable by a tenant. */
+  private readonly allowedHosts: string[];
 
   constructor(
     @InjectRepository(NotificationChannel)
@@ -63,6 +73,33 @@ export class NotificationsService {
 
     this.slackBuilder = new SlackMessageBuilder(this.perfanaUrl);
     this.teamsBuilder = new TeamsMessageBuilder(this.perfanaUrl);
+    this.mattermostBuilder = new MattermostMessageBuilder(this.perfanaUrl);
+    this.allowedHosts = parseAllowedHosts(
+      this.configService.get<string>('NOTIFICATION_WEBHOOK_ALLOWED_HOSTS'),
+    );
+  }
+
+  /**
+   * Validate a webhook URL for its channel type, as a 400 the user can act on.
+   * For a Mattermost channel sent directly, also resolve the host now, so a private
+   * address is reported on save rather than at the first test run. Through a proxy the
+   * proxy resolves and decides, so the address is not checked here.
+   */
+  private async assertValidTarget(
+    type: NotificationChannel['type'],
+    webhookUrl: string,
+    useProxy: boolean,
+  ): Promise<void> {
+    const urlValidation = validateWebhookUrl(webhookUrl, type, { allowedHosts: this.allowedHosts });
+    if (!urlValidation.isValid) {
+      throw new BadRequestException(`Invalid webhook URL: ${urlValidation.error}`);
+    }
+    if (type === 'mattermost' && !useProxy) {
+      const target = await checkWebhookTarget(urlValidation.url!.hostname, this.allowedHosts);
+      if (!target.ok) {
+        throw new BadRequestException(`Invalid webhook URL: ${target.error}`);
+      }
+    }
   }
 
   // ============================================
@@ -209,10 +246,7 @@ export class NotificationsService {
       await this.assertCanManage(userId, roles, system.organization_id, system.team_id);
 
       // Validate webhook URL to prevent SSRF attacks
-      const urlValidation = validateWebhookUrl(dto.webhookUrl);
-      if (!urlValidation.isValid) {
-        throw new BadRequestException(`Invalid webhook URL: ${urlValidation.error}`);
-      }
+      await this.assertValidTarget(dto.type, dto.webhookUrl, dto.useProxy ?? false);
 
       this.logger.log(
         `Creating notification channel "${dto.name}" for system ${dto.systemUnderTestId} by user ${userId}`
@@ -266,12 +300,18 @@ export class NotificationsService {
           ? dto.webhookUrl
           : undefined;
 
-      // Validate webhook URL if provided to prevent SSRF attacks
-      if (newWebhookUrl !== undefined) {
-        const urlValidation = validateWebhookUrl(newWebhookUrl);
-        if (!urlValidation.isValid) {
-          throw new BadRequestException(`Invalid webhook URL: ${urlValidation.error}`);
-        }
+      // Re-validate whenever the type, URL or proxy setting changes: the rules depend
+      // on all three, and switching a Slack channel to Mattermost (or back) without
+      // touching the URL must not keep a URL the new type would refuse.
+      const nextType = dto.type ?? channel.type;
+      const nextUrl = newWebhookUrl ?? channel.webhookUrl;
+      const nextUseProxy = dto.useProxy ?? channel.useProxy;
+      if (
+        nextType !== channel.type ||
+        newWebhookUrl !== undefined ||
+        nextUseProxy !== channel.useProxy
+      ) {
+        await this.assertValidTarget(nextType, nextUrl, nextUseProxy);
       }
 
       // Update only provided fields
@@ -346,12 +386,14 @@ export class NotificationsService {
         case 'teams':
           message = this.teamsBuilder.buildTestMessage(systemName);
           break;
+        case 'mattermost':
+          message = this.mattermostBuilder.buildTestMessage(systemName);
+          break;
         default:
           throw new Error(`Unsupported notification type: ${channel.type}`);
       }
 
-      const testAgents = await this.proxyResolver.resolve(channel.organizationId, channel.useProxy);
-      await this.sendWebhook(channel.webhookUrl, message, testAgents?.dispatcher);
+      await this.deliver(channel, message);
 
       this.logger.log(`Test notification sent successfully to channel ${id} by user ${userId}`);
       return { success: true, message: 'Test notification sent successfully' };
@@ -441,20 +483,57 @@ export class NotificationsService {
       case 'teams':
         message = this.teamsBuilder.buildTestRunResultMessage(testRun, systemName);
         break;
+      case 'mattermost':
+        message = this.mattermostBuilder.buildTestRunResultMessage(testRun, systemName);
+        break;
       default:
         throw new Error(`Unsupported notification type: ${channel.type}`);
     }
 
-    const channelAgents = await this.proxyResolver.resolve(channel.organizationId, channel.useProxy);
-    await this.sendWebhook(channel.webhookUrl, message, channelAgents?.dispatcher);
+    await this.deliver(channel, message);
+  }
+
+  /**
+   * Send a built message to a channel.
+   *
+   * A Mattermost channel is re-validated on every send (the allowlist may have changed
+   * since it was saved) and, when sent directly, goes through `postJsonGuarded`, which
+   * checks the resolved address at connect time and never follows a redirect. Through a
+   * proxy, redirects are refused as well. Slack and Teams are unchanged.
+   */
+  private async deliver(channel: NotificationChannel, message: unknown): Promise<void> {
+    const agents = await this.proxyResolver.resolve(channel.organizationId, channel.useProxy);
+
+    if (channel.type !== 'mattermost') {
+      await this.sendWebhook(channel.webhookUrl, message, agents?.dispatcher);
+      return;
+    }
+
+    const urlValidation = validateWebhookUrl(channel.webhookUrl, 'mattermost', {
+      allowedHosts: this.allowedHosts,
+    });
+    if (!urlValidation.isValid) {
+      throw new Error(`Refusing to send: ${urlValidation.error}`);
+    }
+    if (agents?.dispatcher) {
+      await this.sendWebhook(channel.webhookUrl, message, agents.dispatcher, 'error');
+    } else {
+      await postJsonGuarded(channel.webhookUrl, message, this.allowedHosts);
+    }
   }
 
   /**
    * Send a message to a webhook URL
    */
-  private async sendWebhook(url: string, message: unknown, dispatcher?: unknown): Promise<void> {
+  private async sendWebhook(
+    url: string,
+    message: unknown,
+    dispatcher?: unknown,
+    redirect: RequestRedirect = 'follow',
+  ): Promise<void> {
     const response = await fetch(url, {
       method: 'POST',
+      redirect,
       headers: {
         'Content-Type': 'application/json',
       },

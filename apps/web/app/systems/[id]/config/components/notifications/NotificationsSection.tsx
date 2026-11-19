@@ -81,7 +81,7 @@ export default function NotificationsSection({
             Notification Channels
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Configure Slack or Microsoft Teams notifications for test run completions
+            Configure Slack, Microsoft Teams or Mattermost notifications for test run completions
           </Typography>
         </Box>
         <Button
@@ -107,7 +107,7 @@ export default function NotificationsSection({
             No notification channels configured yet
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Add a Slack or Teams channel to receive notifications when test runs complete
+            Add a Slack, Teams or Mattermost channel to receive notifications when test runs complete
           </Typography>
         </Paper>
       ) : (

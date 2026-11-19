@@ -3,6 +3,7 @@ import { NotificationChannel } from '@perfana/shared';
 import { NotificationsService } from './notifications.service';
 import { MASKED_WEBHOOK_URL } from './notifications.constants';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
+import { checkWebhookTarget, postJsonGuarded } from './webhook-target-guard';
 
 /**
  * Tenant scoping for notification channels. Until these checks existed any
@@ -10,6 +11,12 @@ import { ResourceNotFoundException } from '../../common/exceptions/business.exce
  * credential for its Slack/Teams channel), edit or delete the channel, or post into
  * it through the test send.
  */
+jest.mock('./webhook-target-guard', () => ({
+  ...jest.requireActual('./webhook-target-guard'),
+  checkWebhookTarget: jest.fn(async () => ({ ok: true })),
+  postJsonGuarded: jest.fn(async () => undefined),
+}));
+
 jest.mock('../../common/db/request-em', () => {
   const actual = jest.requireActual('../../common/db/request-em');
   return { ...actual, withRequestEm: jest.fn((repo: unknown) => repo) };
@@ -219,6 +226,100 @@ describe('NotificationsService tenant scoping', () => {
 
       expect(result.success).toBe(true);
       expect(fetchMock.mock.calls[0][0]).toBe(URL);
+    });
+  });
+
+  describe('Mattermost', () => {
+    const MM_URL = 'https://catchup.acme.com/hooks/d59ff08b4c96bc49bd3944e223';
+    const dto = { systemUnderTestId: SUT, type: 'mattermost' as const, name: '#perf', webhookUrl: MM_URL };
+
+    const withAllowlist = (raw: string | undefined) =>
+      new NotificationsService(
+        channelRepo,
+        sutRepo,
+        { get: jest.fn((key: string) => (key === 'NOTIFICATION_WEBHOOK_ALLOWED_HOSTS' ? raw : undefined)) } as any,
+        proxyResolver as any,
+        authz as any,
+      );
+
+    beforeEach(() => {
+      (checkWebhookTarget as jest.Mock).mockReset().mockResolvedValue({ ok: true });
+      (postJsonGuarded as jest.Mock).mockReset().mockResolvedValue(undefined);
+    });
+
+    it('creates a channel on a public host after resolving it', async () => {
+      await service.create(dto, USER, []);
+
+      expect(checkWebhookTarget).toHaveBeenCalledWith('catchup.acme.com', []);
+      expect(channelRepo.save.mock.calls[0][0].type).toBe('mattermost');
+    });
+
+    it('refuses on save when the host resolves to a private address', async () => {
+      (checkWebhookTarget as jest.Mock).mockResolvedValue({ ok: false, error: 'resolves to 10.0.0.5' });
+
+      await expect(service.create(dto, USER, [])).rejects.toThrow(/10\.0\.0\.5/);
+      expect(channelRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a URL that is not a Mattermost hook', async () => {
+      await expect(
+        service.create({ ...dto, webhookUrl: 'https://catchup.acme.com/api/v4/users' }, USER, []),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('accepts an internal IP literal only when the operator allowlisted it', async () => {
+      const internal = { ...dto, webhookUrl: 'https://10.0.0.5/hooks/d59ff08b4c96bc49bd3944e223' };
+
+      await expect(service.create(internal, USER, [])).rejects.toBeInstanceOf(BadRequestException);
+      await expect(withAllowlist('10.0.0.5').create(internal, USER, [])).resolves.toBeDefined();
+    });
+
+    it('skips the save-time resolution when the channel goes through a proxy', async () => {
+      await service.create({ ...dto, useProxy: true }, USER, []);
+
+      expect(checkWebhookTarget).not.toHaveBeenCalled();
+    });
+
+    it('re-validates when only the type changes, so a Slack URL cannot become a Mattermost one', async () => {
+      await expect(service.update(CHANNEL, { type: 'mattermost' }, USER, [])).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(channelRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('sends through the guarded client with the operator allowlist and a Mattermost payload', async () => {
+      channelRepo.findOne.mockResolvedValue(channel({ type: 'mattermost', webhookUrl: MM_URL }));
+
+      const result = await withAllowlist('catchup.acme.com').testChannel(CHANNEL, USER, []);
+
+      expect(result.success).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+      const [url, body, allowed] = (postJsonGuarded as jest.Mock).mock.calls[0];
+      expect(url).toBe(MM_URL);
+      expect(allowed).toEqual(['catchup.acme.com']);
+      expect(body).toEqual(expect.objectContaining({ text: expect.stringContaining('Test Notification') }));
+      expect(body.blocks).toBeUndefined();
+    });
+
+    it('refuses redirects when a Mattermost channel goes through a proxy', async () => {
+      channelRepo.findOne.mockResolvedValue(channel({ type: 'mattermost', webhookUrl: MM_URL, useProxy: true }));
+      proxyResolver.resolve.mockResolvedValue({ dispatcher: {} });
+
+      await service.testChannel(CHANNEL, USER, []);
+
+      expect(postJsonGuarded).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls[0][1].redirect).toBe('error');
+    });
+
+    it('refuses to send to a stored URL the current rules reject', async () => {
+      channelRepo.findOne.mockResolvedValue(
+        channel({ type: 'mattermost', webhookUrl: 'https://10.0.0.5/hooks/d59ff08b4c96bc49bd3944e223' }),
+      );
+
+      const result = await service.testChannel(CHANNEL, USER, []);
+
+      expect(result.success).toBe(false);
+      expect(postJsonGuarded).not.toHaveBeenCalled();
     });
   });
 });
