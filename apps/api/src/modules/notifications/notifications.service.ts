@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   HttpException,
   OnApplicationBootstrap,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -204,6 +205,18 @@ export class NotificationsService implements OnApplicationBootstrap {
     return { ...channel, webhookUrl: channel.webhookUrl ? MASKED_WEBHOOK_URL : '' };
   }
 
+  /**
+   * Saving a webhook URL encrypts it, and the transformer throws without a key. Without
+   * this the caller gets a generic 500 and the cause reaches only the log.
+   */
+  private static assertEncryptionConfigured(): void {
+    if (!process.env.ENCRYPTION_KEY) {
+      throw new ServiceUnavailableException(
+        'Notification channels cannot be saved: ENCRYPTION_KEY is not configured on the API',
+      );
+    }
+  }
+
   private static rethrowHttp(error: unknown): void {
     if (error instanceof HttpException) throw error;
   }
@@ -286,6 +299,7 @@ export class NotificationsService implements OnApplicationBootstrap {
 
       // Validate webhook URL to prevent SSRF attacks
       await this.assertValidTarget(dto.type, dto.webhookUrl, dto.useProxy ?? false);
+      NotificationsService.assertEncryptionConfigured();
 
       this.logger.log(
         `Creating notification channel "${dto.name}" for system ${dto.systemUnderTestId} by user ${userId}`
@@ -352,6 +366,10 @@ export class NotificationsService implements OnApplicationBootstrap {
       ) {
         await this.assertValidTarget(nextType, nextUrl, nextUseProxy);
       }
+      // Every save needs the key, not only a URL change: TypeORM runs the column
+      // transformer on unchanged values too when it diffs the entity, and a row still in
+      // plaintext then throws inside encrypt().
+      NotificationsService.assertEncryptionConfigured();
 
       // Update only provided fields
       if (dto.type !== undefined) channel.type = dto.type;
@@ -541,6 +559,15 @@ export class NotificationsService implements OnApplicationBootstrap {
    * proxy, redirects are refused as well. Slack and Teams are unchanged.
    */
   private async deliver(channel: NotificationChannel, message: unknown): Promise<void> {
+    // The column transformer hands back the ciphertext when it cannot decrypt (a missing or
+    // changed ENCRYPTION_KEY, or a SUT import from an environment with another key). Posting
+    // to it would fail as "Invalid URL" with the real cause logged only at debug. Checked
+    // here because every send path, Mattermost's guarded one included, goes through deliver.
+    if (isEncrypted(channel.webhookUrl)) {
+      throw new Error(
+        'Webhook URL could not be decrypted: ENCRYPTION_KEY is missing or differs from the one it was saved with. Restore the key or re-enter the URL.',
+      );
+    }
     const agents = await this.proxyResolver.resolve(channel.organizationId, channel.useProxy);
 
     if (channel.type !== 'mattermost') {

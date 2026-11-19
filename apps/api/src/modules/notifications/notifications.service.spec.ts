@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { NotificationChannel, encrypt, isEncrypted, safeDecrypt } from '@perfana/shared';
 import { NotificationsService } from './notifications.service';
 import { MASKED_WEBHOOK_URL } from './notifications.constants';
@@ -272,6 +272,50 @@ describe('NotificationsService tenant scoping', () => {
       process.env.ENCRYPTION_KEY = 'b'.repeat(64);
       channelRepo.query = jest.fn().mockRejectedValue(new Error('relation does not exist'));
       await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('encryption failure modes', () => {
+    const originalKey = process.env.ENCRYPTION_KEY;
+    afterEach(() => {
+      if (originalKey === undefined) delete process.env.ENCRYPTION_KEY;
+      else process.env.ENCRYPTION_KEY = originalKey;
+    });
+
+    // Value: protects=a deploy without ENCRYPTION_KEY gets a 503 naming the variable instead of an opaque 500; fails_when=the pre-check is removed or moved after save; why_new=the transformer's error is otherwise wrapped as DatabaseException; seam=none; no_claim=the transformer itself (mocked repo)
+    it('refuses to save a URL without ENCRYPTION_KEY, naming it', async () => {
+      delete process.env.ENCRYPTION_KEY;
+      const dto = { systemUnderTestId: SUT, type: 'slack' as const, name: '#perf', webhookUrl: URL };
+
+      const created = await service.create(dto, USER, []).catch((e) => e);
+      const updated = await service
+        .update(CHANNEL, { webhookUrl: 'https://hooks.slack.com/services/T000/B000/new' }, USER, [])
+        .catch((e) => e);
+
+      for (const err of [created, updated]) {
+        expect(err).toBeInstanceOf(ServiceUnavailableException);
+        expect(err.message).toMatch(/ENCRYPTION_KEY/);
+      }
+      expect(channelRepo.save).not.toHaveBeenCalled();
+      // A save that keeps the stored URL needs the key too: TypeORM transforms unchanged
+      // columns when it diffs the entity (the mocked repo here would not show that).
+      const renamed = await service
+        .update(CHANNEL, { name: 'x', webhookUrl: MASKED_WEBHOOK_URL }, USER, [])
+        .catch((e) => e);
+      expect(renamed).toBeInstanceOf(ServiceUnavailableException);
+      expect(channelRepo.save).not.toHaveBeenCalled();
+    });
+
+    // Value: protects=an undecryptable URL (changed key, cross-env import) fails with a cause the user can act on; fails_when=the isEncrypted guard is removed and ciphertext is POSTed; why_new=safeDecrypt returns ciphertext silently; seam=none; no_claim=the run-completion path's logging (same sendWebhook)
+    it('does not post to a webhook URL that could not be decrypted', async () => {
+      process.env.ENCRYPTION_KEY = 'c'.repeat(64);
+      channelRepo.findOne = jest.fn(async () => channel({ webhookUrl: encrypt(URL) }));
+
+      const result = await service.testChannel(CHANNEL, USER, []);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/could not be decrypted/);
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
