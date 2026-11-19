@@ -5905,3 +5905,47 @@ file passes code review showing nothing at all. Pre-existing; surfaced because v
 but is not a NUL — `\u001f` (unit separator) keeps the same collision-avoidance property and leaves
 the file textual. Verify with `git diff --stat` showing line counts rather than bytes.
 **Completed:** v0.2.95.31 (2026-09-16) — the option loaders moved to `shared/metric-options.ts` with a plain-text key separator; `compare/utils/metric-options.ts` is a re-export shim.
+
+## Comments
+
+### Cross-run comment memory (P3)
+
+**What:** when ADAPT flags a regression on a metric, show comment threads from earlier runs of the same SUT, environment and workload whose markers' `chart_context` includes that metric ("last time this spiked it was GC").
+
+**Why:** turns run comments into team memory across runs, which ADAPT alone cannot give.
+
+**Pros:** reuses `chart_context` (`MetricSeriesRef[]` per marker), so nothing new is captured.
+
+**Cons:** needs a metric lookup across `chart_context` jsonb (an expression index or a side table) and UI on the ADAPT results card.
+
+**Context:** proposed by the second opinion in the comments design (docs/designs/test-run-comments.md, "Cross-Model Perspective"); kept out of v1 by the eng review. Start in the ADAPT results card with a query over `test_run_comments` joined to runs of the same workload.
+
+**Depends on / blocked by:** PR2 of the comments feature (graph markers) shipped.
+
+### Show comment markers on every time-series card (P3)
+
+**What:** draw each run's comment markers (number plus a dashed line at `marker_time`) on the other time-series cards of the run, each linking back to its thread.
+
+**Why:** makes a marker a shared timeline across the run ("one marker, every chart"), so a correlation between, say, a p95 spike and a host metric is visible without hunting.
+
+**Pros:** `marker_time` is stored by v1; several charts already render event lines.
+
+**Cons:** each card has its own x-axis model (indexed or time), so each needs its own timestamp lookup and a visual check in the browser.
+
+**Context:** v1 renders markers on the Graphs card only (docs/designs/test-run-comments.md, premise 2 and eng review R14). Start with cards that already draw event lines through `apps/web/app/test-runs/[id]/components/shared/event-lines.ts`.
+
+**Depends on / blocked by:** PR2 of the comments feature (graph markers) shipped.
+
+### @mentions with per-user notification (P3)
+
+**What:** `@user` in a comment body resolves to a member of the run's organization; the mentioned user gets an individual notification and a distinct "mentioned you" badge, separate from the batched channel post.
+
+**Why:** the standard collaboration pattern: mentions break out of the digest, which is how a specific person gets pulled into a review.
+
+**Pros:** builds on v1's per-card unread model and author identity.
+
+**Cons:** needs a personal delivery channel Perfana does not have (email/SMTP, or a Slack user id per Perfana user) plus a member picker in the reply box.
+
+**Context:** v1 deliberately posts only to team channels via `notification_channels` (docs/designs/test-run-comments.md, premise 5). Decide the per-user delivery mechanism first; it is useful beyond comments.
+
+**Depends on / blocked by:** a per-user notification mechanism.
