@@ -71,6 +71,7 @@ Runs that finished before you set this up are not collected automatically. Re-ev
 - *The source tree is empty* — The account's role cannot search any index that received events in the last 24 hours. Ask your Splunk admin to grant the role access to the indexes you need.
 - *Searches fail with "maximum number of concurrent searches"* — Lower **Concurrent searches** on the connection, or ask your Splunk admin to raise the role's search quota.
 - *A panel shows no data for a run* — Check that a source is mapped at a level that covers the run's environment and workload, and that the panel is enabled.
+- *A panel's search returns rows in Splunk, but the run collected nothing* — Fixed in Perfana 0.2.97.85. Runs collected before that could drop every row when the Splunk user's time format was not one Perfana could read. Re-evaluate the run with **force refetch** while Splunk still holds the logs for that window. If the panel preview or the worker log says Perfana cannot read `_time`, your Splunk is ignoring the requested time format; send that message to your Perfana administrator.
 - *The last minutes of a run are missing* — Splunk can take minutes to index events under load. Perfana re-reads recent minutes on each collection and again at analysis, so these usually fill in once the run is analysed.
 
 ## Related

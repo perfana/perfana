@@ -85,7 +85,7 @@ accidentally read outside the run or at the wrong resolution. Perfana sends:
 ```
 search=search <mapped sources> | search <spl, expanded>
        | timechart span=<bucket>s <aggregation> by <split_by> limit=<max_series> useother=t
-earliest_time=<from epoch>  latest_time=<to epoch>
+earliest_time=<from epoch>  latest_time=<to epoch>  output_time_format=%s
 ```
 
 The mapped sources run first as their own search and the user's filter is piped after it, so a
@@ -188,14 +188,21 @@ from the first mapping row — Common Issue #42) and an **Open in Splunk** link 
 ## Querying Splunk
 
 One endpoint: `POST {host}/servicesNS/-/{splunk_app}/search/v2/jobs/export`, form-encoded,
-with `search=...` and `output_mode=json`. It streams one JSON object per line; a timechart gives
-one row per bucket: `{"result":{"_time":"…","ERROR":"12","WARN":"3","OTHER":"0"}}`.
+with `search=...`, `output_mode=json` and `output_time_format=%s`. It streams one JSON object per
+line; a timechart gives one row per bucket: `{"result":{"_time":"1795007100","ERROR":"12","WARN":"3","OTHER":"0"}}`.
 
 - Parse line by line; a `{"messages":[{"type":"FATAL"|"ERROR",...}]}` line is a failed search
   and fails that panel (see "Live (incremental) ticks" for what that does to the tick). A row with
   `"preview": true` is an interim result set and is skipped; counting it doubles the totals.
 - `_time` is the bucket start. Each non-`_`-prefixed key is a series; `metric_name` = the key,
   clamped through `DS_METRICS_VARCHAR_LIMITS` like every other writer.
+- `_time` arrives as epoch seconds because every export sends `output_time_format=%s`
+  (v0.2.97.85). Before that, `_time` was read in whatever format Splunk sent, and a row whose
+  `_time` `Date` could not parse was dropped silently. Rows came back with value columns and no
+  point was collected. The format that Splunk sent was never captured, so the cause is inferred:
+  a non-ISO format such as a locale display string (`2026-11-18 14:05:30.000 CET`) or bare epoch
+  digits. Asking for `%s` takes the format out of Splunk's hands either way. `parseSplunkTime`
+  reads epoch seconds and still accepts ISO; a row whose `_time` it cannot read is skipped.
 - An empty bucket comes back as `0` from timechart, so zero-filling is free. Do not convert
   `0` to null — "zero errors" is the value an SLO wants.
 - Timeout: `AbortSignal.timeout(SPLUNK_SEARCH_TIMEOUT_MS)`, default 120 s.
@@ -392,6 +399,16 @@ hundreds of final rows and plot nothing. The worker then logs at **warn**, namin
 columns, and the Splunk tab preview shows the same text. The usual causes are a field named
 differently (`level`, `severity`) or a search-time extraction that lives in another app than the
 connection's **App**; a filter such as `log_level=ERROR` on the same field returns no rows at all.
+
+Rows with value columns and still no points has two causes (v0.2.97.85). Either `_time` failed to
+parse, or every cell is empty, which a non-`count` aggregation such as `avg(<field>)` returns for
+buckets with no events. Before that version a panel could return hundreds of rows this way and log
+only `returned no data`, most likely because `_time` came back in a format `Date` cannot parse.
+Since the export asks for epoch seconds, an unreadable `_time` should only recur on a Splunk that
+ignores `output_time_format`. When the first row's `_time` (`ExportStats.firstTime`) does not
+parse, the warn line and the preview quote it and say Perfana cannot read it; empty cells under a
+readable `_time` still log only `returned no data` at info. A run that collected nothing because of
+`_time` needs a force re-fetch while Splunk still holds the window.
 
 The card-level **Open in Splunk** link searches only the mapped sources. Each panel's own link runs
 that panel's search, so use it to check a filter.
