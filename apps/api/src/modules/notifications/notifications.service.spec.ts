@@ -246,10 +246,10 @@ describe('NotificationsService tenant scoping', () => {
       channelRepo.query = jest
         .fn()
         .mockResolvedValueOnce([
-          { id: CHANNEL, webhook_url: URL },
-          { id: OTHER_CHANNEL, webhook_url: already },
+          { src: 'c', id: CHANNEL, v: URL },
+          { src: 'c', id: OTHER_CHANNEL, v: already },
         ])
-        .mockResolvedValue([]);
+        .mockResolvedValue([[], 1]);
 
       await service.onApplicationBootstrap();
 
@@ -278,13 +278,38 @@ describe('NotificationsService tenant scoping', () => {
     it('writes nothing when the key cannot decrypt the rows already encrypted', async () => {
       const underOtherKey = encrypt('https://hooks.slack.com/services/T000/B000/old', Buffer.from('d'.repeat(64), 'hex'));
       channelRepo.query = jest.fn().mockResolvedValueOnce([
-        { id: CHANNEL, webhook_url: URL },
-        { id: OTHER_CHANNEL, webhook_url: underOtherKey },
+        { src: 'c', id: CHANNEL, v: URL },
+        { src: 'c', id: OTHER_CHANNEL, v: underOtherKey },
       ]);
 
       await service.onApplicationBootstrap();
 
       expect(channelRepo.query).toHaveBeenCalledTimes(1);
+    });
+
+    // Value: protects=a first deploy (no encrypted channel yet) cannot bulk-encrypt under an unverified key; fails_when=the probe ignores other credential columns or proceeds with no sample; why_new=the channel table alone is empty of ciphertext on every existing install; seam=none; no_claim=real cross-table SQL (mocked query)
+    it('verifies the key against other credentials, and writes nothing with no sample at all', async () => {
+      const otherCred = encrypt('grafana-api-key');
+      const corrupt = `${'a'.repeat(24)}:${'b'.repeat(32)}:${'c'.repeat(16)}`;
+      channelRepo.query = jest
+        .fn()
+        .mockResolvedValueOnce([
+          { src: 'c', id: CHANNEL, v: URL },
+          { src: 'k', id: null, v: corrupt },
+          { src: 'k', id: null, v: otherCred },
+        ])
+        .mockResolvedValue([[], 1]);
+
+      await service.onApplicationBootstrap();
+      // One corrupt sample does not block: the readable one proves the key.
+      expect(channelRepo.query).toHaveBeenCalledTimes(2);
+
+      channelRepo.query = jest.fn().mockResolvedValueOnce([{ src: 'c', id: CHANNEL, v: URL }]);
+      const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+      await service.onApplicationBootstrap();
+      expect(channelRepo.query).toHaveBeenCalledTimes(1);
+      // Says why (nothing to verify against), not that the key is wrong.
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no encrypted credential exists yet/));
     });
 
     it('skips with a malformed key instead of throwing on the first row', async () => {
@@ -309,7 +334,7 @@ describe('NotificationsService tenant scoping', () => {
       const err = await service.create(dto, USER, []).catch((e) => e);
 
       expect(err).toBeInstanceOf(ServiceUnavailableException);
-      expect(err.message).toMatch(/ENCRYPTION_KEY must be/);
+      expect(err.message).toMatch(/missing or invalid/);
       expect(err.message).not.toContain('abc');
       expect(channelRepo.save).not.toHaveBeenCalled();
     });

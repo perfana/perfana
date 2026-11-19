@@ -121,23 +121,48 @@ export class NotificationsService implements OnApplicationBootstrap {
       return;
     }
     try {
-      // No request context at boot, so no request EntityManager exists to use.
+      // No request context at boot, so no request EntityManager exists to use. One
+      // statement returns the channels ('c') and a sample of every other column encrypted
+      // with ENCRYPTION_KEY ('k'), which is what the key check below reads.
       // eslint-disable-next-line owned-resource-must-use-request-em
-      const rows: Array<{ id: string; webhook_url: string }> = await this.notificationChannelRepository.query(
-        `SELECT id, webhook_url FROM notification_channels WHERE webhook_url <> ''`,
+      const all: Array<{ src: 'c' | 'k'; id: string | null; v: string }> = await this.notificationChannelRepository.query(
+        `SELECT 'c' AS src, id::text AS id, webhook_url AS v FROM notification_channels WHERE webhook_url <> ''
+         UNION ALL
+         SELECT 'k', NULL, v FROM (
+           SELECT api_key AS v FROM grafana_instances UNION ALL SELECT password FROM grafana_instances
+           UNION ALL SELECT api_token FROM dynatrace_configs UNION ALL SELECT platform_api_token FROM dynatrace_configs
+           UNION ALL SELECT api_token FROM splunk_configs UNION ALL SELECT password FROM splunk_configs
+           UNION ALL SELECT username FROM proxy_servers UNION ALL SELECT password FROM proxy_servers
+         ) k WHERE v IS NOT NULL AND v <> '' LIMIT 1000`,
       );
-      const plaintext = rows.filter((r) => !isEncrypted(r.webhook_url));
+      const rows = all.filter((r) => r.src === 'c');
+      const plaintext = rows.filter((r) => !isEncrypted(r.v));
 
       // Prove the key is the one the existing ciphertext was written with before
       // overwriting anything: encrypting under a wrong key destroys the only readable
-      // copy of each URL. With no encrypted row yet there is nothing to check against.
-      const sample = rows.find((r) => isEncrypted(r.webhook_url));
-      if (sample && plaintext.length > 0) {
-        try {
-          decrypt(sample.webhook_url);
-        } catch {
+      // copy of each URL. AES-GCM authenticates, so one value that decrypts proves the key;
+      // trying every sample keeps one corrupt row or a half-finished rotation from
+      // blocking the pass. With nothing encrypted anywhere there is nothing to prove the
+      // key against, so the rows are left for a user save rather than risked in bulk.
+      if (plaintext.length > 0) {
+        const samples = all.filter((r) => isEncrypted(r.v));
+        if (samples.length === 0) {
+          this.logger.warn(
+            `Not encrypting ${plaintext.length} plaintext notification webhook URL(s): no encrypted credential exists yet to verify ENCRYPTION_KEY against. They are encrypted when next saved.`,
+          );
+          return;
+        }
+        const readable = samples.some((r) => {
+          try {
+            decrypt(r.v);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (!readable) {
           this.logger.error(
-            `Not encrypting ${plaintext.length} plaintext notification webhook URL(s): ENCRYPTION_KEY cannot decrypt the channels already encrypted, so it is not the key they were saved with`,
+            `Not encrypting ${plaintext.length} plaintext notification webhook URL(s): ENCRYPTION_KEY decrypts none of the ${samples.length} stored credential(s), so it is not the key they were saved with`,
           );
           return;
         }
@@ -148,7 +173,7 @@ export class NotificationsService implements OnApplicationBootstrap {
         // eslint-disable-next-line owned-resource-must-use-request-em
         const result = await this.notificationChannelRepository.query(
           `UPDATE notification_channels SET webhook_url = $1 WHERE id = $2 AND webhook_url = $3`,
-          [encrypt(row.webhook_url), row.id, row.webhook_url],
+          [encrypt(row.v), row.id, row.v],
         );
         // UPDATE answers [rows, rowCount]; 0 when another replica or a save got there first.
         encrypted += Array.isArray(result) && typeof result[1] === 'number' ? result[1] : 0;
@@ -234,7 +259,11 @@ export class NotificationsService implements OnApplicationBootstrap {
   private static assertEncryptionConfigured(): void {
     const problem = NotificationsService.encryptionKeyProblem();
     if (problem) {
-      throw new ServiceUnavailableException(`Notification channels cannot be saved: ${problem}`);
+      // Fixed text for the caller: the detail (length, format) describes server config and
+      // goes to the boot log, not to tenant users.
+      throw new ServiceUnavailableException(
+        'Notification channels cannot be saved: ENCRYPTION_KEY is missing or invalid on the API',
+      );
     }
   }
 
