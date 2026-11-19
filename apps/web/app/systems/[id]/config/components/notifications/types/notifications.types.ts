@@ -11,6 +11,12 @@ export type ChannelType = 'slack' | 'teams' | 'mattermost';
 export const MASKED_WEBHOOK_URL = '[MASKED]';
 
 /**
+ * What the API returns in place of a saved webhook URL (the URL is a credential and is
+ * never sent back). Saving the form with this value unchanged keeps the stored URL.
+ */
+export const MASKED_WEBHOOK_URL = '[MASKED]';
+
+/**
  * Notification channel entity from the API
  */
 export interface NotificationChannel {
