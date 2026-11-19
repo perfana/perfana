@@ -4,11 +4,13 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  OnApplicationBootstrap,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { NotificationChannel, TestRun, SystemUnderTest } from '@perfana/shared';
+import { NotificationChannel, TestRun, SystemUnderTest, decrypt, encrypt, getEncryptionKey, isEncrypted } from '@perfana/shared';
 import { withRequestEm } from '../../common/db/request-em';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import {
@@ -48,7 +50,7 @@ import { checkWebhookTarget, postJsonGuarded } from './webhook-target-guard';
  * so these checks are the whole protection.
  */
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnApplicationBootstrap {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly perfanaUrl: string;
   private readonly slackBuilder: SlackMessageBuilder;
@@ -99,6 +101,91 @@ export class NotificationsService {
       if (!target.ok) {
         throw new BadRequestException(`Invalid webhook URL: ${target.error}`);
       }
+    }
+  }
+
+  /**
+   * Encrypt webhook URLs stored before the column was encrypted. The entity's transformer
+   * only encrypts on save, so a channel nobody edits would otherwise keep its bearer URL in
+   * plaintext in the database, backups and SUT exports.
+   *
+   * Reads and writes raw SQL: the transformer decrypts on load, so a loaded entity cannot
+   * tell a plaintext row from an encrypted one. Each UPDATE is conditional on the value it
+   * read, so concurrent replicas and a user save in between never clobber each other.
+   * Never fails the boot: without ENCRYPTION_KEY it skips, and any error is logged.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    const keyProblem = NotificationsService.encryptionKeyProblem();
+    if (keyProblem) {
+      this.logger.warn(`Existing notification webhook URLs stay unencrypted: ${keyProblem}`);
+      return;
+    }
+    try {
+      // No request context at boot, so no request EntityManager exists to use. One
+      // statement returns the channels ('c') and a sample of every other column encrypted
+      // with ENCRYPTION_KEY ('k'), which is what the key check below reads.
+      // eslint-disable-next-line owned-resource-must-use-request-em
+      const all: Array<{ src: 'c' | 'k'; id: string | null; v: string }> = await this.notificationChannelRepository.query(
+        `SELECT 'c' AS src, id::text AS id, webhook_url AS v FROM notification_channels WHERE webhook_url <> ''
+         UNION ALL
+         SELECT 'k', NULL, v FROM (
+           SELECT api_key AS v FROM grafana_instances UNION ALL SELECT password FROM grafana_instances
+           UNION ALL SELECT api_token FROM dynatrace_configs UNION ALL SELECT platform_api_token FROM dynatrace_configs
+           UNION ALL SELECT api_token FROM splunk_configs UNION ALL SELECT password FROM splunk_configs
+           UNION ALL SELECT username FROM proxy_servers UNION ALL SELECT password FROM proxy_servers
+         ) k WHERE v IS NOT NULL AND v <> '' LIMIT 1000`,
+      );
+      const rows = all.filter((r) => r.src === 'c');
+      const plaintext = rows.filter((r) => !isEncrypted(r.v));
+
+      // Prove the key is the one the existing ciphertext was written with before
+      // overwriting anything: encrypting under a wrong key destroys the only readable
+      // copy of each URL. AES-GCM authenticates, so one value that decrypts proves the key;
+      // trying every sample keeps one corrupt row or a half-finished rotation from
+      // blocking the pass. With nothing encrypted anywhere there is nothing to prove the
+      // key against, so the rows are left for a user save rather than risked in bulk.
+      if (plaintext.length > 0) {
+        const samples = all.filter((r) => isEncrypted(r.v));
+        if (samples.length === 0) {
+          this.logger.warn(
+            `Not encrypting ${plaintext.length} plaintext notification webhook URL(s): no encrypted credential exists yet to verify ENCRYPTION_KEY against. They are encrypted when next saved.`,
+          );
+          return;
+        }
+        const readable = samples.some((r) => {
+          try {
+            decrypt(r.v);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (!readable) {
+          this.logger.error(
+            `Not encrypting ${plaintext.length} plaintext notification webhook URL(s): ENCRYPTION_KEY decrypts none of the ${samples.length} stored credential(s), so it is not the key they were saved with`,
+          );
+          return;
+        }
+      }
+
+      let encrypted = 0;
+      for (const row of plaintext) {
+        // eslint-disable-next-line owned-resource-must-use-request-em
+        const result = await this.notificationChannelRepository.query(
+          `UPDATE notification_channels SET webhook_url = $1 WHERE id = $2 AND webhook_url = $3`,
+          [encrypt(row.v), row.id, row.v],
+        );
+        // UPDATE answers [rows, rowCount]; 0 when another replica or a save got there first.
+        encrypted += Array.isArray(result) && typeof result[1] === 'number' ? result[1] : 0;
+      }
+      // Logged every boot, so a pass that saw nothing (e.g. a login role without RLS
+      // bypass on this FORCE RLS table) is visible rather than silent.
+      this.logger.log(
+        `Notification webhook URLs: scanned ${rows.length}, encrypted ${encrypted} of ${plaintext.length} plaintext`,
+      );
+    } catch (error) {
+      const msg = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
+      this.logger.error(`Could not encrypt existing notification webhook URLs: ${msg}`);
     }
   }
 
@@ -163,6 +250,31 @@ export class NotificationsService {
   /** A copy safe to return to a client: the webhook URL is replaced by a placeholder. */
   private toResponse(channel: NotificationChannel): NotificationChannel {
     return { ...channel, webhookUrl: channel.webhookUrl ? MASKED_WEBHOOK_URL : '' };
+  }
+
+  /**
+   * Saving a webhook URL encrypts it, and the transformer throws without a key. Without
+   * this the caller gets a generic 500 and the cause reaches only the log.
+   */
+  private static assertEncryptionConfigured(): void {
+    const problem = NotificationsService.encryptionKeyProblem();
+    if (problem) {
+      // Fixed text for the caller: the detail (length, format) describes server config and
+      // goes to the boot log, not to tenant users.
+      throw new ServiceUnavailableException(
+        'Notification channels cannot be saved: ENCRYPTION_KEY is missing or invalid on the API',
+      );
+    }
+  }
+
+  /** Why ENCRYPTION_KEY is unusable (missing or malformed), or null. Never includes the key. */
+  private static encryptionKeyProblem(): string | null {
+    try {
+      getEncryptionKey();
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : 'ENCRYPTION_KEY is invalid';
+    }
   }
 
   private static rethrowHttp(error: unknown): void {
@@ -247,6 +359,7 @@ export class NotificationsService {
 
       // Validate webhook URL to prevent SSRF attacks
       await this.assertValidTarget(dto.type, dto.webhookUrl, dto.useProxy ?? false);
+      NotificationsService.assertEncryptionConfigured();
 
       this.logger.log(
         `Creating notification channel "${dto.name}" for system ${dto.systemUnderTestId} by user ${userId}`
@@ -313,6 +426,10 @@ export class NotificationsService {
       ) {
         await this.assertValidTarget(nextType, nextUrl, nextUseProxy);
       }
+      // Every save needs the key, not only a URL change: TypeORM runs the column
+      // transformer on unchanged values too when it diffs the entity, and a row still in
+      // plaintext then throws inside encrypt().
+      NotificationsService.assertEncryptionConfigured();
 
       // Update only provided fields
       if (dto.type !== undefined) channel.type = dto.type;
@@ -502,6 +619,15 @@ export class NotificationsService {
    * proxy, redirects are refused as well. Slack and Teams are unchanged.
    */
   private async deliver(channel: NotificationChannel, message: unknown): Promise<void> {
+    // The column transformer hands back the ciphertext when it cannot decrypt (a missing or
+    // changed ENCRYPTION_KEY, or a SUT import from an environment with another key). Posting
+    // to it would fail as "Invalid URL" with the real cause logged only at debug. Checked
+    // here because every send path, Mattermost's guarded one included, goes through deliver.
+    if (isEncrypted(channel.webhookUrl)) {
+      throw new Error(
+        'Webhook URL could not be decrypted: ENCRYPTION_KEY is missing or differs from the one it was saved with. Restore the key or re-enter the URL.',
+      );
+    }
     const agents = await this.proxyResolver.resolve(channel.organizationId, channel.useProxy);
 
     if (channel.type !== 'mattermost') {

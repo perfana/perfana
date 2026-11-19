@@ -32,6 +32,11 @@ Every run of this system that finishes and completes its analysis posts a messag
 **The webhook URL is kept secret**
 A webhook URL lets anyone who has it post into your channel, so Perfana treats it like a password. It is stored encrypted, and after you save a channel Perfana shows `[MASKED]` instead of the URL. To keep the URL when you edit a channel, leave the field as it is. To replace it, paste the new URL.
 
+Perfana encrypts the URL with the `ENCRYPTION_KEY` set on the Perfana API, so two things depend on that key:
+
+- **Saving a channel fails with "ENCRYPTION_KEY is missing or invalid on the API".** The key is not set, or is not a 64-character hex string. Every save needs it, renaming a channel or switching it on or off included. Ask the administrator of your Perfana installation to set it and restart the API.
+- **Sending fails with "Webhook URL could not be decrypted".** The key changed since the URL was saved, or the system was imported from another Perfana installation that uses a different key. Restore the original key, or paste the webhook URL into the channel again and save it.
+
 ## Mattermost on an internal address
 
 Mattermost usually runs on your own servers. Perfana posts to any Mattermost server whose address is public, with no extra setup.

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.84] - 2026-11-19
+
+### Fixed
+- **Notification webhook URLs saved before encryption are now encrypted too.** When notification channels were scoped to organizations (#752), a channel's webhook URL started being encrypted, but only when someone saved the channel, so every existing Slack, Teams or Mattermost URL stayed readable in the database, in backups and in system exports. The API now encrypts them when it starts. It first checks that `ENCRYPTION_KEY` can decrypt a credential Perfana already stores (a Grafana, Dynatrace, Splunk or proxy credential, or an encrypted channel), because encrypting under the wrong key would make the URL unreadable for good. When nothing can confirm the key, the URLs are left as they are and encrypted the next time each channel is saved. Every start logs how many URLs it found and encrypted.
+- **Saving a notification channel without a usable `ENCRYPTION_KEY` says so.** Creating or editing a channel on a deployment where the key is missing or malformed failed with a generic 500. It now answers 503, saying the key is missing or invalid on the API. This applies to every edit, renaming or switching a channel on or off included, because the save re-encrypts the stored URL.
+- **A notification whose webhook URL cannot be decrypted fails with a reason.** After a change of `ENCRYPTION_KEY`, or a system imported from an environment with a different key, Perfana posted the unreadable value and the send failed as "Invalid URL", with the real cause logged only at debug level. The send, and the channel's test button, now report that the key is missing or differs and that the URL needs to be re-entered or the key restored.
+
 ## [0.2.97.83] - 2026-11-19
 
 ### Added

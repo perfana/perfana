@@ -1,5 +1,5 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { NotificationChannel } from '@perfana/shared';
+import { BadRequestException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { NotificationChannel, encrypt, isEncrypted, safeDecrypt } from '@perfana/shared';
 import { NotificationsService } from './notifications.service';
 import { MASKED_WEBHOOK_URL } from './notifications.constants';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
@@ -114,6 +114,17 @@ describe('NotificationsService tenant scoping', () => {
       await expect(service.findOne(OTHER_CHANNEL, USER, [])).rejects.toBeInstanceOf(ResourceNotFoundException);
     });
 
+    // Value: protects=a global admin can read any organization's channel by id; fails_when=inOrgs stops treating a null org filter as "all orgs" (admins get 404 on every foreign channel); why_new=the admin case is only covered for the list query, which never calls inOrgs; seam=none; no_claim=does not cover the admin capability check on writes
+    it('lets a global admin read another organization\'s channel by id', async () => {
+      authz.isGlobalAdmin.mockReturnValue(true);
+
+      const result = await service.findOne(OTHER_CHANNEL, USER, ['perfana-admin']);
+
+      expect(result.id).toBe(OTHER_CHANNEL);
+      expect(result.webhookUrl).toBe(MASKED_WEBHOOK_URL);
+      expect(authz.getAccessibleOrganizations).not.toHaveBeenCalled();
+    });
+
     it('masks the webhook URL on a read by id', async () => {
       const result = await service.findOne(CHANNEL, USER, []);
 
@@ -184,6 +195,17 @@ describe('NotificationsService tenant scoping', () => {
       expect(channelRepo.save.mock.calls[0][0].webhookUrl).toBe(URL);
     });
 
+    // Value: protects=SSRF validation still runs on a replacement URL after the masked-placeholder refactor; fails_when=validation is keyed on the wrong variable (e.g. only when dto.webhookUrl is undefined) or the BadRequest is swallowed into a DatabaseException; why_new=no case sends an invalid new URL through update; seam=none; no_claim=does not enumerate the validator's rules (url-validator has its own tests)
+    it('rejects an invalid replacement URL with 400 and writes nothing', async () => {
+      const err = await service
+        .update(CHANNEL, { webhookUrl: 'http://169.254.169.254/latest/meta-data' }, USER, [])
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect(err.message).toMatch(/^Invalid webhook URL/);
+      expect(channelRepo.save).not.toHaveBeenCalled();
+    });
+
     it('replaces the URL when a new one is sent', async () => {
       const next = 'https://hooks.slack.com/services/T000/B000/rotated';
 
@@ -205,6 +227,152 @@ describe('NotificationsService tenant scoping', () => {
 
       await expect(service.delete(CHANNEL, USER, [])).rejects.toBeInstanceOf(ForbiddenException);
       expect(channelRepo.remove).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('boot-time encryption of existing rows', () => {
+    const originalKey = process.env.ENCRYPTION_KEY;
+    beforeEach(() => {
+      process.env.ENCRYPTION_KEY = 'b'.repeat(64);
+    });
+    afterEach(() => {
+      if (originalKey === undefined) delete process.env.ENCRYPTION_KEY;
+      else process.env.ENCRYPTION_KEY = originalKey;
+    });
+
+    // Value: protects=channels saved before encryption get their bearer URL encrypted without an edit; fails_when=the backfill stops running, re-encrypts already-encrypted rows, or drops the read-value guard that keeps a concurrent save safe; why_new=the transformer only encrypts on save; seam=none; no_claim=real SQL against Postgres (repository.query is mocked)
+    it('encrypts only plaintext rows, conditional on the value it read', async () => {
+      const already = encrypt('https://hooks.slack.com/services/T000/B000/old');
+      channelRepo.query = jest
+        .fn()
+        .mockResolvedValueOnce([
+          { src: 'c', id: CHANNEL, v: URL },
+          { src: 'c', id: OTHER_CHANNEL, v: already },
+        ])
+        .mockResolvedValue([[], 1]);
+
+      await service.onApplicationBootstrap();
+
+      const updates = channelRepo.query.mock.calls.slice(1);
+      expect(updates).toHaveLength(1);
+      const [sql, [value, id, readValue]] = updates[0];
+      expect(sql).toMatch(/WHERE id = \$2 AND webhook_url = \$3/);
+      expect(id).toBe(CHANNEL);
+      expect(readValue).toBe(URL);
+      expect(isEncrypted(value)).toBe(true);
+      expect(safeDecrypt(value)).toBe(URL);
+    });
+
+    it('skips without ENCRYPTION_KEY and never throws', async () => {
+      delete process.env.ENCRYPTION_KEY;
+      channelRepo.query = jest.fn();
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+      expect(channelRepo.query).not.toHaveBeenCalled();
+
+      process.env.ENCRYPTION_KEY = 'b'.repeat(64);
+      channelRepo.query = jest.fn().mockRejectedValue(new Error('relation does not exist'));
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+    });
+
+    // Value: protects=a wrong-but-well-formed key never overwrites the only readable copy of a URL; fails_when=the decrypt probe against an already-encrypted row is removed; why_new=encrypting under the wrong key is unrecoverable; seam=none; no_claim=a table with no encrypted row yet has nothing to probe
+    it('writes nothing when the key cannot decrypt the rows already encrypted', async () => {
+      const underOtherKey = encrypt('https://hooks.slack.com/services/T000/B000/old', Buffer.from('d'.repeat(64), 'hex'));
+      channelRepo.query = jest.fn().mockResolvedValueOnce([
+        { src: 'c', id: CHANNEL, v: URL },
+        { src: 'c', id: OTHER_CHANNEL, v: underOtherKey },
+      ]);
+
+      await service.onApplicationBootstrap();
+
+      expect(channelRepo.query).toHaveBeenCalledTimes(1);
+    });
+
+    // Value: protects=a first deploy (no encrypted channel yet) cannot bulk-encrypt under an unverified key; fails_when=the probe ignores other credential columns or proceeds with no sample; why_new=the channel table alone is empty of ciphertext on every existing install; seam=none; no_claim=real cross-table SQL (mocked query)
+    it('verifies the key against other credentials, and writes nothing with no sample at all', async () => {
+      const otherCred = encrypt('grafana-api-key');
+      const corrupt = `${'a'.repeat(24)}:${'b'.repeat(32)}:${'c'.repeat(16)}`;
+      channelRepo.query = jest
+        .fn()
+        .mockResolvedValueOnce([
+          { src: 'c', id: CHANNEL, v: URL },
+          { src: 'k', id: null, v: corrupt },
+          { src: 'k', id: null, v: otherCred },
+        ])
+        .mockResolvedValue([[], 1]);
+
+      await service.onApplicationBootstrap();
+      // One corrupt sample does not block: the readable one proves the key.
+      expect(channelRepo.query).toHaveBeenCalledTimes(2);
+
+      channelRepo.query = jest.fn().mockResolvedValueOnce([{ src: 'c', id: CHANNEL, v: URL }]);
+      const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+      await service.onApplicationBootstrap();
+      expect(channelRepo.query).toHaveBeenCalledTimes(1);
+      // Says why (nothing to verify against), not that the key is wrong.
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no encrypted credential exists yet/));
+    });
+
+    it('skips with a malformed key instead of throwing on the first row', async () => {
+      process.env.ENCRYPTION_KEY = 'not-hex';
+      channelRepo.query = jest.fn();
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+      expect(channelRepo.query).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('encryption failure modes', () => {
+    const originalKey = process.env.ENCRYPTION_KEY;
+    afterEach(() => {
+      if (originalKey === undefined) delete process.env.ENCRYPTION_KEY;
+      else process.env.ENCRYPTION_KEY = originalKey;
+    });
+
+    it('answers 503 for a malformed key too, naming the problem', async () => {
+      process.env.ENCRYPTION_KEY = 'abc';
+      const dto = { systemUnderTestId: SUT, type: 'slack' as const, name: '#perf', webhookUrl: URL };
+
+      const err = await service.create(dto, USER, []).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ServiceUnavailableException);
+      expect(err.message).toMatch(/missing or invalid/);
+      expect(err.message).not.toContain('abc');
+      expect(channelRepo.save).not.toHaveBeenCalled();
+    });
+
+    // Value: protects=a deploy without ENCRYPTION_KEY gets a 503 naming the variable instead of an opaque 500; fails_when=the pre-check is removed or moved after save; why_new=the transformer's error is otherwise wrapped as DatabaseException; seam=none; no_claim=the transformer itself (mocked repo)
+    it('refuses to save a URL without ENCRYPTION_KEY, naming it', async () => {
+      delete process.env.ENCRYPTION_KEY;
+      const dto = { systemUnderTestId: SUT, type: 'slack' as const, name: '#perf', webhookUrl: URL };
+
+      const created = await service.create(dto, USER, []).catch((e) => e);
+      const updated = await service
+        .update(CHANNEL, { webhookUrl: 'https://hooks.slack.com/services/T000/B000/new' }, USER, [])
+        .catch((e) => e);
+
+      for (const err of [created, updated]) {
+        expect(err).toBeInstanceOf(ServiceUnavailableException);
+        expect(err.message).toMatch(/ENCRYPTION_KEY/);
+      }
+      expect(channelRepo.save).not.toHaveBeenCalled();
+      // A save that keeps the stored URL needs the key too: TypeORM transforms unchanged
+      // columns when it diffs the entity (the mocked repo here would not show that).
+      const renamed = await service
+        .update(CHANNEL, { name: 'x', webhookUrl: MASKED_WEBHOOK_URL }, USER, [])
+        .catch((e) => e);
+      expect(renamed).toBeInstanceOf(ServiceUnavailableException);
+      expect(channelRepo.save).not.toHaveBeenCalled();
+    });
+
+    // Value: protects=an undecryptable URL (changed key, cross-env import) fails with a cause the user can act on; fails_when=the isEncrypted guard is removed and ciphertext is POSTed; why_new=safeDecrypt returns ciphertext silently; seam=none; no_claim=the run-completion path's logging (same sendWebhook)
+    it('does not post to a webhook URL that could not be decrypted', async () => {
+      process.env.ENCRYPTION_KEY = 'c'.repeat(64);
+      channelRepo.findOne = jest.fn(async () => channel({ webhookUrl: encrypt(URL) }));
+
+      const result = await service.testChannel(CHANNEL, USER, []);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/could not be decrypted/);
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
