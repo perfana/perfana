@@ -104,7 +104,7 @@ All configuration is managed through environment variables, loaded from `.env.lo
 
 | Variable | Description |
 |---|---|
-| `ENCRYPTION_KEY` | Key for encrypting stored credentials |
+| `ENCRYPTION_KEY` | Key for encrypting stored credentials: Grafana, Dynatrace, Splunk and proxy credentials, and notification-channel webhook URLs. A 64-character hex string (32 bytes); set in the `.env.example` of the API, worker and grafana-sync. Without a usable key, creating or editing a notification channel answers 503. Changing it makes every value saved under the old key unreadable: a notification whose URL cannot be decrypted is refused with a message naming the key rather than posted. At boot the API encrypts webhook URLs stored before the column was encrypted, but only after the key decrypts at least one credential already stored; with nothing to verify it against, the URLs stay plaintext until each channel is next saved. Every boot logs how many it scanned and encrypted. |
 
 > [!warning] Secrets
 > Never commit `.env.local` or files containing API keys, passwords, or tokens. Use `.env.example` as a template.
