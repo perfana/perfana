@@ -13,6 +13,8 @@ import {
   scopeSplFilter,
   splunkTimechart,
   timechartTimeRange,
+  explainEmptyTimechart,
+  type ExportStats,
   SplunkError,
   type SplunkConnection,
   type SplunkEntityMappingLike,
@@ -226,6 +228,7 @@ export class SplunkCollector {
           continue;
         }
         try {
+          let stats: ExportStats | undefined;
           const points = await this.withConcurrencyRetry(() =>
             splunkTimechart(
               conn,
@@ -233,9 +236,12 @@ export class SplunkCollector {
               {
                 dispatcher,
                 // String interpolation only: pino drops a second-argument object.
-                onSearch: (search, st, ms) => this.logger.debug(
-                  `Splunk panel "${q.panel_title}" search (${ms}ms, ${st.lines} lines, ${st.finalRows} final rows, ${st.previewRows} preview rows${st.usedPreview ? ', used last preview set' : ''}): ${search}`,
-                ),
+                onSearch: (search, st, ms) => {
+                  stats = st;
+                  this.logger.debug(
+                    `Splunk panel "${q.panel_title}" search (${ms}ms, ${st.lines} lines, ${st.finalRows} final rows, ${st.previewRows} preview rows${st.usedPreview ? ', used last preview set' : ''}, columns ${st.columns.join(',')}): ${search}`,
+                  );
+                },
               },
             ),
           );
@@ -244,9 +250,14 @@ export class SplunkCollector {
             // The range is what was sent as earliest_time/latest_time (Splunk Web's time picker),
             // never part of the search text.
             const { earliestTime, latestTime } = timechartTimeRange({ from, to });
-            this.logger.info(
-              `Splunk panel "${q.panel_title}" returned no data for ${from.toISOString()}..${to.toISOString()} (earliest_time=${earliestTime} latest_time=${latestTime}): ${filter}`,
-            );
+            const why = explainEmptyTimechart(stats, q.split_by);
+            const line = `Splunk panel "${q.panel_title}" returned no data for ${from.toISOString()}..${to.toISOString()} (earliest_time=${earliestTime} latest_time=${latestTime}): ${filter}`;
+            // Rows without series is a configuration problem worth a warning, not an empty window.
+            if (why) {
+              this.logger.warn(`${line}. ${why}`);
+            } else {
+              this.logger.info(line);
+            }
           }
           documents.push({
             testRunId,

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.82] - 2026-11-19
+
+### Fixed
+- **A Splunk panel that gets rows but nothing to plot now says why.** A timechart split by a field the events do not have (for example a log-level field Splunk does not extract for that sourcetype) returns one row per time bucket with only the time columns, so the panel collected nothing while the log said only `returned no data`. The worker now logs a warning naming the field and the columns Splunk returned, and the panel preview on the Splunk tab shows the same explanation instead of "No events in the last hour". The debug line for each search also lists the returned columns.
+
 ## [0.2.97.81] - 2026-11-18
 
 ### Fixed

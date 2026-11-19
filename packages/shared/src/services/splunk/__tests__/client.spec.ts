@@ -10,6 +10,8 @@ import {
   splunkAuthHeader,
   splunkExport,
   splunkFieldSummary,
+  explainEmptyTimechart,
+  parseExportStream,
   splunkTimechart,
   SplunkError,
   timechartRowsToPoints,
@@ -111,6 +113,30 @@ describe('splunkTimechart', () => {
     expect(body.get('earliest_time')).toBe('1794909600');
     expect(body.get('latest_time')).toBe('1794913201');
     expect(body.get('search')).not.toMatch(/earliest|latest/);
+  });
+});
+
+describe('a timechart whose split field the events lack', () => {
+  // Value: protects=rows that carry only _time/_span are reported as a missing split field, naming it, instead of
+  // a bare "no data"; fails_when=the columns stat or the explanation is dropped, or a real value column is
+  // misread as empty; why_new=a real Splunk returned 485 such rows and the log said only "returned no data";
+  // seam=none; no_claim=that Splunk produces exactly these columns for a missing field (observed shape, not documented)
+  const body = [
+    '{"preview":false,"result":{"_time":"2026-11-18T14:05:00.000+01:00","_span":"30"}}',
+    '{"preview":false,"result":{"_time":"2026-11-18T14:05:30.000+01:00","_span":"30"}}',
+  ].join('\n') + '\n';
+
+  it('yields no points and explains why, naming the field', () => {
+    const { rows, stats } = parseExportStream(body);
+    expect(timechartRowsToPoints(rows)).toEqual([]);
+    expect(stats).toMatchObject({ rows: 2, columns: ['_time', '_span'] });
+    expect(explainEmptyTimechart(stats, 'log_level')).toContain('no event in the window has the field "log_level"');
+  });
+
+  it('says nothing when there are no rows, or when a value column exists', () => {
+    expect(explainEmptyTimechart(parseExportStream('').stats, 'log_level')).toBeNull();
+    const withValues = parseExportStream('{"preview":false,"result":{"_time":"2026-11-18T14:05:00Z","NULL":"0"}}\n').stats;
+    expect(explainEmptyTimechart(withValues, 'log_level')).toBeNull();
   });
 });
 

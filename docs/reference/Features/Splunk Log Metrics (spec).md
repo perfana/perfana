@@ -355,11 +355,18 @@ the host only shows up once credentials are filled in.
 ## Troubleshooting empty panels
 
 With `LOG_LEVEL=debug` the worker logs every search it sends and what came back:
-`Splunk panel "<title>" search (<ms>ms, <n> lines, <n> final rows, <n> preview rows): <SPL> [earliest_time=<epoch> latest_time=<epoch>]`.
+`Splunk panel "<title>" search (<ms>ms, <n> lines, <n> final rows, <n> preview rows, columns <cols>): <SPL> [earliest_time=<epoch> latest_time=<epoch>]`.
 Paste the SPL into Splunk Web and set the bracketed range in the time picker to compare: since
 v0.2.97.80 the range is sent as parameters, not as part of the search text. `0 lines` means Splunk returned nothing for that window;
 `used last preview set` means the export sent no final rows (handled since v0.2.97.75). A panel
 whose search returns no points also logs its window and SPL at info level.
+
+Rows with no points is a different case (v0.2.97.82). A timechart `by <field>` over events that
+lack the field returns one row per bucket carrying only `_time`/`_span`, so a panel can get
+hundreds of final rows and plot nothing. The worker then logs at **warn**, naming the field and the
+columns, and the Splunk tab preview shows the same text. The usual causes are a field named
+differently (`level`, `severity`) or a search-time extraction that lives in another app than the
+connection's **App**; a filter such as `log_level=ERROR` on the same field returns no rows at all.
 
 The card-level **Open in Splunk** link searches only the mapped sources. Each panel's own link runs
 that panel's search, so use it to check a filter.

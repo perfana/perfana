@@ -12,6 +12,8 @@ import {
   splunkServerInfo,
   splunkTimechart,
   timechartTimeRange,
+  explainEmptyTimechart,
+  ExportStats,
   SplunkConnection,
   SplunkDiscoveredSource,
   SplunkError,
@@ -440,12 +442,16 @@ export class SplunkService {
     const conn = this.connectionOf(config);
     const opts = await this.requestOptions(config.organizationId, config.useProxy);
     try {
+      let stats: ExportStats | undefined;
       const [points, fields] = await Promise.all([
         splunkTimechart(conn, { filter, from, to, bucketSeconds, aggregation: dto.aggregation, splitBy: dto.splitBy, maxSeries: dto.maxSeries }, {
           ...opts,
-          onSearch: (search, st, ms) => this.logger.debug(
-            `Splunk preview search (${ms}ms, ${st.lines} lines, ${st.finalRows} final rows, ${st.previewRows} preview rows${st.usedPreview ? ', used last preview set' : ''}): ${search}`,
-          ),
+          onSearch: (search, st, ms) => {
+            stats = st;
+            this.logger.debug(
+              `Splunk preview search (${ms}ms, ${st.lines} lines, ${st.finalRows} final rows, ${st.previewRows} preview rows${st.usedPreview ? ', used last preview set' : ''}, columns ${st.columns.join(',')}): ${search}`,
+            );
+          },
         }),
         // Candidate split fields come from the mapped sources themselves, not the user's filter:
         // fields a rex/eval in the filter creates are known to whoever wrote it.
@@ -459,6 +465,7 @@ export class SplunkService {
         series: [...totals.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total),
         points: points.length,
         fields,
+        ...(points.length === 0 ? { message: explainEmptyTimechart(stats, dto.splitBy) ?? undefined } : {}),
       };
     } catch (err) {
       throw this.toHttp(err);
