@@ -320,16 +320,18 @@ scope; it ignores labels. A panel whose `$entities[label]` matches no mapping is
 points, the tick records a zero-width range, and the source sits in coverage at 0% (root CLAUDE.md
 #21 shape). Fix: give the predicate the label filter, or have the collector report "not applicable".
 
-### The earliest_time/latest_time fix is verified against the mock only (P1)
+### Confirm the starter panels' split field on a real Splunk (P1)
 
-v0.2.97.80 moved the run window out of the search text into the export endpoint's
-`earliest_time`/`latest_time` parameters, because one real Splunk returned no rows for inline
-`earliest=<epoch> latest=<epoch>` while Splunk Web showed data for the same window. Every check
-since ran against the perfana-demo mock, which reads both shapes. Confirm on the next live run of a
-system with Splunk panels (e.g. emc-bcm-els) that the worker's `returned no data` lines stop and
-`ds_metrics` gains rows for the Splunk dashboards; force-refetch runs collected empty before.
-Source discovery still bounds its `tstats` inline (`earliest=-Nh` in the tstats `where`), which
-the same Splunk answered; if that ever comes back empty, move it to `earliestTime` too.
+v0.2.97.80 moved the run window into the export endpoint's `earliest_time`/`latest_time`
+parameters. A live re-evaluate on 2026-11-19 confirmed that part: the "Log events by level" search
+now returns one row per bucket (485 rows over 4 hours) where the inline form returned none. Those
+rows still produced no points, and `log_level=ERROR` matched nothing, which fits a `log_level`
+field that Splunk does not extract for that sourcetype. v0.2.97.82 logs the returned columns and
+warns, naming the field, when rows carry no value column. On the next run, read that warning: if
+it names `log_level`, find the field the events actually carry (the Splunk tab preview lists
+them, or the connection's App holds the extraction) and re-create the starter panels with it;
+then force-refetch the runs collected empty. Source discovery still bounds its `tstats` inline
+(`earliest=-Nh` in the tstats `where`), which the same Splunk answered.
 
 ### A timechart export can run unbounded if a caller drops the range (P3)
 
