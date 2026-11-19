@@ -50,6 +50,14 @@ To change the connection later, open the Splunk card and click **Settings**.
    - **Max series** — series beyond this number are added up into `OTHER`, so totals stay correct.
 
    The panel preview shows the search Perfana sends, the series it returns with their totals, and the fields your logs have. An empty preview while the source tree shows events usually means the log-level field has a different name; click a field in the preview to use it.
+7. Optional: click **Import dashboard JSON** to turn an existing Splunk dashboard into panels.
+   In Splunk, open the dashboard, click **Edit**, then **Source**, and copy the JSON, or save it as a file. Only Dashboard Studio dashboards can be imported, not Classic (Simple XML) ones. Paste the JSON or click **Upload .json**, then click **Review panels**.
+   Each search becomes one panel:
+   - its `index=` terms are replaced by `$entities`, so make sure those indexes are mapped under **Sources**. The dialog warns about an index that is not;
+   - `eval`, `where`, `rex` and the other commands Perfana allows are kept;
+   - a closing `timechart`, `stats`, `top` or `chart … over _time` becomes the panel's **Value** and **One series per**. `stats count` becomes a count per time bucket, and `span=` is dropped because Perfana picks the bucket size.
+
+   A search that does more than that, for example `stats … by <id>` followed by more calculations, a subsearch, a macro or a saved report, is not imported; **Show searches not imported** lists each one with the reason. Dashboard tokens such as `$host$` are dropped, and a search used by several visualizations is imported once. The panels are grouped under a Perfana dashboard named after the Splunk dashboard; you can change that name before importing, but not afterwards. A panel whose title already exists starts unticked.
 
 ## Result
 
