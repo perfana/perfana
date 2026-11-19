@@ -2,7 +2,7 @@
  * Notification channel type definitions
  */
 
-export type ChannelType = 'slack' | 'teams';
+export type ChannelType = 'slack' | 'teams' | 'mattermost';
 
 /**
  * What the API returns in place of a saved webhook URL (the URL is a credential and is
@@ -90,6 +90,8 @@ export function getChannelTypeLabel(type: ChannelType): string {
       return 'Slack';
     case 'teams':
       return 'Microsoft Teams';
+    case 'mattermost':
+      return 'Mattermost';
     default:
       return type;
   }
@@ -104,6 +106,8 @@ export function getChannelTypeColor(type: ChannelType): string {
       return '#4A154B'; // Slack purple
     case 'teams':
       return '#6264A7'; // Teams purple
+    case 'mattermost':
+      return '#1E325C'; // Mattermost denim
     default:
       return '#757575';
   }
@@ -118,6 +122,8 @@ export function getWebhookPlaceholder(type: ChannelType): string {
       return 'https://hooks.slack.com/services/...';
     case 'teams':
       return 'https://outlook.office.com/webhook/...';
+    case 'mattermost':
+      return 'https://mattermost.example.com/hooks/...';
     default:
       return '';
   }
@@ -132,6 +138,8 @@ export function getWebhookHelperText(type: ChannelType): string {
       return 'Enter your Slack incoming webhook URL';
     case 'teams':
       return 'Enter your Microsoft Teams incoming webhook URL';
+    case 'mattermost':
+      return 'Enter your Mattermost incoming webhook URL (ending in /hooks/<key>). A server on an internal address must be allowed by your Perfana administrator.';
     default:
       return '';
   }

@@ -147,12 +147,145 @@ export function validateExternalUrl(
 }
 
 /**
- * Validates webhook URLs for Slack and Microsoft Teams
+ * Webhook channel types the validator knows. Kept as a plain string union so this
+ * module does not depend on the entity package.
+ */
+export type WebhookChannelType = 'slack' | 'teams' | 'mattermost';
+
+export interface WebhookValidationOptions {
+  /**
+   * Operator-configured hosts (`NOTIFICATION_WEBHOOK_ALLOWED_HOSTS`) a self-hosted
+   * webhook may point at even when it is an internal address. Exact names or
+   * `*.example.com`. Only consulted for Mattermost.
+   */
+  allowedHosts?: string[];
+}
+
+/**
+ * Path of a Mattermost incoming webhook: `/hooks/<26-character id>`, optionally under
+ * a sub-path when Mattermost is served from one (`/chat/hooks/<id>`). Mattermost ids
+ * are 26 lowercase base32 characters. Requiring this shape means a "Mattermost"
+ * channel can only POST to something that looks like a Mattermost hook, never to an
+ * arbitrary endpoint.
+ */
+const MATTERMOST_HOOK_PATH = /^(?:\/[^/]+)*\/hooks\/[a-z0-9]{26}$/;
+
+/** Lowercase, without a trailing dot, without IPv6 brackets. */
+export function normalizeHostname(hostname: string): string {
+  return hostname.trim().toLowerCase().replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1');
+}
+
+/**
+ * Parse the operator's allowlist: comma- or whitespace-separated host names, each an
+ * exact name or `*.domain`. A full URL is accepted and reduced to its host, so pasting
+ * the webhook URL itself works. Entries are normalised; empty ones are dropped.
+ */
+export function parseAllowedHosts(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[\s,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      if (entry.includes('://')) {
+        try {
+          return normalizeHostname(new URL(entry).hostname);
+        } catch {
+          return '';
+        }
+      }
+      return normalizeHostname(entry);
+    })
+    .filter(Boolean);
+}
+
+export function isHostAllowlisted(hostname: string, allowedHosts: string[] | undefined): boolean {
+  if (!allowedHosts || allowedHosts.length === 0) return false;
+  const host = normalizeHostname(hostname);
+  return allowedHosts.some((allowed) => {
+    if (allowed.startsWith('*.')) {
+      const domain = allowed.slice(2);
+      return host === domain || host.endsWith('.' + domain);
+    }
+    return host === allowed;
+  });
+}
+
+/** Cloud metadata endpoints: refused even when an operator lists them. */
+export function isMetadataHostname(hostname: string): boolean {
+  return BLOCKED_HOSTNAMES.includes(normalizeHostname(hostname));
+}
+
+/**
+ * Validates a Mattermost incoming-webhook URL, without DNS. The address the host
+ * resolves to is checked when connecting (see `webhook-target-guard.ts`), because a
+ * hostname says nothing about where it points.
+ */
+function validateMattermostWebhookUrl(
+  urlString: string,
+  options: WebhookValidationOptions,
+): UrlValidationResult {
+  let url: URL;
+  try {
+    url = new URL(urlString);
+  } catch {
+    return { isValid: false, error: 'Invalid URL format' };
+  }
+
+  if (url.protocol !== 'https:') {
+    return { isValid: false, error: 'HTTPS is required' };
+  }
+  if (url.username || url.password) {
+    return { isValid: false, error: 'The URL must not contain credentials' };
+  }
+  if (url.search || url.hash) {
+    return { isValid: false, error: 'A Mattermost webhook URL has no query string or fragment' };
+  }
+  if (!MATTERMOST_HOOK_PATH.test(url.pathname)) {
+    return {
+      isValid: false,
+      error: 'Expected a Mattermost incoming webhook URL ending in /hooks/<26-character key>',
+    };
+  }
+
+  const hostname = normalizeHostname(url.hostname);
+  if (isMetadataHostname(hostname)) {
+    return { isValid: false, error: 'URL hostname is blocked (potential metadata service)' };
+  }
+  if (isHostAllowlisted(hostname, options.allowedHosts)) {
+    return { isValid: true, url };
+  }
+  if (BLOCKED_IP_PATTERNS.some((pattern) => pattern.test(hostname))) {
+    return {
+      isValid: false,
+      error:
+        `${hostname} is a private or internal address. An administrator can allow it ` +
+        'by adding it to NOTIFICATION_WEBHOOK_ALLOWED_HOSTS.',
+    };
+  }
+  return { isValid: true, url };
+}
+
+/**
+ * Validates a notification webhook URL for its channel type.
+ *
+ * - Slack and Teams: HTTPS on the providers' own domains.
+ * - Mattermost: self-hosted, so any HTTPS host, but the path must be a Mattermost
+ *   hook and an internal address is refused unless the operator allowlisted it.
  *
  * @param urlString - The webhook URL to validate
- * @returns Validation result
+ * @param type - The channel type; defaults to the Slack/Teams rules
+ * @param options - Operator allowlist for self-hosted types
  */
-export function validateWebhookUrl(urlString: string): UrlValidationResult {
+export function validateWebhookUrl(
+  urlString: string,
+  type: WebhookChannelType = 'slack',
+  options: WebhookValidationOptions = {},
+): UrlValidationResult {
+  if (type === 'mattermost') {
+    return validateMattermostWebhookUrl(urlString, options);
+  }
+
   // First do general SSRF validation
   const generalValidation = validateExternalUrl(urlString, {
     requireHttps: true,

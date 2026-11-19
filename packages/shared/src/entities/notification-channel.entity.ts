@@ -2,7 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { SystemUnderTest } from './system-under-test.entity';
 import { encryptedColumnTransformer } from '../utils/encrypted-column.transformer';
 
-export type NotificationChannelType = 'slack' | 'teams';
+export type NotificationChannelType = 'slack' | 'teams' | 'mattermost';
 
 @Entity('notification_channels')
 @Unique('uq_notification_channels_system_name', ['systemUnderTestId', 'name'])

@@ -13,11 +13,11 @@ export class CreateNotificationChannelDto {
 
   @ApiProperty({
     description: 'Notification channel type',
-    enum: ['slack', 'teams'],
+    enum: ['slack', 'teams', 'mattermost'],
     example: 'slack',
   })
   @IsNotEmpty()
-  @IsIn(['slack', 'teams'])
+  @IsIn(['slack', 'teams', 'mattermost'])
   type!: NotificationChannelType;
 
   @ApiProperty({

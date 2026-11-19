@@ -68,7 +68,7 @@ export class NotificationsController {
   @Post('channels')
   @ApiOperation({
     summary: 'Create a new notification channel',
-    description: 'Creates a new Slack or Teams notification channel for a system',
+    description: 'Creates a new Slack, Microsoft Teams or Mattermost notification channel for a system',
   })
   @ApiResponse({
     status: 201,

@@ -89,6 +89,7 @@ export function NotificationChannelDialog({
             >
               <MenuItem value="slack">Slack</MenuItem>
               <MenuItem value="teams">Microsoft Teams</MenuItem>
+              <MenuItem value="mattermost">Mattermost</MenuItem>
             </Select>
           </FormControl>
 

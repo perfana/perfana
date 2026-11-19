@@ -71,6 +71,7 @@ nav:
       - Configure ADAPT: configuration/adapt-settings.md
       - Set up alert filters: configuration/alert-filters.md
       - Manage reporting templates: configuration/reporting-templates.md
+      - Send notifications: configuration/notifications.md
   - Integrations:
       - integrations/index.md
       - Connect Grafana: integrations/connect-grafana.md
