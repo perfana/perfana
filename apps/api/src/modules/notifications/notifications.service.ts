@@ -4,11 +4,12 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { NotificationChannel, TestRun, SystemUnderTest } from '@perfana/shared';
+import { NotificationChannel, TestRun, SystemUnderTest, encrypt, isEncrypted } from '@perfana/shared';
 import { withRequestEm } from '../../common/db/request-em';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import {
@@ -48,7 +49,7 @@ import { checkWebhookTarget, postJsonGuarded } from './webhook-target-guard';
  * so these checks are the whole protection.
  */
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnApplicationBootstrap {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly perfanaUrl: string;
   private readonly slackBuilder: SlackMessageBuilder;
@@ -99,6 +100,44 @@ export class NotificationsService {
       if (!target.ok) {
         throw new BadRequestException(`Invalid webhook URL: ${target.error}`);
       }
+    }
+  }
+
+  /**
+   * Encrypt webhook URLs stored before the column was encrypted. The entity's transformer
+   * only encrypts on save, so a channel nobody edits would otherwise keep its bearer URL in
+   * plaintext in the database, backups and SUT exports.
+   *
+   * Reads and writes raw SQL: the transformer decrypts on load, so a loaded entity cannot
+   * tell a plaintext row from an encrypted one. Each UPDATE is conditional on the value it
+   * read, so concurrent replicas and a user save in between never clobber each other.
+   * Never fails the boot: without ENCRYPTION_KEY it skips, and any error is logged.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    if (!process.env.ENCRYPTION_KEY) {
+      this.logger.warn('ENCRYPTION_KEY is not set; existing notification webhook URLs stay unencrypted');
+      return;
+    }
+    try {
+      // No request context at boot, so no request EntityManager exists to use.
+      // eslint-disable-next-line owned-resource-must-use-request-em
+      const rows: Array<{ id: string; webhook_url: string }> = await this.notificationChannelRepository.query(
+        `SELECT id, webhook_url FROM notification_channels WHERE webhook_url <> ''`,
+      );
+      let encrypted = 0;
+      for (const row of rows) {
+        if (isEncrypted(row.webhook_url)) continue;
+        // eslint-disable-next-line owned-resource-must-use-request-em
+        await this.notificationChannelRepository.query(
+          `UPDATE notification_channels SET webhook_url = $1 WHERE id = $2 AND webhook_url = $3`,
+          [encrypt(row.webhook_url), row.id, row.webhook_url],
+        );
+        encrypted++;
+      }
+      if (encrypted > 0) this.logger.log(`Encrypted ${encrypted} plaintext notification webhook URL(s)`);
+    } catch (error) {
+      const msg = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
+      this.logger.error(`Could not encrypt existing notification webhook URLs: ${msg}`);
     }
   }
 

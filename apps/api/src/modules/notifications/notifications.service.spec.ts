@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { NotificationChannel } from '@perfana/shared';
+import { NotificationChannel, encrypt, isEncrypted, safeDecrypt } from '@perfana/shared';
 import { NotificationsService } from './notifications.service';
 import { MASKED_WEBHOOK_URL } from './notifications.constants';
 import { ResourceNotFoundException } from '../../common/exceptions/business.exception';
@@ -114,6 +114,17 @@ describe('NotificationsService tenant scoping', () => {
       await expect(service.findOne(OTHER_CHANNEL, USER, [])).rejects.toBeInstanceOf(ResourceNotFoundException);
     });
 
+    // Value: protects=a global admin can read any organization's channel by id; fails_when=inOrgs stops treating a null org filter as "all orgs" (admins get 404 on every foreign channel); why_new=the admin case is only covered for the list query, which never calls inOrgs; seam=none; no_claim=does not cover the admin capability check on writes
+    it('lets a global admin read another organization\'s channel by id', async () => {
+      authz.isGlobalAdmin.mockReturnValue(true);
+
+      const result = await service.findOne(OTHER_CHANNEL, USER, ['perfana-admin']);
+
+      expect(result.id).toBe(OTHER_CHANNEL);
+      expect(result.webhookUrl).toBe(MASKED_WEBHOOK_URL);
+      expect(authz.getAccessibleOrganizations).not.toHaveBeenCalled();
+    });
+
     it('masks the webhook URL on a read by id', async () => {
       const result = await service.findOne(CHANNEL, USER, []);
 
@@ -184,6 +195,17 @@ describe('NotificationsService tenant scoping', () => {
       expect(channelRepo.save.mock.calls[0][0].webhookUrl).toBe(URL);
     });
 
+    // Value: protects=SSRF validation still runs on a replacement URL after the masked-placeholder refactor; fails_when=validation is keyed on the wrong variable (e.g. only when dto.webhookUrl is undefined) or the BadRequest is swallowed into a DatabaseException; why_new=no case sends an invalid new URL through update; seam=none; no_claim=does not enumerate the validator's rules (url-validator has its own tests)
+    it('rejects an invalid replacement URL with 400 and writes nothing', async () => {
+      const err = await service
+        .update(CHANNEL, { webhookUrl: 'http://169.254.169.254/latest/meta-data' }, USER, [])
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect(err.message).toMatch(/^Invalid webhook URL/);
+      expect(channelRepo.save).not.toHaveBeenCalled();
+    });
+
     it('replaces the URL when a new one is sent', async () => {
       const next = 'https://hooks.slack.com/services/T000/B000/rotated';
 
@@ -205,6 +227,51 @@ describe('NotificationsService tenant scoping', () => {
 
       await expect(service.delete(CHANNEL, USER, [])).rejects.toBeInstanceOf(ForbiddenException);
       expect(channelRepo.remove).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('boot-time encryption of existing rows', () => {
+    const originalKey = process.env.ENCRYPTION_KEY;
+    beforeEach(() => {
+      process.env.ENCRYPTION_KEY = 'b'.repeat(64);
+    });
+    afterEach(() => {
+      if (originalKey === undefined) delete process.env.ENCRYPTION_KEY;
+      else process.env.ENCRYPTION_KEY = originalKey;
+    });
+
+    // Value: protects=channels saved before encryption get their bearer URL encrypted without an edit; fails_when=the backfill stops running, re-encrypts already-encrypted rows, or drops the read-value guard that keeps a concurrent save safe; why_new=the transformer only encrypts on save; seam=none; no_claim=real SQL against Postgres (repository.query is mocked)
+    it('encrypts only plaintext rows, conditional on the value it read', async () => {
+      const already = encrypt('https://hooks.slack.com/services/T000/B000/old');
+      channelRepo.query = jest
+        .fn()
+        .mockResolvedValueOnce([
+          { id: CHANNEL, webhook_url: URL },
+          { id: OTHER_CHANNEL, webhook_url: already },
+        ])
+        .mockResolvedValue([]);
+
+      await service.onApplicationBootstrap();
+
+      const updates = channelRepo.query.mock.calls.slice(1);
+      expect(updates).toHaveLength(1);
+      const [sql, [value, id, readValue]] = updates[0];
+      expect(sql).toMatch(/WHERE id = \$2 AND webhook_url = \$3/);
+      expect(id).toBe(CHANNEL);
+      expect(readValue).toBe(URL);
+      expect(isEncrypted(value)).toBe(true);
+      expect(safeDecrypt(value)).toBe(URL);
+    });
+
+    it('skips without ENCRYPTION_KEY and never throws', async () => {
+      delete process.env.ENCRYPTION_KEY;
+      channelRepo.query = jest.fn();
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+      expect(channelRepo.query).not.toHaveBeenCalled();
+
+      process.env.ENCRYPTION_KEY = 'b'.repeat(64);
+      channelRepo.query = jest.fn().mockRejectedValue(new Error('relation does not exist'));
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
     });
   });
 
