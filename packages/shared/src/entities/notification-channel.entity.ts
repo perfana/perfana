@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, Unique, ManyToOne, JoinColumn } from 'typeorm';
 import { SystemUnderTest } from './system-under-test.entity';
+import { encryptedColumnTransformer } from '../utils/encrypted-column.transformer';
 
 export type NotificationChannelType = 'slack' | 'teams';
 
@@ -20,7 +21,9 @@ export class NotificationChannel {
   @Column({ type: 'varchar', length: 255 })
   name!: string;
 
-  @Column({ name: 'webhook_url', type: 'text' })
+  // Encrypted at rest: the URL is a bearer credential for the channel. Rows written
+  // before encryption was added are plaintext and are read back as-is until re-saved.
+  @Column({ name: 'webhook_url', type: 'text', transformer: encryptedColumnTransformer })
   webhookUrl!: string;
 
   @Column({ name: 'notify_on_finished', type: 'boolean', default: true })

@@ -1,6 +1,7 @@
-import { IsOptional, IsString, IsBoolean, IsIn, IsUrl } from 'class-validator';
+import { IsOptional, IsString, IsBoolean, IsIn, IsUrl, ValidateIf } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { NotificationChannelType } from '@perfana/shared';
+import { MASKED_WEBHOOK_URL } from '../notifications.constants';
 
 export class UpdateNotificationChannelDto {
   @ApiPropertyOptional({
@@ -21,10 +22,12 @@ export class UpdateNotificationChannelDto {
   name?: string;
 
   @ApiPropertyOptional({
-    description: 'Webhook URL for the notification channel',
+    description:
+      `Webhook URL for the notification channel. Omit it, or send "${MASKED_WEBHOOK_URL}" as returned by a read, to keep the stored URL.`,
     example: 'https://hooks.slack.com/services/xxx/yyy/zzz',
   })
   @IsOptional()
+  @ValidateIf((o: UpdateNotificationChannelDto) => o.webhookUrl !== MASKED_WEBHOOK_URL)
   @IsUrl()
   webhookUrl?: string;
 
