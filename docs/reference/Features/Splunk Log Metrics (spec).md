@@ -286,6 +286,31 @@ uuid namespace rather than copying it; rules that carry over unchanged:
 - Web: an Integrations card for Splunk configs, and a queries editor on the system config page
   next to the Dynatrace one. SPL is a `<textarea>`; no SPL parser.
 
+## Importing a Splunk dashboard
+
+The Splunk tab's **Import dashboard JSON** (`ImportSplunkDashboardDialog.tsx`) converts an
+exported Dashboard Studio definition into panels for the selected workload. The conversion is
+client-side and pure (`apps/web/lib/splunk-dashboard-import.ts`); each panel is then created
+through the ordinary `POST /splunk/queries`, one at a time because `nextPanelId` is `MAX + 1`.
+No API change was needed beyond letting the client send `dashboardLabel`, which the import
+sets to the Splunk dashboard's title.
+
+A dashboard search is a whole pipeline, a Perfana panel is a filter plus one aggregation, so a
+search is cut into leading terms (`index=` replaced by `$entities`; `earliest`/`latest` and
+`$token$` terms dropped), the allowed streaming commands, and one reporting command (`timechart`,
+`stats`, `top`/`rare`, `chart … over _time`) whose first aggregation and single `by` field become
+`aggregation` and `split_by`. Only display commands (`fields`, `table`, `rename`, `sort`,
+`head`, `tail`, `fillnull`) may follow it; anything else, a generating command, a subsearch, a
+macro or a saved search is reported as not imported with the reason. `ds.chain` data sources are
+followed to their base. Identical conversions are imported once.
+
+The allowlist and the final check are the API's own: the converter imports
+`ALLOWED_SPL_COMMANDS` and `validateSplFilter` from `@perfana/shared/services/splunk/client`
+(a module with no imports, so it bundles into the browser), and a converted filter that
+`validateSplFilter(spl, { timeModifiers: true })` refuses is listed as not imported rather than
+offered and then rejected by the API. The tests convert a real exported dashboard
+(`apps/web/__tests__/lib/fixtures/splunk-studio-dashboard.json`).
+
 ## Starter queries (seeded as a profile, editable)
 
 | Panel | `spl` | `split_by` | `aggregation` |

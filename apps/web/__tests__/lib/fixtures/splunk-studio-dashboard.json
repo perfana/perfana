@@ -1,0 +1,1276 @@
+{
+  "visualizations": {
+    "viz_rpcI2Cno": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#36AADF"
+          },
+          {
+            "to": 0,
+            "value": "#36AADF"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_afQsUfKj"
+      },
+      "title": "Aantal meetpunt=\"in-bcm-bte-vkb\"",
+      "showProgressBar": true
+    },
+    "viz_mPJNZGts": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-bte-vkb\"",
+      "showProgressBar": true
+    },
+    "viz_owpxKSR6": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "off",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisEnd",
+        "showY2MajorGridLines": true,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "nullValueDisplay": "zero",
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right",
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#f8be34",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100",
+          "#FFA476",
+          "#FF6ACE",
+          "#AE8CFF",
+          "#00689D",
+          "#00490A",
+          "#465D00",
+          "#9D6300",
+          "#F6540B",
+          "#FF969E",
+          "#E47BFE"
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_x70LSfKK"
+      },
+      "title": "VKB per minuut",
+      "showProgressBar": true
+    },
+    "viz_tLl77t0F": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "transparent",
+        "strokeColor": "transparent"
+      }
+    },
+    "viz_MW0jgpw7": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "auto",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisMiddle",
+        "showY2MajorGridLines": true,
+        "yAxisMajorTickInterval": 0.2,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "yAxisScale": "linear",
+        "showOverlayY2Axis": false,
+        "y2AxisScale": "inherit",
+        "nullValueDisplay": "zero",
+        "overlayFields": [
+          "\"perc95(duur): ecm-ccb\"",
+          "\"perc95(duur): ecm-esp\""
+        ],
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "showIndependentYRanges": true,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right"
+      },
+      "dataSources": {
+        "primary": "ds_MPX5Qbvz"
+      },
+      "title": "Duur (ms) per MeetpuntmatchID",
+      "showProgressBar": true
+    },
+    "viz_B13hrzNR": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#36AADF"
+          },
+          {
+            "to": 0,
+            "value": "#36AADF"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_wl2mM4zy_ds_afQsUfKj"
+      },
+      "title": "Aantal meetpunt=\"in-bcm-bte-ovb\"",
+      "showProgressBar": true
+    },
+    "viz_FEHbhQ34": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_nYKuQYbb_ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-bte-ovb\"",
+      "showProgressBar": true
+    },
+    "viz_zzel5AXs": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#36AADF"
+          },
+          {
+            "to": 0,
+            "value": "#36AADF"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_r6Kms1CE_ds_wl2mM4zy_ds_afQsUfKj"
+      },
+      "title": "Aantal meetpunt=\"in-bcm-bte-ovb-mq\"",
+      "showProgressBar": true
+    },
+    "viz_pl1taQnE": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_jRL5PxzC_ds_nYKuQYbb_ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-bte-ovb-mq\"",
+      "showProgressBar": true
+    },
+    "viz_6woD6ctk": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#36AADF"
+          },
+          {
+            "to": 0,
+            "value": "#36AADF"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_WklWn5kS_ds_r6Kms1CE_ds_wl2mM4zy_ds_afQsUfKj"
+      },
+      "title": "Aantal meetpunt=\"in-bcm-bte-avo\"",
+      "showProgressBar": true
+    },
+    "viz_xnHI6nsw": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_MRk3AhgW_ds_jRL5PxzC_ds_nYKuQYbb_ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-bte-avo\"",
+      "showProgressBar": true
+    },
+    "viz_INIocEjg": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#36AADF"
+          },
+          {
+            "to": 0,
+            "value": "#36AADF"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_oMjy8C2F_ds_wl2mM4zy_ds_afQsUfKj"
+      },
+      "title": "Aantal meetpunt=\"in-bcm-emc\"",
+      "showProgressBar": true
+    },
+    "viz_XkijOgBK": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#36AADF"
+          },
+          {
+            "to": 0,
+            "value": "#36AADF"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_LdMVwaaH_ds_oMjy8C2F_ds_wl2mM4zy_ds_afQsUfKj"
+      },
+      "title": "Aantal meetpunt=\"in-bcm-ewf\"",
+      "showProgressBar": true
+    },
+    "viz_KNGOA9B7": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-emc\"",
+      "showProgressBar": true
+    },
+    "viz_7bPoMrgq": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_grtDZzIz_ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-bte-ovb\"",
+      "showProgressBar": true
+    },
+    "viz_1sQgejZU": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_wbzSrlxl_ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-bte-ovb\"",
+      "showProgressBar": true
+    },
+    "viz_Xmr1EYNi": {
+      "type": "splunk.singlevalue",
+      "options": {
+        "backgroundColor": "> majorValue | rangeValue(convertedColorRange)"
+      },
+      "context": {
+        "convertedColorRange": [
+          {
+            "from": 0,
+            "value": "#00B050"
+          },
+          {
+            "to": 0,
+            "value": "#00B050"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_f95L28zy_ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N"
+      },
+      "title": "Aantal meetpunt=\"uit-bcm-ewf\"",
+      "showProgressBar": true
+    },
+    "viz_DCjbfH8C": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "off",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisEnd",
+        "showY2MajorGridLines": true,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "nullValueDisplay": "zero",
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right",
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#f8be34",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100",
+          "#FFA476",
+          "#FF6ACE",
+          "#AE8CFF",
+          "#00689D",
+          "#00490A",
+          "#465D00",
+          "#9D6300",
+          "#F6540B",
+          "#FF969E",
+          "#E47BFE"
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_MopfXofv_ds_x70LSfKK"
+      },
+      "title": "AVO per minuut",
+      "showProgressBar": true
+    },
+    "viz_0uBsXENT": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "off",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisEnd",
+        "showY2MajorGridLines": true,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "nullValueDisplay": "zero",
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right",
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#f8be34",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100",
+          "#FFA476",
+          "#FF6ACE",
+          "#AE8CFF",
+          "#00689D",
+          "#00490A",
+          "#465D00",
+          "#9D6300",
+          "#F6540B",
+          "#FF969E",
+          "#E47BFE"
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK"
+      },
+      "title": "EWF per minuut",
+      "showProgressBar": true
+    },
+    "viz_qGFev7RE": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "off",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisEnd",
+        "showY2MajorGridLines": true,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "nullValueDisplay": "zero",
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right",
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#f8be34",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100",
+          "#FFA476",
+          "#FF6ACE",
+          "#AE8CFF",
+          "#00689D",
+          "#00490A",
+          "#465D00",
+          "#9D6300",
+          "#F6540B",
+          "#FF969E",
+          "#E47BFE"
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK"
+      },
+      "title": "EMC per minuut",
+      "showProgressBar": true
+    },
+    "viz_bY5HxdBd": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "off",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisEnd",
+        "showY2MajorGridLines": true,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "nullValueDisplay": "zero",
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right",
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#f8be34",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100",
+          "#FFA476",
+          "#FF6ACE",
+          "#AE8CFF",
+          "#00689D",
+          "#00490A",
+          "#465D00",
+          "#9D6300",
+          "#F6540B",
+          "#FF969E",
+          "#E47BFE"
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_7t3ToVcS_ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK"
+      },
+      "title": "OVB MQ per minuut",
+      "showProgressBar": true
+    },
+    "viz_RS6sN7rL": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "off",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisEnd",
+        "showY2MajorGridLines": true,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "nullValueDisplay": "zero",
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right",
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#f8be34",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100",
+          "#FFA476",
+          "#FF6ACE",
+          "#AE8CFF",
+          "#00689D",
+          "#00490A",
+          "#465D00",
+          "#9D6300",
+          "#F6540B",
+          "#FF969E",
+          "#E47BFE"
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_UEGkg9So_ds_7t3ToVcS_ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK"
+      },
+      "title": "AVO per minuut",
+      "showProgressBar": true
+    },
+    "viz_w5lyveFH": {
+      "type": "splunk.line",
+      "options": {
+        "yAxisAbbreviation": "off",
+        "y2AxisAbbreviation": "off",
+        "showRoundedY2AxisLabels": false,
+        "legendTruncation": "ellipsisEnd",
+        "showY2MajorGridLines": true,
+        "xAxisTitleVisibility": "hide",
+        "yAxisTitleVisibility": "show",
+        "y2AxisTitleVisibility": "show",
+        "nullValueDisplay": "zero",
+        "dataValuesDisplay": "minmax",
+        "seriesColorsByField": {},
+        "showSplitSeries": false,
+        "legendMode": "seriesCompare",
+        "legendDisplay": "right",
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#f8be34",
+          "#FF677B",
+          "#CB2196",
+          "#813193",
+          "#0051B5",
+          "#008C80",
+          "#99B100",
+          "#FFA476",
+          "#FF6ACE",
+          "#AE8CFF",
+          "#00689D",
+          "#00490A",
+          "#465D00",
+          "#9D6300",
+          "#F6540B",
+          "#FF969E",
+          "#E47BFE"
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_Luwj2lhY_ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK"
+      },
+      "title": "OVB per minuut",
+      "showProgressBar": true
+    }
+  },
+  "dataSources": {
+    "ds_afQsUfKj": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-vkb\" MeetpuntLabel=\"in-bcm-bte-vkb\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__in-bcm-rma-rms-bulk-declaration_ - Single value search"
+    },
+    "ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-vkb\" MeetpuntLabel=\"uit-bcm-bte-vkb\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-bte-vkb_ - Single value search"
+    },
+    "ds_x70LSfKK": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-vkb\"\r\n| eval richting=if(like(MeetpuntLabel,\"in-%\"),\"in\",\"uit\")\r\n| timechart span=1m count by richting",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "VKB per minuut - Line chart search"
+    },
+    "ds_MPX5Qbvz": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-vkb\" \n| stats last(_time) as _time values(_time) as tijd by MeetpuntMatchId  \n| eval start=mvindex(tijd,0) \n| eval eind=mvindex(tijd,1) \n| eval duur=eind-start \n| table _time MeetpuntMatchId ApplicatieNaam tijd start eind duur\n| timechart $field2$ avg(duur) max(duur) by ApplicatieNaam",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Duur _ms_ per MeetpuntmatchID - Line chart search"
+    },
+    "ds_wl2mM4zy_ds_afQsUfKj": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb\" MeetpuntLabel=\"in-bcm-bte-ovb\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__in-bcm-bte-ovb_ - Single value search copy 1"
+    },
+    "ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb\" MeetpuntLabel=\"uit-bcm-bte-ovb\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-bte-vkb_ - Single value search copy 1"
+    },
+    "ds_r6Kms1CE_ds_wl2mM4zy_ds_afQsUfKj": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb-mq\" MeetpuntLabel=\"in-bcm-bte-ovb-mq\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__in-bcm-bte-ovb-mq_ - Single value search copy 2"
+    },
+    "ds_jRL5PxzC_ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb-mq\" MeetpuntLabel=\"uit-bcm-bte-ovb-mq\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-bte-vkb_ - Single value search copy 2"
+    },
+    "ds_WklWn5kS_ds_r6Kms1CE_ds_wl2mM4zy_ds_afQsUfKj": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-avo\" MeetpuntLabel=\"in-bcm-bte-avo\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__in-bcm-bte-avo_ - Single value search copy 3"
+    },
+    "ds_MRk3AhgW_ds_jRL5PxzC_ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-avo\" MeetpuntLabel=\"uit-bcm-bte-avo\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-bte-avo_ - Single value search copy 3"
+    },
+    "ds_oMjy8C2F_ds_wl2mM4zy_ds_afQsUfKj": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-emc\" MeetpuntLabel=\"in-bcm-emc\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__in-bcm-emc_ - Single value search copy 2"
+    },
+    "ds_OuMvC6Nc_ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb\" MeetpuntLabel=\"uit-bcm-bte-ovb\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-bte-vkb_ - Single value search copy 3"
+    },
+    "ds_LdMVwaaH_ds_oMjy8C2F_ds_wl2mM4zy_ds_afQsUfKj": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-ewf\" MeetpuntLabel=\"in-bcm-ewf\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__in-bcm-ewf_ - Single value search copy 3"
+    },
+    "ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-emc\" MeetpuntLabel=\"uit-bcm-emc\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-emc_ - Single value search copy 4"
+    },
+    "ds_grtDZzIz_ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb\" MeetpuntLabel=\"uit-bcm-bte-ovb\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-bte-vkb_ - Single value search copy 5"
+    },
+    "ds_wbzSrlxl_ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb\" MeetpuntLabel=\"uit-bcm-bte-ovb\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-bte-vkb_ - Single value search copy 6"
+    },
+    "ds_f95L28zy_ds_5vaHC2aK_ds_nYKuQYbb_ds_QKAFd23N": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-ewf\" MeetpuntLabel=\"uit-bcm-ewf\" \n| stats c as aantal  \n| fields aantal",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "Aantal meetpunt__uit-bcm-ewf_ - Single value search copy 7"
+    },
+    "ds_MopfXofv_ds_x70LSfKK": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-avo\"\r\n| eval richting=if(like(MeetpuntLabel,\"in-%\"),\"in\",\"uit\")\r\n| timechart span=1m count by richting",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "AVO per minuut - Line chart search"
+    },
+    "ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-ewf\"\r\n| eval richting=if(like(MeetpuntLabel,\"in-%\"),\"in\",\"uit\")\r\n| timechart span=1m count by richting",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "EWF per minuut - Line chart search copy 1"
+    },
+    "ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-emc\"\r\n| eval richting=if(like(MeetpuntLabel,\"in-%\"),\"in\",\"uit\")\r\n| timechart span=1m count by richting",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "EMC per minuut - Line chart search copy 2"
+    },
+    "ds_7t3ToVcS_ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb-mq\"\r\n| eval richting=if(like(MeetpuntLabel,\"in-%\"),\"in\",\"uit\")\r\n| timechart span=1m count by richting",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "OVB MQ per minuut - Line chart search copy 3"
+    },
+    "ds_UEGkg9So_ds_7t3ToVcS_ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-avo\"\r\n| eval richting=if(like(MeetpuntLabel,\"in-%\"),\"in\",\"uit\")\r\n| timechart span=1m count by richting",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "AVO per minuut - Line chart search copy 4"
+    },
+    "ds_Luwj2lhY_ds_ziuohvnf_ds_YfNZmaXv_ds_MopfXofv_ds_x70LSfKK": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=ecm-sts-appl ApplicatieNaam=\"bcm-bte-ovb\"\r\n| eval richting=if(like(MeetpuntLabel,\"in-%\"),\"in\",\"uit\")\r\n| timechart span=1m count by richting",
+        "queryParameters": {
+          "earliest": "$timeSelector.earliest$",
+          "latest": "$timeSelector.latest$"
+        }
+      },
+      "name": "OVB per minuut - Line chart search copy 5"
+    }
+  },
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {}
+        }
+      }
+    }
+  },
+  "inputs": {
+    "input_lNGp56je": {
+      "type": "input.timerange",
+      "options": {
+        "token": "timeSelector",
+        "defaultValue": "-60m@m,now"
+      },
+      "title": "Selecteer periode:"
+    },
+    "input_qnEzhJKj": {
+      "type": "input.dropdown",
+      "options": {
+        "defaultValue": "bins=100",
+        "items": [
+          {
+            "value": "bins=100",
+            "label": "automatisch"
+          },
+          {
+            "value": "span=1s",
+            "label": "per seconde"
+          },
+          {
+            "value": "span=1m",
+            "label": "per minuut"
+          },
+          {
+            "value": "span=15m",
+            "label": "per kwartier"
+          },
+          {
+            "value": "span=1h",
+            "label": "per uur"
+          }
+        ],
+        "token": "field1"
+      },
+      "title": "Span:"
+    },
+    "input_XM0ZI9D4": {
+      "type": "input.dropdown",
+      "options": {
+        "defaultValue": "bins=100",
+        "items": [
+          {
+            "value": "bins=100",
+            "label": "automatisch"
+          },
+          {
+            "value": "span=1s",
+            "label": "per seconde"
+          },
+          {
+            "value": "span=1m",
+            "label": "per minuut"
+          },
+          {
+            "value": "span=15m",
+            "label": "per kwartier"
+          },
+          {
+            "value": "span=1h",
+            "label": "per uur"
+          }
+        ],
+        "token": "field2"
+      },
+      "title": "Span:"
+    }
+  },
+  "layout": {
+    "options": {
+      "submitButton": false
+    },
+    "globalInputs": [
+      "input_lNGp56je"
+    ],
+    "tabs": {
+      "items": [
+        {
+          "layoutId": "layout_1",
+          "label": "New tab"
+        }
+      ]
+    },
+    "layoutDefinitions": {
+      "layout_1": {
+        "type": "grid",
+        "structure": [
+          {
+            "item": "viz_rpcI2Cno",
+            "type": "block",
+            "position": {
+              "x": 0,
+              "y": 0,
+              "w": 174,
+              "h": 121
+            }
+          },
+          {
+            "item": "input_qnEzhJKj",
+            "type": "input",
+            "position": {
+              "x": 0,
+              "y": 121,
+              "w": 174,
+              "h": 90
+            }
+          },
+          {
+            "item": "viz_owpxKSR6",
+            "type": "block",
+            "position": {
+              "x": 0,
+              "y": 211,
+              "w": 476,
+              "h": 360
+            }
+          },
+          {
+            "item": "viz_0uBsXENT",
+            "type": "block",
+            "position": {
+              "x": 0,
+              "y": 571,
+              "w": 476,
+              "h": 331
+            }
+          },
+          {
+            "item": "input_XM0ZI9D4",
+            "type": "input",
+            "position": {
+              "x": 0,
+              "y": 902,
+              "w": 201,
+              "h": 387
+            }
+          },
+          {
+            "item": "viz_mPJNZGts",
+            "type": "block",
+            "position": {
+              "x": 174,
+              "y": 0,
+              "w": 187,
+              "h": 121
+            }
+          },
+          {
+            "item": "viz_INIocEjg",
+            "type": "block",
+            "position": {
+              "x": 174,
+              "y": 121,
+              "w": 187,
+              "h": 90
+            }
+          },
+          {
+            "item": "viz_MW0jgpw7",
+            "type": "block",
+            "position": {
+              "x": 201,
+              "y": 902,
+              "w": 1239,
+              "h": 387
+            }
+          },
+          {
+            "item": "viz_B13hrzNR",
+            "type": "block",
+            "position": {
+              "x": 361,
+              "y": 0,
+              "w": 175,
+              "h": 121
+            }
+          },
+          {
+            "item": "viz_KNGOA9B7",
+            "type": "block",
+            "position": {
+              "x": 361,
+              "y": 121,
+              "w": 175,
+              "h": 90
+            }
+          },
+          {
+            "item": "viz_DCjbfH8C",
+            "type": "block",
+            "position": {
+              "x": 476,
+              "y": 211,
+              "w": 517,
+              "h": 360
+            }
+          },
+          {
+            "item": "viz_qGFev7RE",
+            "type": "block",
+            "position": {
+              "x": 476,
+              "y": 571,
+              "w": 517,
+              "h": 331
+            }
+          },
+          {
+            "item": "viz_FEHbhQ34",
+            "type": "block",
+            "position": {
+              "x": 536,
+              "y": 0,
+              "w": 180,
+              "h": 121
+            }
+          },
+          {
+            "item": "viz_XkijOgBK",
+            "type": "block",
+            "position": {
+              "x": 536,
+              "y": 121,
+              "w": 180,
+              "h": 90
+            }
+          },
+          {
+            "item": "viz_zzel5AXs",
+            "type": "block",
+            "position": {
+              "x": 716,
+              "y": 0,
+              "w": 192,
+              "h": 121
+            }
+          },
+          {
+            "item": "viz_Xmr1EYNi",
+            "type": "block",
+            "position": {
+              "x": 716,
+              "y": 121,
+              "w": 192,
+              "h": 90
+            }
+          },
+          {
+            "item": "viz_pl1taQnE",
+            "type": "block",
+            "position": {
+              "x": 908,
+              "y": 0,
+              "w": 190,
+              "h": 121
+            }
+          },
+          {
+            "type": "block",
+            "position": {
+              "x": 908,
+              "y": 121,
+              "w": 532,
+              "h": 90
+            },
+            "item": "viz_tLl77t0F"
+          },
+          {
+            "item": "viz_bY5HxdBd",
+            "type": "block",
+            "position": {
+              "x": 993,
+              "y": 211,
+              "w": 447,
+              "h": 360
+            }
+          },
+          {
+            "item": "viz_w5lyveFH",
+            "type": "block",
+            "position": {
+              "x": 993,
+              "y": 571,
+              "w": 447,
+              "h": 331
+            }
+          },
+          {
+            "item": "viz_6woD6ctk",
+            "type": "block",
+            "position": {
+              "x": 1098,
+              "y": 0,
+              "w": 190,
+              "h": 121
+            }
+          },
+          {
+            "item": "viz_xnHI6nsw",
+            "type": "block",
+            "position": {
+              "x": 1288,
+              "y": 0,
+              "w": 152,
+              "h": 121
+            }
+          }
+        ],
+        "options": {
+          "width": 1440,
+          "height": 792
+        }
+      }
+    }
+  },
+  "description": "",
+  "title": "BTE performancetest",
+  "applicationProperties": {
+    "hideEdit": false,
+    "hideExport": false,
+    "hideOpenInSearch": false
+  }
+}
