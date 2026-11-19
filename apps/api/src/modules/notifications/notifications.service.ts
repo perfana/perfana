@@ -1,6 +1,12 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { NotificationChannel, TestRun, SystemUnderTest } from '@perfana/shared';
 import { withRequestEm } from '../../common/db/request-em';
@@ -10,18 +16,29 @@ import {
   DatabaseException,
 } from '../../common/exceptions/business.exception';
 import { validateWebhookUrl } from '../../common/security';
-// NOTE: AuthorizationService will be re-added when Phase 3 adds org filtering to notifications
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { Capability } from '../../constants/capabilities.constants';
 import { CreateNotificationChannelDto, UpdateNotificationChannelDto } from './dto';
 import { SlackMessageBuilder, TeamsMessageBuilder } from './message-builders';
+import { MASKED_WEBHOOK_URL } from './notifications.constants';
 
 /**
  * Service responsible for managing notification channels.
  *
- * Authorization:
- * - All methods accept userId and roles parameters for authorization
- * - Currently NotificationChannel entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to NotificationChannel (Phase 4), authorization checks will be enabled
- * - Global admins bypass all authorization checks
+ * Authorization (same shape as graph presets, see apps/api/CLAUDE.md):
+ * - Every route resolves the caller's organizations once with `withOrgFilter`
+ *   (`null` = global admin). A channel outside them answers 404, never 403, so a
+ *   caller cannot learn that another tenant's channel id exists.
+ * - Create, update, delete and the test send need `sut:manage` in the channel's
+ *   organization (org admins and members, not viewers). The test send counts as a
+ *   write because it posts into the channel.
+ * - Create authorizes the caller-supplied system before inheriting its organization.
+ * - The webhook URL is a bearer credential. It is never returned (`MASKED_WEBHOOK_URL`)
+ *   and is encrypted at rest by the entity's column transformer.
+ *
+ * There is no RLS backstop on a default deploy (`DB_ENABLE_RLS_ROLE` defaults to false),
+ * so these checks are the whole protection.
  */
 @Injectable()
 export class NotificationsService {
@@ -37,6 +54,7 @@ export class NotificationsService {
     private readonly systemUnderTestRepository: Repository<SystemUnderTest>,
     private readonly configService: ConfigService,
     private readonly proxyResolver: ProxyResolverService,
+    private readonly authzService: AuthorizationService,
   ) {
     // Get Perfana URL for deeplinks, fallback to localhost
     this.perfanaUrl = this.configService.get<string>('PERFANA_URL')
@@ -47,101 +65,148 @@ export class NotificationsService {
     this.teamsBuilder = new TeamsMessageBuilder(this.perfanaUrl);
   }
 
+  // ============================================
+  // Authorization helpers
+  // ============================================
+
+  private resolveOrgFilter(userId: string, roles: string[]): Promise<string[] | null> {
+    return withOrgFilter(userId, roles, this.authzService);
+  }
+
+  private static inOrgs(organizationId: string | null | undefined, orgIds: string[] | null): boolean {
+    if (orgIds === null) return true;
+    return !!organizationId && orgIds.includes(organizationId);
+  }
+
+  /** Whether the caller may create, change, delete or test-send channels in that organization. */
+  private async canManage(
+    userId: string,
+    roles: string[],
+    organizationId: string,
+    teamId?: string | null,
+  ): Promise<boolean> {
+    // An API key is already confined to its own organization by the org filter above;
+    // it carries no role, so it passes the capability check as it does elsewhere.
+    if (userId.startsWith('api-key:')) return true;
+    const caps = await this.authzService.getCapabilities(userId, roles, organizationId, teamId ?? null);
+    return caps.includes(Capability.SutManage);
+  }
+
+  private async assertCanManage(
+    userId: string,
+    roles: string[],
+    organizationId: string,
+    teamId?: string | null,
+  ): Promise<void> {
+    if (await this.canManage(userId, roles, organizationId, teamId)) return;
+    this.logger.warn(
+      `Write denied: capability=${Capability.SutManage} userId=${userId} orgId=${organizationId}`,
+    );
+    throw new ForbiddenException('You do not have permission to manage notification channels for this system');
+  }
+
   /**
-   * Find all notification channels for a system
-   *
-   * @param systemId - The system under test ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: NotificationChannel entity does not have organization_id yet, so org filtering is not applied.
-   * Full org filtering will be enabled when Phase 4 adds organization_id column.
+   * Load a channel the caller may see. Returns the stored entity, webhook URL included,
+   * so it must not be returned to a client as-is; use `toResponse`.
+   */
+  private async loadAccessible(id: string, userId: string, roles: string[]): Promise<NotificationChannel> {
+    const orgIds = await this.resolveOrgFilter(userId, roles);
+    const channel = await withRequestEm(this.notificationChannelRepository).findOne({
+      where: { id },
+    });
+    if (!channel || !NotificationsService.inOrgs(channel.organizationId, orgIds)) {
+      if (channel) {
+        this.logger.warn(`Read denied: notification channel ${id} is outside the orgs of userId=${userId}`);
+      }
+      throw new ResourceNotFoundException('Notification channel', id);
+    }
+    return channel;
+  }
+
+  /** A copy safe to return to a client: the webhook URL is replaced by a placeholder. */
+  private toResponse(channel: NotificationChannel): NotificationChannel {
+    return { ...channel, webhookUrl: channel.webhookUrl ? MASKED_WEBHOOK_URL : '' };
+  }
+
+  private static rethrowHttp(error: unknown): void {
+    if (error instanceof HttpException) throw error;
+  }
+
+  // ============================================
+  // CRUD
+  // ============================================
+
+  /**
+   * Find all notification channels for a system the caller may see.
+   * A system in another organization reads as having no channels.
    */
   async findBySystemId(
     systemId: string,
     userId: string,
-    _roles: string[],
+    roles: string[],
   ): Promise<NotificationChannel[]> {
     try {
       this.logger.debug(`findBySystemId: systemId=${systemId}, userId=${userId}`);
 
-      // NOTE: Org filtering will be added here when NotificationChannel entity has organization_id
-      // For now, all notification channels for the system are returned (treated as legacy data)
+      const orgIds = await this.resolveOrgFilter(userId, roles);
+      // `In([])` renders `IN ()`, a syntax error rather than an empty result.
+      if (orgIds !== null && orgIds.length === 0) return [];
 
-      return await withRequestEm(this.notificationChannelRepository).find({
-        where: { systemUnderTestId: systemId },
+      const channels = await withRequestEm(this.notificationChannelRepository).find({
+        where: {
+          systemUnderTestId: systemId,
+          ...(orgIds !== null ? { organizationId: In(orgIds) } : {}),
+        },
         order: { createdAt: 'DESC' },
       });
+      return channels.map((c) => this.toResponse(c));
     } catch (error) {
+      NotificationsService.rethrowHttp(error);
       this.logger.error('Failed to find notification channels:', error);
       throw new DatabaseException('Failed to retrieve notification channels', error);
     }
   }
 
-  /**
-   * Find a single notification channel by ID
-   *
-   * @param id - The notification channel ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: NotificationChannel entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
-   */
+  /** Find a single notification channel by ID. 404 when it is outside the caller's organizations. */
   async findOne(
     id: string,
     userId: string,
-    _roles: string[],
+    roles: string[],
   ): Promise<NotificationChannel> {
     try {
       this.logger.debug(`findOne: id=${id}, userId=${userId}`);
-
-      const channel = await withRequestEm(this.notificationChannelRepository).findOne({
-        where: { id },
-      });
-
-      if (!channel) {
-        throw new ResourceNotFoundException('Notification channel', id);
-      }
-
-      // NOTE: Access permission check will be added here when NotificationChannel entity has organization_id
-      // For now, all notification channels are accessible (treated as legacy data)
-
-      return channel;
+      return this.toResponse(await this.loadAccessible(id, userId, roles));
     } catch (error) {
-      if (error instanceof ResourceNotFoundException) {
-        throw error;
-      }
+      NotificationsService.rethrowHttp(error);
       this.logger.error('Failed to find notification channel:', error);
       throw new DatabaseException('Failed to retrieve notification channel', error);
     }
   }
 
   /**
-   * Create a new notification channel
-   *
-   * @param dto - The create notification channel DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: NotificationChannel entity does not have organization_id or created_by/updated_by yet,
-   * so ownership tracking is not applied. Full ownership assignment will be enabled when
-   * Phase 4 adds the ownership columns.
+   * Create a new notification channel. The system must be one the caller may see, and
+   * the caller needs `sut:manage` in its organization; the channel inherits both its
+   * organization and team.
    */
   async create(
     dto: CreateNotificationChannelDto,
     userId: string,
-    _roles: string[],
+    roles: string[],
   ): Promise<NotificationChannel> {
     try {
       this.logger.debug(`create: userId=${userId}`);
 
-      this.logger.log(
-        `Creating notification channel "${dto.name}" for system ${dto.systemUnderTestId} by user ${userId}`
-      );
-
-      // NOTE: Permission check will be added here when NotificationChannel entity has organization_id
-      // For now, all users can create notification channels (treated as legacy data)
+      // Authorize the caller-supplied system BEFORE inheriting its organization:
+      // otherwise naming another tenant's system id writes a channel into it.
+      const orgIds = await this.resolveOrgFilter(userId, roles);
+      const system = await withRequestEm(this.systemUnderTestRepository).findOne({
+        where: { id: dto.systemUnderTestId },
+      });
+      if (!system || !NotificationsService.inOrgs(system.organization_id, orgIds)) {
+        // Same message either way, so the response does not confirm the system exists.
+        throw new BadRequestException(`System under test not found: ${dto.systemUnderTestId}`);
+      }
+      await this.assertCanManage(userId, roles, system.organization_id, system.team_id);
 
       // Validate webhook URL to prevent SSRF attacks
       const urlValidation = validateWebhookUrl(dto.webhookUrl);
@@ -149,15 +214,12 @@ export class NotificationsService {
         throw new BadRequestException(`Invalid webhook URL: ${urlValidation.error}`);
       }
 
+      this.logger.log(
+        `Creating notification channel "${dto.name}" for system ${dto.systemUnderTestId} by user ${userId}`
+      );
+
       // Inherit org/team from the parent SUT — NotificationChannel.organization_id
       // is NOT NULL and the camelCase property key is required.
-      const system = await withRequestEm(this.systemUnderTestRepository).findOne({
-        where: { id: dto.systemUnderTestId },
-      });
-      if (!system) {
-        throw new BadRequestException(`System under test not found: ${dto.systemUnderTestId}`);
-      }
-
       const channel = this.notificationChannelRepository.create({
         systemUnderTestId: dto.systemUnderTestId,
         type: dto.type,
@@ -173,26 +235,17 @@ export class NotificationsService {
         teamId: system.team_id,
       });
 
-      return await withRequestEm(this.notificationChannelRepository).save(channel);
+      return this.toResponse(await withRequestEm(this.notificationChannelRepository).save(channel));
     } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
+      NotificationsService.rethrowHttp(error);
       this.logger.error('Failed to create notification channel:', error);
       throw new DatabaseException('Failed to create notification channel', error);
     }
   }
 
   /**
-   * Update an existing notification channel
-   *
-   * @param id - The notification channel ID
-   * @param dto - The update notification channel DTO
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: NotificationChannel entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
+   * Update an existing notification channel. A `webhookUrl` equal to
+   * `MASKED_WEBHOOK_URL` (what a read returns) keeps the stored URL.
    */
   async update(
     id: string,
@@ -203,14 +256,19 @@ export class NotificationsService {
     try {
       this.logger.debug(`update: id=${id}, userId=${userId}`);
 
-      const channel = await this.findOne(id, userId, roles);
+      const channel = await this.loadAccessible(id, userId, roles);
+      await this.assertCanManage(userId, roles, channel.organizationId, channel.teamId);
 
-      // NOTE: Modify permission check will be added here when NotificationChannel entity has organization_id
-      // For now, all notification channels are modifiable (treated as legacy data)
+      // `@IsOptional()` lets an explicit null through, and webhook_url is NOT NULL,
+      // so only a real string other than the placeholder replaces the stored URL.
+      const newWebhookUrl =
+        typeof dto.webhookUrl === 'string' && dto.webhookUrl !== MASKED_WEBHOOK_URL
+          ? dto.webhookUrl
+          : undefined;
 
       // Validate webhook URL if provided to prevent SSRF attacks
-      if (dto.webhookUrl !== undefined) {
-        const urlValidation = validateWebhookUrl(dto.webhookUrl);
+      if (newWebhookUrl !== undefined) {
+        const urlValidation = validateWebhookUrl(newWebhookUrl);
         if (!urlValidation.isValid) {
           throw new BadRequestException(`Invalid webhook URL: ${urlValidation.error}`);
         }
@@ -219,7 +277,7 @@ export class NotificationsService {
       // Update only provided fields
       if (dto.type !== undefined) channel.type = dto.type;
       if (dto.name !== undefined) channel.name = dto.name;
-      if (dto.webhookUrl !== undefined) channel.webhookUrl = dto.webhookUrl;
+      if (newWebhookUrl !== undefined) channel.webhookUrl = newWebhookUrl;
       if (dto.notifyOnFinished !== undefined) channel.notifyOnFinished = dto.notifyOnFinished;
       if (dto.notifyOnFailedOnly !== undefined) channel.notifyOnFailedOnly = dto.notifyOnFailedOnly;
       if (dto.enabled !== undefined) channel.enabled = dto.enabled;
@@ -228,26 +286,15 @@ export class NotificationsService {
 
       this.logger.log(`Updating notification channel ${id} by user ${userId}`);
 
-      return await withRequestEm(this.notificationChannelRepository).save(channel);
+      return this.toResponse(await withRequestEm(this.notificationChannelRepository).save(channel));
     } catch (error) {
-      if (error instanceof ResourceNotFoundException || error instanceof BadRequestException) {
-        throw error;
-      }
+      NotificationsService.rethrowHttp(error);
       this.logger.error('Failed to update notification channel:', error);
       throw new DatabaseException('Failed to update notification channel', error);
     }
   }
 
-  /**
-   * Delete a notification channel
-   *
-   * @param id - The notification channel ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
-   *
-   * Note: NotificationChannel entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
-   */
+  /** Delete a notification channel. */
   async delete(
     id: string,
     userId: string,
@@ -256,29 +303,22 @@ export class NotificationsService {
     try {
       this.logger.debug(`delete: id=${id}, userId=${userId}`);
 
-      const channel = await this.findOne(id, userId, roles);
-
-      // NOTE: Delete permission check will be added here when NotificationChannel entity has organization_id
-      // For now, all notification channels are deletable (treated as legacy data)
+      const channel = await this.loadAccessible(id, userId, roles);
+      await this.assertCanManage(userId, roles, channel.organizationId, channel.teamId);
 
       this.logger.log(`Deleting notification channel ${id} by user ${userId}`);
 
       await withRequestEm(this.notificationChannelRepository).remove(channel);
     } catch (error) {
-      if (error instanceof ResourceNotFoundException) {
-        throw error;
-      }
+      NotificationsService.rethrowHttp(error);
       this.logger.error('Failed to delete notification channel:', error);
       throw new DatabaseException('Failed to delete notification channel', error);
     }
   }
 
   /**
-   * Send a test notification to verify the channel configuration
-   *
-   * @param id - The notification channel ID
-   * @param userId - The user ID for authorization
-   * @param roles - The user's roles for authorization checks
+   * Send a test notification to verify the channel configuration. Needs the same
+   * permission as editing the channel, because it posts into it.
    */
   async testChannel(
     id: string,
@@ -287,7 +327,8 @@ export class NotificationsService {
   ): Promise<{ success: boolean; message: string }> {
     this.logger.debug(`testChannel: id=${id}, userId=${userId}`);
 
-    const channel = await this.findOne(id, userId, roles);
+    const channel = await this.loadAccessible(id, userId, roles);
+    await this.assertCanManage(userId, roles, channel.organizationId, channel.teamId);
 
     // Get system name for the message
     const system = await withRequestEm(this.systemUnderTestRepository).findOne({

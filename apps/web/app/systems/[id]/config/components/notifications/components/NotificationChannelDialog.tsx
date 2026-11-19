@@ -23,6 +23,7 @@ import {
   DialogMode,
   getWebhookPlaceholder,
   getWebhookHelperText,
+  MASKED_WEBHOOK_URL,
 } from '../types';
 
 interface NotificationChannelDialogProps {
@@ -107,7 +108,11 @@ export function NotificationChannelDialog({
             placeholder={getWebhookPlaceholder(formData.type)}
             fullWidth
             required
-            helperText={getWebhookHelperText(formData.type)}
+            helperText={
+              formData.webhookUrl === MASKED_WEBHOOK_URL
+                ? 'The saved URL is hidden. Leave it as is to keep it, or paste a new URL to replace it.'
+                : getWebhookHelperText(formData.type)
+            }
           />
 
           <FormControlLabel
