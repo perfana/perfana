@@ -273,6 +273,26 @@ describe('NotificationsService tenant scoping', () => {
       channelRepo.query = jest.fn().mockRejectedValue(new Error('relation does not exist'));
       await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
     });
+
+    // Value: protects=a wrong-but-well-formed key never overwrites the only readable copy of a URL; fails_when=the decrypt probe against an already-encrypted row is removed; why_new=encrypting under the wrong key is unrecoverable; seam=none; no_claim=a table with no encrypted row yet has nothing to probe
+    it('writes nothing when the key cannot decrypt the rows already encrypted', async () => {
+      const underOtherKey = encrypt('https://hooks.slack.com/services/T000/B000/old', Buffer.from('d'.repeat(64), 'hex'));
+      channelRepo.query = jest.fn().mockResolvedValueOnce([
+        { id: CHANNEL, webhook_url: URL },
+        { id: OTHER_CHANNEL, webhook_url: underOtherKey },
+      ]);
+
+      await service.onApplicationBootstrap();
+
+      expect(channelRepo.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips with a malformed key instead of throwing on the first row', async () => {
+      process.env.ENCRYPTION_KEY = 'not-hex';
+      channelRepo.query = jest.fn();
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+      expect(channelRepo.query).not.toHaveBeenCalled();
+    });
   });
 
   describe('encryption failure modes', () => {
@@ -280,6 +300,18 @@ describe('NotificationsService tenant scoping', () => {
     afterEach(() => {
       if (originalKey === undefined) delete process.env.ENCRYPTION_KEY;
       else process.env.ENCRYPTION_KEY = originalKey;
+    });
+
+    it('answers 503 for a malformed key too, naming the problem', async () => {
+      process.env.ENCRYPTION_KEY = 'abc';
+      const dto = { systemUnderTestId: SUT, type: 'slack' as const, name: '#perf', webhookUrl: URL };
+
+      const err = await service.create(dto, USER, []).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ServiceUnavailableException);
+      expect(err.message).toMatch(/ENCRYPTION_KEY must be/);
+      expect(err.message).not.toContain('abc');
+      expect(channelRepo.save).not.toHaveBeenCalled();
     });
 
     // Value: protects=a deploy without ENCRYPTION_KEY gets a 503 naming the variable instead of an opaque 500; fails_when=the pre-check is removed or moved after save; why_new=the transformer's error is otherwise wrapped as DatabaseException; seam=none; no_claim=the transformer itself (mocked repo)

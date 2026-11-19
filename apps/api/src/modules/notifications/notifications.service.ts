@@ -10,7 +10,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { NotificationChannel, TestRun, SystemUnderTest, encrypt, isEncrypted } from '@perfana/shared';
+import { NotificationChannel, TestRun, SystemUnderTest, decrypt, encrypt, getEncryptionKey, isEncrypted } from '@perfana/shared';
 import { withRequestEm } from '../../common/db/request-em';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import {
@@ -115,8 +115,9 @@ export class NotificationsService implements OnApplicationBootstrap {
    * Never fails the boot: without ENCRYPTION_KEY it skips, and any error is logged.
    */
   async onApplicationBootstrap(): Promise<void> {
-    if (!process.env.ENCRYPTION_KEY) {
-      this.logger.warn('ENCRYPTION_KEY is not set; existing notification webhook URLs stay unencrypted');
+    const keyProblem = NotificationsService.encryptionKeyProblem();
+    if (keyProblem) {
+      this.logger.warn(`Existing notification webhook URLs stay unencrypted: ${keyProblem}`);
       return;
     }
     try {
@@ -125,17 +126,38 @@ export class NotificationsService implements OnApplicationBootstrap {
       const rows: Array<{ id: string; webhook_url: string }> = await this.notificationChannelRepository.query(
         `SELECT id, webhook_url FROM notification_channels WHERE webhook_url <> ''`,
       );
+      const plaintext = rows.filter((r) => !isEncrypted(r.webhook_url));
+
+      // Prove the key is the one the existing ciphertext was written with before
+      // overwriting anything: encrypting under a wrong key destroys the only readable
+      // copy of each URL. With no encrypted row yet there is nothing to check against.
+      const sample = rows.find((r) => isEncrypted(r.webhook_url));
+      if (sample && plaintext.length > 0) {
+        try {
+          decrypt(sample.webhook_url);
+        } catch {
+          this.logger.error(
+            `Not encrypting ${plaintext.length} plaintext notification webhook URL(s): ENCRYPTION_KEY cannot decrypt the channels already encrypted, so it is not the key they were saved with`,
+          );
+          return;
+        }
+      }
+
       let encrypted = 0;
-      for (const row of rows) {
-        if (isEncrypted(row.webhook_url)) continue;
+      for (const row of plaintext) {
         // eslint-disable-next-line owned-resource-must-use-request-em
-        await this.notificationChannelRepository.query(
+        const result = await this.notificationChannelRepository.query(
           `UPDATE notification_channels SET webhook_url = $1 WHERE id = $2 AND webhook_url = $3`,
           [encrypt(row.webhook_url), row.id, row.webhook_url],
         );
-        encrypted++;
+        // UPDATE answers [rows, rowCount]; 0 when another replica or a save got there first.
+        encrypted += Array.isArray(result) && typeof result[1] === 'number' ? result[1] : 0;
       }
-      if (encrypted > 0) this.logger.log(`Encrypted ${encrypted} plaintext notification webhook URL(s)`);
+      // Logged every boot, so a pass that saw nothing (e.g. a login role without RLS
+      // bypass on this FORCE RLS table) is visible rather than silent.
+      this.logger.log(
+        `Notification webhook URLs: scanned ${rows.length}, encrypted ${encrypted} of ${plaintext.length} plaintext`,
+      );
     } catch (error) {
       const msg = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
       this.logger.error(`Could not encrypt existing notification webhook URLs: ${msg}`);
@@ -210,10 +232,19 @@ export class NotificationsService implements OnApplicationBootstrap {
    * this the caller gets a generic 500 and the cause reaches only the log.
    */
   private static assertEncryptionConfigured(): void {
-    if (!process.env.ENCRYPTION_KEY) {
-      throw new ServiceUnavailableException(
-        'Notification channels cannot be saved: ENCRYPTION_KEY is not configured on the API',
-      );
+    const problem = NotificationsService.encryptionKeyProblem();
+    if (problem) {
+      throw new ServiceUnavailableException(`Notification channels cannot be saved: ${problem}`);
+    }
+  }
+
+  /** Why ENCRYPTION_KEY is unusable (missing or malformed), or null. Never includes the key. */
+  private static encryptionKeyProblem(): string | null {
+    try {
+      getEncryptionKey();
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : 'ENCRYPTION_KEY is invalid';
     }
   }
 
