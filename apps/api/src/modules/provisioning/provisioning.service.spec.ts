@@ -480,6 +480,48 @@ describe('ProvisioningService', () => {
       expect(benchmarkRepo.insert).not.toHaveBeenCalled();
     });
 
+    it('provisions a splunk-panels benchmark keyed on its panel title', async () => {
+      profileRepo.findOne.mockResolvedValue(profileMock);
+      benchmarkRepo.findOne.mockResolvedValue(null);
+      benchmarkRepo.insert.mockResolvedValue(undefined as any);
+
+      const result = await service.provisionProfileBenchmarks(
+        [{
+          profile: 'gatling',
+          source: 'splunk-panels',
+          panel: { title: 'Errors by host', evaluateType: 'max', requirement: { operator: 'lt', value: 10 } },
+        }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 1, updated: 0, skipped: 0, errors: 0 });
+      expect(dashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(benchmarkRepo.findOne).toHaveBeenCalledWith({
+        where: expect.objectContaining({ dashboard_uid: '^splunk-', panel_title: 'Errors by host' }),
+      });
+      expect(benchmarkRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile_dashboard_id: null,
+          source: 'splunk-panels',
+          dashboard_uid: '^splunk-',
+          panel_id: undefined,
+          panel_title: 'Errors by host',
+        }),
+      );
+    });
+
+    it('skips a splunk-panels benchmark with no panel title', async () => {
+      profileRepo.findOne.mockResolvedValue(profileMock);
+
+      const result = await service.provisionProfileBenchmarks(
+        [{ profile: 'gatling', source: 'splunk-panels', panel: { id: 3 } }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 0, updated: 0, skipped: 1, errors: 0 });
+      expect(benchmarkRepo.insert).not.toHaveBeenCalled();
+    });
+
     it('should skip when profile not found', async () => {
       profileRepo.findOne.mockResolvedValue(null);
 

@@ -16,9 +16,10 @@ import {
 
 // Types
 import { BenchmarkFormDialogProps } from './types';
+import { isSplunkProfileDashboard } from '@/lib/profile-benchmarks';
 
 // Hooks
-import { useBenchmarkForm } from './hooks';
+import { useBenchmarkForm, useConfiguredIntegrations } from './hooks';
 
 // Components
 import {
@@ -68,6 +69,7 @@ export default function BenchmarkFormDialog({
     onSubmit,
     onClose,
   });
+  const configuredIntegrations = useConfiguredIntegrations(open);
 
   return (
     <Dialog open={open} onClose={handleCancel} maxWidth="md" fullWidth>
@@ -96,6 +98,7 @@ export default function BenchmarkFormDialog({
               onSelect={handleDashboardSelect}
               loading={externalLoading}
               error={validationErrors.selectedDashboard}
+              configuredIntegrations={configuredIntegrations}
             />
 
             {formData.selectedDashboard && (
@@ -106,6 +109,7 @@ export default function BenchmarkFormDialog({
                 loading={panelsLoading}
                 error={validationErrors.selectedPanel}
                 dashboardName={formData.selectedDashboard.dashboardName}
+                matchByTitle={isSplunkProfileDashboard(formData.selectedDashboard)}
               />
             )}
 

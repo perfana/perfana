@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Grid,
   TextField,
@@ -11,14 +11,22 @@ import {
 } from '@mui/material';
 import { ProfileDashboard } from '@/lib/profiles';
 import {
-  PERF_TEST_PROFILE_DASHBOARD,
-  DYNATRACE_HOSTS_PROFILE_DASHBOARD,
   isPerfTestProfileDashboard,
   isDynatraceHostsProfileDashboard,
+  isSplunkProfileDashboard,
   isPatternProfileDashboard,
+  availablePseudoDashboards,
+  ConfiguredIntegrations,
 } from '@/lib/profile-benchmarks';
 
-const PSEUDO_DASHBOARDS = [PERF_TEST_PROFILE_DASHBOARD, DYNATRACE_HOSTS_PROFILE_DASHBOARD];
+const pseudoDashboardDescription = (option: ProfileDashboard): string | null =>
+  isPerfTestProfileDashboard(option)
+    ? 'Applies to every performance-test scenario dashboard, including scenarios added in later runs'
+    : isDynatraceHostsProfileDashboard(option)
+      ? 'Applies to every mapped Dynatrace host, including hosts mapped later'
+      : isSplunkProfileDashboard(option)
+        ? "Applies to the panel with this title on every workload's Splunk dashboards, including panels added later"
+        : null;
 
 interface DashboardSelectFieldProps {
   profileDashboards: ProfileDashboard[];
@@ -26,6 +34,8 @@ interface DashboardSelectFieldProps {
   onSelect: (dashboard: ProfileDashboard | null) => void;
   loading: boolean;
   error?: string;
+  /** Gates the Dynatrace hosts and Splunk pseudo-dashboards. */
+  configuredIntegrations: ConfiguredIntegrations;
 }
 
 export function DashboardSelectField({
@@ -34,11 +44,16 @@ export function DashboardSelectField({
   onSelect,
   loading,
   error,
+  configuredIntegrations,
 }: DashboardSelectFieldProps) {
+  const pseudoDashboards = useMemo(
+    () => availablePseudoDashboards(configuredIntegrations, selectedDashboard),
+    [configuredIntegrations, selectedDashboard],
+  );
   return (
     <Grid size={{ xs: 12 }}>
       <Autocomplete
-        options={[...profileDashboards, ...PSEUDO_DASHBOARDS]}
+        options={[...profileDashboards, ...pseudoDashboards]}
         getOptionLabel={(option) =>
           isPatternProfileDashboard(option) ? option.dashboardName : `${option.dashboardName} (${option.grafanaLabel})`
         }
@@ -54,7 +69,7 @@ export function DashboardSelectField({
             fullWidth
             required
             error={!!error}
-            helperText={error || `Select dashboard from profile (${profileDashboards.length + PSEUDO_DASHBOARDS.length} available)`}
+            helperText={error || `Select dashboard from profile (${profileDashboards.length + pseudoDashboards.length} available)`}
             InputProps={{
               ...params.InputProps,
               endAdornment: (
@@ -73,11 +88,7 @@ export function DashboardSelectField({
               <Box>
                 <Typography variant="body1">{option.dashboardName}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {isPerfTestProfileDashboard(option)
-                    ? 'Applies to every performance-test scenario dashboard, including scenarios added in later runs'
-                    : isDynatraceHostsProfileDashboard(option)
-                      ? 'Applies to every mapped Dynatrace host, including hosts mapped later'
-                      : `${option.grafanaLabel} • UID: ${option.dashboardUid}`}
+                  {pseudoDashboardDescription(option) ?? `${option.grafanaLabel} • UID: ${option.dashboardUid}`}
                 </Typography>
               </Box>
             </Box>

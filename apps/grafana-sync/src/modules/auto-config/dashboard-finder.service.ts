@@ -299,20 +299,66 @@ export class DashboardFinderService {
     workload: string,
     organizationId: string | undefined,
   ): Promise<Array<{ applicationDashboard: ApplicationDashboard; panelId: number }>> {
+    return this.findQueryPanelsByUidPattern(
+      { table: 'dynatrace_queries', uidLike: 'dynatrace-%' },
+      uidPattern,
+      panelTitle,
+      application,
+      testEnvironment,
+      workload,
+      organizationId,
+    );
+  }
+
+  /**
+   * The artificial Splunk dashboards of a system whose uid matches `uidPattern`, each paired with
+   * the id of its panel titled `panelTitle` in the run's workload. Same shape and rules as
+   * findDynatraceHostPanelsByUidPattern: a Splunk panel's id is assigned per workload
+   * (`nextPanelId`), so it is read from that workload's `splunk_queries` row.
+   */
+  async findSplunkPanelsByUidPattern(
+    uidPattern: string,
+    panelTitle: string,
+    application: string,
+    testEnvironment: string,
+    workload: string,
+    organizationId: string | undefined,
+  ): Promise<Array<{ applicationDashboard: ApplicationDashboard; panelId: number }>> {
+    return this.findQueryPanelsByUidPattern(
+      { table: 'splunk_queries', uidLike: 'splunk-%' },
+      uidPattern,
+      panelTitle,
+      application,
+      testEnvironment,
+      workload,
+      organizationId,
+    );
+  }
+
+  /** `source` is one of the two constants above; it is interpolated, never caller input. */
+  private async findQueryPanelsByUidPattern(
+    source: { table: 'dynatrace_queries' | 'splunk_queries'; uidLike: 'dynatrace-%' | 'splunk-%' },
+    uidPattern: string,
+    panelTitle: string,
+    application: string,
+    testEnvironment: string,
+    workload: string,
+    organizationId: string | undefined,
+  ): Promise<Array<{ applicationDashboard: ApplicationDashboard; panelId: number }>> {
     // Same fail-closed rule as findApplicationDashboardsByUidPattern.
     if (!organizationId) return [];
     const { entities, raw } = await this.applicationDashboardRepo
       .createQueryBuilder('ad')
       .innerJoin('ad.systemUnderTest', 'sut')
       .innerJoin(
-        'dynatrace_queries',
+        source.table,
         'dq',
         'dq.application_dashboard_id = ad.id AND dq.system_under_test_id = sut.id',
       )
       .addSelect('dq.panel_id', 'dq_panel_id')
-      // The regex can only narrow the Dynatrace set: a stray `.` must not fan an SLO out
-      // over the SUT's Grafana and perf-test dashboards.
-      .where("ad.dashboardUid LIKE 'dynatrace-%'")
+      // The regex can only narrow this source's set: a stray `.` must not fan an SLO out
+      // over the SUT's Grafana and other generated dashboards.
+      .where(`ad.dashboardUid LIKE '${source.uidLike}'`)
       .andWhere('ad.dashboardUid ~ :uidPattern', { uidPattern })
       .andWhere('sut.name = :application', { application })
       .andWhere('ad.testEnvironment = :testEnvironment', { testEnvironment })
@@ -322,9 +368,11 @@ export class DashboardFinderService {
       .andWhere('dq.panel_title = :panelTitle', { panelTitle })
       .andWhere('dq.enabled = true')
       .orderBy('ad.id')
+      .addOrderBy('dq.panel_id')
       .getRawAndEntities();
 
-    // One SLO per dashboard: a host added twice can carry the same query twice.
+    // One SLO per dashboard: a host added twice can carry the same query twice, and two Splunk
+    // panels of one workload may share a title (the lowest panel id wins, ordered below).
     const byDashboard = new Map<
       string,
       { applicationDashboard: ApplicationDashboard; panelId: number }

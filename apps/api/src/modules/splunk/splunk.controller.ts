@@ -133,6 +133,13 @@ export class SplunkController {
 
   // --- queries ---------------------------------------------------------------
 
+  // Declared before any `queries/:id` route so the literal segment wins.
+  @Get('queries/panel-titles')
+  @ApiOperation({ summary: 'Distinct Splunk panel titles in your organizations, plus the starter panels — what a profile SLO on every Splunk dashboard can target' })
+  listPanelTitles(@UserCtx() ctx: UserContext) {
+    return this.splunk.listPanelTitles(ctx.userId, ctx.roles);
+  }
+
   @Get('queries')
   listQueries(
     @Query('systemId', ParseUUIDPipe) systemUnderTestId: string,

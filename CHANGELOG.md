@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.82] - 2026-11-19
+
+### Added
+- **"Splunk — all panels" profile SLO.** The profile's Service Level Objectives tab can now add a check to a Splunk panel on every workload, the way "Performance test metrics — every scenario" and "Dynatrace — all hosts" do for scenarios and hosts. Pick the entry, pick a panel title from the Splunk panels already in use in your organization (or a starter panel), and set the threshold. Each matching test run adds the check to that workload's Splunk panel with that title, including panels added later. A workload with no panel of that title gets no check. Provisioning accepts it as `source: splunk-panels`, keyed on `panel.title`.
+
+### Changed
+- **The profile SLO dialog offers "Dynatrace — all hosts" only when a Dynatrace connection exists, and "Splunk — all panels" only when a Splunk connection exists.** An SLO that already targets one of them stays editable after its connection is removed.
+
 ## [0.2.97.81] - 2026-11-18
 
 ### Fixed

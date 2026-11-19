@@ -15,6 +15,8 @@ import {
   DYNATRACE_HOSTS_PROFILE_SOURCE,
   DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
   dynatraceHostPanelTitle,
+  SPLUNK_PROFILE_SOURCE,
+  SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT,
   PROVISIONED_SLO_AUTO_DISABLED_KEY,
 } from '@perfana/shared/constants';
 
@@ -75,8 +77,11 @@ export class BenchmarkProcessorService {
       // RBAC: Pass organizationId to filter dashboards by organization
       const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
 
-      if (profileBenchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE) {
-        await this.processDynatraceHostsBenchmark(testRun, profileBenchmark, systemUnderTestName);
+      if (
+        profileBenchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE ||
+        profileBenchmark.source === SPLUNK_PROFILE_SOURCE
+      ) {
+        await this.processQueryPanelBenchmark(testRun, profileBenchmark, systemUnderTestName);
         return;
       }
 
@@ -134,18 +139,25 @@ export class BenchmarkProcessorService {
   }
 
   /**
-   * A `dynatrace-hosts` benchmark: like a perf-test one, `dashboard_uid` is a regex, here over
-   * the `dynatrace-dynatrace-host-metrics-<host>` uids, so one profile row fans out to every
-   * mapped host, including hosts mapped later. Unlike perf-test the panel id differs per host,
-   * so the synthetic profile panel id is mapped to its title and each host's real id is read
-   * from its `dynatrace_queries` row.
+   * A `dynatrace-hosts` or `splunk-panels` benchmark: like a perf-test one, `dashboard_uid` is a
+   * regex, over the `dynatrace-dynatrace-host-metrics-<host>` / `splunk-<label>` uids, so one
+   * profile row fans out to every mapped host / every Splunk dashboard, including ones added
+   * later. Unlike perf-test the panel id differs per dashboard, so the benchmark names its panel
+   * by title (for a host via the synthetic profile panel id) and each dashboard's real id is read
+   * from its `dynatrace_queries` / `splunk_queries` row in the run's workload.
    */
-  private async processDynatraceHostsBenchmark(
+  private async processQueryPanelBenchmark(
     testRun: TestRun,
     profileBenchmark: ProfileBenchmark,
     systemUnderTestName: string,
   ): Promise<void> {
-    const lookup = profileBenchmark.dashboard_uid || DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT;
+    const isSplunk = profileBenchmark.source === SPLUNK_PROFILE_SOURCE;
+    const kind = isSplunk ? 'Splunk' : 'Dynatrace host';
+    const lookup =
+      profileBenchmark.dashboard_uid ||
+      (isSplunk
+        ? SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT
+        : DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT);
     // The API validates on write; rows written before it did (or by SQL) reach Postgres `~` here.
     const check = validateRegexPattern(lookup, { maxLength: 255 });
     if (!check.safe) {
@@ -154,29 +166,34 @@ export class BenchmarkProcessorService {
       );
       return;
     }
-    const panelTitle =
-      dynatraceHostPanelTitle(profileBenchmark.panel_id) ?? profileBenchmark.panel_title;
+    // A Splunk panel SLO is keyed on its title alone: Splunk panel ids are assigned per workload.
+    const panelTitle = isSplunk
+      ? profileBenchmark.panel_title
+      : (dynatraceHostPanelTitle(profileBenchmark.panel_id) ?? profileBenchmark.panel_title);
     if (!panelTitle) {
       this.logger.warn(
-        `Profile benchmark ${profileBenchmark.id} names no Dynatrace host panel (panel_id ${profileBenchmark.panel_id}) - skipping`,
+        `Profile benchmark ${profileBenchmark.id} names no ${kind} panel (panel_id ${profileBenchmark.panel_id}) - skipping`,
       );
       return;
     }
 
-    const hostPanels = await this.dashboardFinderService.findDynatraceHostPanelsByUidPattern(
+    const finderArgs = [
       lookup,
       panelTitle,
       systemUnderTestName,
       testRun.testEnvironment,
       testRun.workload,
       testRun.organizationId,
-    );
+    ] as const;
+    const panels = isSplunk
+      ? await this.dashboardFinderService.findSplunkPanelsByUidPattern(...finderArgs)
+      : await this.dashboardFinderService.findDynatraceHostPanelsByUidPattern(...finderArgs);
     this.logger.log(
-      `Found ${hostPanels.length} Dynatrace host dashboards with panel '${panelTitle}' for uid pattern ${lookup}`,
+      `Found ${panels.length} ${kind} dashboards with panel '${panelTitle}' for uid pattern ${lookup}`,
     );
 
-    // One failing host must not skip the rest.
-    for (const { applicationDashboard, panelId } of hostPanels) {
+    // One failing dashboard must not skip the rest.
+    for (const { applicationDashboard, panelId } of panels) {
       try {
         await this.createBenchmarkIfNotExists(testRun, profileBenchmark, applicationDashboard, {
           panelId,

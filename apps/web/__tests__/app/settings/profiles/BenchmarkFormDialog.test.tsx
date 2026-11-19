@@ -32,6 +32,13 @@ jest.mock('@/lib/api', () => ({
 
 const mockAuthenticatedFetch = authenticatedFetch as jest.MockedFunction<typeof authenticatedFetch>;
 
+// Which integrations exist gates the Dynatrace / Splunk pseudo-dashboards. Dynatrace on and
+// Splunk off by default, so the counts below are 2 profile dashboards + 2 synthetic entries.
+const mockIntegrations = { dynatrace: true, splunk: false };
+jest.mock('@/app/settings/profiles/[id]/components/benchmark-form/hooks/useConfiguredIntegrations', () => ({
+  useConfiguredIntegrations: () => mockIntegrations,
+}));
+
 /**
  * Helper to select a dashboard from the Profile Dashboard autocomplete.
  * Properly waits for the dropdown option to appear before clicking.
@@ -439,6 +446,75 @@ describe('BenchmarkFormDialog', () => {
       });
       expect(screen.getByRole('combobox', { name: /metric/i })).toHaveValue('Transaction Error Rate');
       expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Integration-gated entries', () => {
+    afterEach(() => {
+      mockIntegrations.dynatrace = true;
+      mockIntegrations.splunk = false;
+    });
+
+    const openDashboardOptions = async () => {
+      const user = userEvent.setup();
+      render(
+        <BenchmarkFormDialog
+          open={true}
+          mode="create"
+          profileDashboards={mockProfileDashboards}
+          loading={false}
+          onClose={mockOnClose}
+          onSubmit={mockOnSubmit}
+        />
+      );
+      await user.click(screen.getByRole('combobox', { name: /profile dashboard/i }));
+      const listbox = await screen.findByRole('listbox');
+      return within(listbox).getAllByRole('option');
+    };
+
+    it('hides "Dynatrace — all hosts" when no Dynatrace connection is configured', async () => {
+      mockIntegrations.dynatrace = false;
+      const options = await openDashboardOptions();
+      expect(options).toHaveLength(3);
+      expect(options.map((o) => o.textContent).join('|')).not.toMatch(/dynatrace — all hosts/i);
+      expect(screen.getByText(/3 available/i)).toBeInTheDocument();
+    });
+
+    it('offers "Splunk — all panels" only when a Splunk connection is configured', async () => {
+      mockIntegrations.splunk = true;
+      const options = await openDashboardOptions();
+      expect(options).toHaveLength(5);
+      expect(options[4]).toHaveTextContent(/splunk — all panels/i);
+      expect(options[4]).toHaveTextContent(/every workload's splunk dashboards/i);
+    });
+
+    it('keeps showing a Splunk SLO being edited after the Splunk connection is gone', async () => {
+      render(
+        <BenchmarkFormDialog
+          open={true}
+          mode="edit"
+          benchmark={{
+            ...mockExistingBenchmark,
+            profileDashboardId: null,
+            source: 'splunk-panels',
+            grafanaInstance: undefined,
+            dashboardUid: '^splunk-',
+            panelId: undefined,
+            panelTitle: 'Errors by host',
+            panelType: 'splunk',
+            metricUnit: 'short',
+          }}
+          profileDashboards={mockProfileDashboards}
+          loading={false}
+          onClose={mockOnClose}
+          onSubmit={mockOnSubmit}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('combobox', { name: /profile dashboard/i })).toHaveValue('Splunk — all panels');
+      });
+      expect(screen.getByRole('combobox', { name: /metric/i })).toHaveValue('Errors by host');
     });
   });
 

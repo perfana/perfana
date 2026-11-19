@@ -1,8 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsOptional, IsBoolean, IsNumber, IsArray, IsUUID, IsIn } from 'class-validator';
-import { PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE } from '@perfana/shared/constants';
+import { PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE, SPLUNK_PROFILE_SOURCE } from '@perfana/shared/constants';
 
-export const PROFILE_BENCHMARK_SOURCES = ['grafana', 'dynatrace', PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE] as const;
+export const PROFILE_BENCHMARK_SOURCES = ['grafana', 'dynatrace', PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE, SPLUNK_PROFILE_SOURCE] as const;
+
+/** Sources whose `dashboardUid` is a regex over generated dashboards, with no profile dashboard. */
+export const PATTERN_PROFILE_BENCHMARK_SOURCES: readonly string[] = [PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE, SPLUNK_PROFILE_SOURCE];
 
 /**
  * DTO for creating a new profile benchmark
@@ -10,9 +13,10 @@ export const PROFILE_BENCHMARK_SOURCES = ['grafana', 'dynatrace', PERF_TEST_PROF
 export class CreateProfileBenchmarkDto {
   @ApiProperty({
     description:
-      'Profile dashboard ID to attach benchmark to. Omit for source `performance-metrics` and ' +
-      '`dynatrace-hosts`, which target the perf-test scenario dashboards / the Dynatrace host ' +
-      'dashboards via a `dashboardUid` regex instead',
+      'Profile dashboard ID to attach benchmark to. Omit for source `performance-metrics`, ' +
+      '`dynatrace-hosts` and `splunk-panels`, which target the perf-test scenario dashboards / the ' +
+      'Dynatrace host dashboards / the Splunk dashboards via a `dashboardUid` regex instead. A ' +
+      '`splunk-panels` benchmark is matched by `panelTitle` (required), not `panelId`',
     example: '550e8400-e29b-41d4-a716-446655440000',
     required: false
   })
