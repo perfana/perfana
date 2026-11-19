@@ -18,6 +18,7 @@ import {
   fetchSplunkQueries, previewSplunkQuery, updateSplunkQuery,
 } from '@/lib/splunk';
 import { getErrorMessage } from '@/lib/errors';
+import ImportSplunkDashboardDialog from './ImportSplunkDashboardDialog';
 
 const MONO = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 };
 
@@ -46,6 +47,7 @@ export default function SplunkSection({ systemId, systemName, organizationId, se
   const [sourceDialog, setSourceDialog] = useState(false);
   const [panelDialog, setPanelDialog] = useState<SplunkQuery | 'new' | null>(null);
   const [starterOpen, setStarterOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const env = selectedEnvironment ?? '';
   const workload = selectedWorkload ?? '';
@@ -198,6 +200,7 @@ export default function SplunkSection({ systemId, systemName, organizationId, se
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button size="small" variant="outlined" onClick={() => setImportOpen(true)}>Import dashboard JSON</Button>
               <Button size="small" variant="outlined" onClick={() => setStarterOpen(true)}>Add starter panels</Button>
               <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setPanelDialog('new')}>Add panel</Button>
             </Box>
@@ -269,6 +272,15 @@ export default function SplunkSection({ systemId, systemName, organizationId, se
               setStarterOpen(false);
               setNotice(created.length ? `Added ${created.length} starter panel(s)` : 'The starter panels already exist');
             })}
+          />
+          <ImportSplunkDashboardDialog
+            open={importOpen}
+            configId={configId}
+            scope={scope}
+            existing={scopedQueries}
+            mappings={scopedMappings}
+            onClose={() => setImportOpen(false)}
+            onImported={(created) => void run(async () => undefined, `Imported ${created} panel(s) from the Splunk dashboard`)}
           />
           <PanelDialog
             target={panelDialog}

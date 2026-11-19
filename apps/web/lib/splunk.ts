@@ -156,6 +156,8 @@ export const fetchSplunkPanelTitles = () =>
 
 export type SplunkQueryInput = SplunkScope & {
   splunkConfigId: string;
+  /** Create only; defaults to "Splunk logs" on the API. */
+  dashboardLabel?: string;
   panelTitle: string;
   spl: string;
   splitBy?: string | null;
@@ -171,7 +173,7 @@ export const createSplunkQuery = (input: SplunkQueryInput) =>
 export const createSplunkStarterQueries = (input: SplunkScope & { splunkConfigId: string; levelField?: string }) =>
   call<SplunkQuery[]>('/splunk/queries/starter', 'Failed to create the starter panels', { method: 'POST', ...json(input) });
 
-export const updateSplunkQuery = (id: string, input: Partial<Omit<SplunkQueryInput, keyof SplunkScope | 'splunkConfigId'>>) =>
+export const updateSplunkQuery = (id: string, input: Partial<Omit<SplunkQueryInput, keyof SplunkScope | 'splunkConfigId' | 'dashboardLabel'>>) =>
   call<SplunkQuery>(`/splunk/queries/${id}`, 'Failed to update the Splunk panel', { method: 'PATCH', ...json(input) });
 
 export const deleteSplunkQuery = (id: string) =>
