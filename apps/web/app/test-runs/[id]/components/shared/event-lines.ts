@@ -231,3 +231,18 @@ export function mergeEventShapesIntoIndexedLayout(
     annotations: [...(layout.annotations || []), ...annotations],
   };
 }
+
+/**
+ * The bucket a graph marker is drawn on (design R14): the index whose timestamp is nearest
+ * `iso`, or null when `iso` lies outside the plotted buckets, so a pin is hidden rather than
+ * pinned to the edge of a chart that does not reach its moment. Same binary search as events,
+ * rounded, because a marker snaps to a bucket where an event line may sit between two.
+ */
+export function nearestBucketIndex(iso: string, sortedTimestamps: string[]): number | null {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms) || sortedTimestamps.length === 0) return null;
+  const sortedMs = sortedTimestamps.map((ts) => Date.parse(ts));
+  if (ms < sortedMs[0]! || ms > sortedMs[sortedMs.length - 1]!) return null;
+  const idx = findClosestIndex(ms, sortedMs);
+  return idx === null ? null : Math.round(idx);
+}

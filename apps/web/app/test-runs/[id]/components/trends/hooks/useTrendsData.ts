@@ -22,7 +22,7 @@ import {
   buildAggregatedMetricName,
   fetchAggregatedStatistics,
 } from '@/lib/aggregated-perf-series';
-import { buildAggregatedTrendsStatistics } from '../utils/trends-utils';
+import { buildAggregatedTrendsStatistics, resolveTimeRange } from '../utils/trends-utils';
 import { mapLimit, OPTION_FETCH_CONCURRENCY, type SeriesPick } from '../../shared/metric-options';
 
 interface UseTrendsDataProps {
@@ -131,23 +131,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       setMetricsLoading(true);
 
       // Calculate time range
-      let fromDate: Date;
-      let toDate: Date;
-
-      if (timeRange.value === 'custom') {
-        fromDate = customTimeRange.from;
-        toDate = customTimeRange.to;
-      } else {
-        toDate = new Date();
-
-        if (timeRange.type === 'months') {
-          fromDate = new Date(toDate);
-          fromDate.setMonth(fromDate.getMonth() - (timeRange.value as number));
-        } else {
-          const days = timeRange.value as number;
-          fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-        }
-      }
+      const { from: fromDate, to: toDate } = resolveTimeRange(timeRange, customTimeRange);
 
       const aggregatedSeries = addedSeries.filter(s => s.isAggregated);
       const normalSeries = addedSeries.filter(s => !s.isAggregated);

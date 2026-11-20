@@ -1,4 +1,5 @@
 import { TestRun } from '@/types/test-runs';
+import type { ToastAction } from '../../../types';
 
 /**
  * Time range options for trends chart
@@ -39,7 +40,7 @@ export interface TrendsCardProps {
   testRunId: string;
   trendsExpanded: boolean;
   onTrendsExpand: () => void;
-  showToast: (message: string) => void;
+  showToast: (message: string, action?: ToastAction) => void;
 }
 
 export interface ApplicationDashboard {

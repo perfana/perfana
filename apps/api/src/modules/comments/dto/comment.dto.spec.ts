@@ -1,0 +1,72 @@
+// Value: protects=each card's recorded view is checked against that card's shape: a Graphs view
+// holds the series a Graphs chart can actually hold (Splunk included), a Trends view carries its
+// time range and aggregation, a Compare view its baseline; anything malformed or on the wrong card
+// is a 400, and `kind` is stamped from the card; fails_when=SPLUNK leaves DataSource, the series cap
+// drifts, a range stops requiring a readable forwards pair, the whitelist stops stripping unknown
+// keys, or a card without a view shape starts accepting one; why_new=the request DTO types
+// chartContext loosely, so validateChartContext is the only check; seam=none; no_claim=the
+// request-level rules (marker/reply/anchor: comments.service.spec.ts, RLS spec).
+import 'reflect-metadata';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CreateCommentDto, MARKER_MAX_SERIES } from './comment.dto';
+import { validateChartContext } from '../comments.service';
+
+const s = (source = 'grafana') => ({ dashboardId: 'd1', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: 'used', source });
+const graphs = (over: Record<string, unknown> = {}) => ({ series: [s()], xRange: ['2026-11-20T10:00:00Z', '2026-11-20T11:00:00Z'], axisMode: 'split', ...over });
+const trends = (over: Record<string, unknown> = {}) => ({ series: [{ ...s(), metricsSourceId: 'm1', isAggregated: false }], timeRange: 'Last week', evaluateType: 'p95', ...over });
+const compare = (over: Record<string, unknown> = {}) => ({ series: [s()], baselineTestRunId: 'App-acc-loadTest-00007', ...over });
+
+describe('validateChartContext', () => {
+  it('accepts a Graphs view with grafana, dynatrace, perf-test and splunk series at the cap, stamped with its kind', () => {
+    const series = Array.from({ length: MARKER_MAX_SERIES }, (_, i) => s(['grafana', 'dynatrace', 'performance-metrics', 'splunk'][i % 4]));
+    expect(validateChartContext('graphs', undefined, graphs({ series }))).toMatchObject({ kind: 'graphs', axisMode: 'split' });
+  });
+
+  it('keeps a Trends view’s range and aggregation, and a Compare view’s baseline', () => {
+    expect(validateChartContext('trends', undefined, trends({ timeRange: 'Custom', customRange: ['2026-11-01T00:00:00Z', '2026-11-20T00:00:00Z'] })))
+      .toMatchObject({ kind: 'trends', timeRange: 'Custom', evaluateType: 'p95', series: [{ metricsSourceId: 'm1' }] });
+    expect(validateChartContext('compare', undefined, compare({ baselineTestRunId: 'control-group' })))
+      .toMatchObject({ kind: 'compare', baselineTestRunId: 'control-group' });
+  });
+
+  it('strips keys outside the shape and ignores a kind the body claims', () => {
+    const out = validateChartContext('trends', undefined, trends({ kind: 'graphs', extra: 'x' }));
+    expect(out.kind).toBe('trends');
+    expect(out).not.toHaveProperty('extra');
+  });
+
+  it.each([
+    ['one series over the cap', 'graphs', graphs({ series: Array.from({ length: MARKER_MAX_SERIES + 1 }, () => s()) })],
+    ['no series', 'graphs', graphs({ series: [] })],
+    ['an unknown source', 'graphs', graphs({ series: [s('influx')] })],
+    ['a one-sided zoom window', 'graphs', graphs({ xRange: ['2026-11-20T10:00:00Z'] })],
+    ['a non-ISO zoom bound', 'graphs', graphs({ xRange: ['2026-11-20T10:00:00Z', 'later'] })],
+    ['a week-date zoom bound', 'graphs', graphs({ xRange: ['2026-W01', '2026-W02'] })],
+    ['a backwards zoom window', 'graphs', graphs({ xRange: ['2026-11-20T11:00:00Z', '2026-11-20T10:00:00Z'] })],
+    ['an unknown axis mode', 'graphs', graphs({ axisMode: 'stacked' })],
+    ['a Trends view with no aggregation', 'trends', trends({ evaluateType: undefined })],
+    ['a backwards custom Trends window', 'trends', trends({ customRange: ['2026-11-20T00:00:00Z', '2026-11-01T00:00:00Z'] })],
+    ['a Compare view with no series', 'compare', compare({ series: [] })],
+    ['a view on a card that records none', 'slo', graphs()],
+  ])('refuses %s', (_label, card, raw) => {
+    expect(() => validateChartContext(card, undefined, raw)).toThrow();
+  });
+
+  it('refuses a view on a reply', () => {
+    expect(() => validateChartContext('graphs', 'parent-id', graphs())).toThrow(/root comment/);
+  });
+});
+
+describe('CreateCommentDto', () => {
+  it('passes a view through the global pipe untouched, for the service to check per card', async () => {
+    const dto = plainToInstance(CreateCommentDto, { card: 'trends', body: 'b', chartContext: trends() });
+    expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+    expect(dto.chartContext).toMatchObject({ timeRange: 'Last week', evaluateType: 'p95' });
+  });
+
+  it('refuses a non-ISO marker time', async () => {
+    const dto = plainToInstance(CreateCommentDto, { card: 'graphs', body: 'b', markerTime: '10:37', chartContext: graphs() });
+    expect((await validate(dto, { whitelist: true })).length).toBeGreaterThan(0);
+  });
+});

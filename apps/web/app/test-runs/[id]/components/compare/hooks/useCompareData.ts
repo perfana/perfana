@@ -49,6 +49,8 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   // Related test runs state
   const [relatedTestRuns, setRelatedTestRuns] = useState<RelatedTestRun[]>([]);
   const [loading, setLoading] = useState(false);
+  /** True once the related runs have answered (or failed); a replayed baseline waits for it. */
+  const [relatedTestRunsLoaded, setRelatedTestRunsLoaded] = useState(false);
   const [comparisonStatus, setComparisonStatus] = useState<ComparisonStatus | null>(null);
   const [selectedTestRun, setSelectedTestRun] = useState<RelatedTestRun | null>(null);
   // The run's control group, offered as a baseline. `undefined` until asked for, `null` when
@@ -127,6 +129,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       setComparisonStatus({ hasBaseline: false, totalComparisons: 0, differences: 0, status: 'info' });
     } finally {
       setLoading(false);
+      setRelatedTestRunsLoaded(true);
     }
   }, [testRun, testRunId]);
 
@@ -514,6 +517,8 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     relatedTestRuns,
     controlGroup: controlGroup ?? null,
     baselineOptions,
+    /** Both halves of baselineOptions have answered, so a missing baseline really is missing. */
+    baselineOptionsLoaded: relatedTestRunsLoaded && controlGroup !== undefined,
     loading,
     comparisonStatus,
     selectedTestRun,

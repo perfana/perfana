@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.88] - 2026-11-20
+
+### Added
+- **Pin a numbered marker to a moment on a Graphs chart.** "+ add marker" on the Graphs card drops a pending pin you move by clicking the chart, or one bucket at a time with the arrow buttons, and posts it with a comment. Each marker gets the next number for its run, is drawn as a dashed line with a numbered pin above the chart, and stacks with others on the same moment. Clicking a pin opens its thread; a deleted marker stays greyed with its number.
+- **Comments on Graphs, Trends and Compare remember the view they were written on.** A new comment records the card's series, plus the zoom and axis mode on Graphs, the time range and aggregation on Trends, and the baseline on Compare. "Restore view" in the thread, or a link to the comment, puts that view back, with Undo. A Trends comment written on "Last week" restores the week its author saw, not the week before today.
+
+### Changed
+- **A collapsed comment shows its text on up to three lines.** The author, time, marker time or row, the text and the reply count each get their own line, instead of one line cut off after a few words.
+
+### Fixed
+- **Opening a card's comments no longer resets the card.** The card lost its own state as the panel opened: the Graphs chart emptied, and any card dropped expanded rows or picker choices.
+- **Graph presets with Splunk series can be saved.** A preset that included a series from a Splunk panel was refused.
+
 ## [0.2.97.87] - 2026-11-20
 
 ### Added

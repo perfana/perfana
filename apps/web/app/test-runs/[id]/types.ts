@@ -78,3 +78,9 @@ export interface ConfigurationStatus {
   hasDistributedTracing: boolean;
   hasDynatrace: boolean;
 }
+
+/** An action button on the page's toast, e.g. "Undo" after a marker view replaced the chart. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}

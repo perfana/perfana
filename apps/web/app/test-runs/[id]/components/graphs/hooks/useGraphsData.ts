@@ -311,6 +311,35 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, [addedSeries, fetchSeriesBatch]);
 
   /**
+   * Replace the whole view: series, zoom window, axis mode and title, then fetch every series
+   * for that window. Used by a marker's "Restore view" and by its Undo. Answers how many series
+   * came back with no points (a series that no longer resolves, design Open Question 6).
+   */
+  const loadView = useCallback(async (view: {
+    series: SeriesConfig[];
+    range: ChartTimeRange | null;
+    axisMode: AxisDisplayMode;
+    title: string | null;
+  }): Promise<number> => {
+    const request = ++zoomRequestRef.current;
+    setAddedSeries(view.series);
+    setZoomRange(view.range);
+    setAxisMode(view.axisMode);
+    setChartName(view.title);
+    setSeriesData(new Map());
+    if (view.series.length === 0) return 0;
+    setChartDataLoading(true);
+    try {
+      const fetched = await fetchSeriesBatch(view.series, view.range);
+      if (request === zoomRequestRef.current) setSeriesData(new Map(fetched));
+      const withData = new Set(fetched.filter(([, points]) => points.length > 0).map(([id]) => id));
+      return view.series.filter((s) => !withData.has(s.id)).length;
+    } finally {
+      if (request === zoomRequestRef.current) setChartDataLoading(false);
+    }
+  }, [fetchSeriesBatch]);
+
+  /**
    * Add the picked series and fetch their data. Each pick carries its own dashboard and
    * panel, so one click can add series from several panels across several dashboards.
    */
@@ -478,6 +507,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     dynatraceDashboardsLoading,
     addedSeries,
     chartName,
+    customChartName,
     seriesData,
     chartDataLoading,
     axisMode,
@@ -502,5 +532,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     handleUpdateSeriesUnit,
     handleToggleSeriesVisibility,
     applyZoomRange,
+    loadView,
   };
 }

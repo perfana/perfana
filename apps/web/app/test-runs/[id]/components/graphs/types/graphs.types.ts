@@ -1,5 +1,6 @@
 import { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
+import type { ToastAction } from '../../../types';
 
 export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
 
@@ -8,7 +9,7 @@ export interface GraphsCardProps {
   testRunId: string;
   graphsExpanded: boolean;
   onGraphsExpand: () => void;
-  showToast: (message: string) => void;
+  showToast: (message: string, action?: ToastAction) => void;
   events?: PerfanaEvent[];
 }
 

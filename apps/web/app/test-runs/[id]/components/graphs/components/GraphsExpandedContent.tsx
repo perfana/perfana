@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, InputBase, Button, useTheme } from '@mui/material';
 import { BookmarkBorder, DeleteSweepOutlined } from '@mui/icons-material';
 
-import { SeriesConfig, ApplicationDashboard, MetricDataPoint, ChartTimeRange } from '../types';
+import { SeriesConfig, ApplicationDashboard, MetricDataPoint, ChartTimeRange, GraphsChartProps } from '../types';
 import type { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
 import type { GraphPreset } from '@/lib/graph-presets';
@@ -46,6 +46,13 @@ interface GraphsExpandedContentProps {
   /** A drag-zoom on the chart; `null` on reset. Refetches every series for that window. */
   onZoomRange?: (range: ChartTimeRange | null) => void;
   zoomed?: boolean;
+  /** Comment markers; passed straight to the chart. */
+  markers?: GraphsChartProps['markers'];
+  selectedMarkerId?: GraphsChartProps['selectedMarkerId'];
+  markerDraftTime?: GraphsChartProps['markerDraftTime'];
+  onStartMarker?: GraphsChartProps['onStartMarker'];
+  onPlaceMarker?: GraphsChartProps['onPlaceMarker'];
+  onMarkerClick?: GraphsChartProps['onMarkerClick'];
 }
 
 /**
@@ -80,6 +87,7 @@ export function GraphsExpandedContent({
   showToast,
   onZoomRange,
   zoomed,
+  ...markerProps
 }: GraphsExpandedContentProps) {
   const mode = useTheme().palette.mode === 'dark' ? 'dark' : 'light';
   const [confirmClear, setConfirmClear] = useState(false);
@@ -111,6 +119,7 @@ export function GraphsExpandedContent({
         onToggleSeriesVisibility={onToggleSeriesVisibility}
         onZoomRange={onZoomRange}
         zoomed={zoomed}
+        {...markerProps}
         titleNode={
           <InputBase
             value={chartName}

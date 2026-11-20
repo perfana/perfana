@@ -7,7 +7,7 @@ import { Box, Typography, Card, CardContent, Collapse, CircularProgress } from '
 import { TrendsCardProps } from './types';
 
 // Hooks
-import { useTrendsData, useTrendsPresets, useTrendsPlot } from './hooks';
+import { useTrendsData, useTrendsPresets, useTrendsPlot, useTrendsCommentView } from './hooks';
 
 // Components
 import { TrendsCollapsedView, TrendsSelectionControls, TrendsChart } from './components';
@@ -36,6 +36,8 @@ export default function TrendsCard({
     testRunId,
     trendsExpanded,
   });
+
+  useTrendsCommentView(trendsData, showToast);
 
   // Presets hook
   const trendsPresets = useTrendsPresets({

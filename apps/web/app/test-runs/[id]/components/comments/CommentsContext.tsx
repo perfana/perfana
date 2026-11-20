@@ -6,7 +6,7 @@ import {
   type CommentCardKey,
 } from '@perfana/shared/constants/comment-cards';
 import { socketManager } from '@/lib/socket';
-import { fetchCommentCounts, fetchCommentItemCounts, markCommentsSeen, type CardCommentCounts, type CommentItemCounts, type RunComment } from '@/lib/test-run-comments';
+import { fetchCommentCounts, fetchCommentItemCounts, fetchCommentThreads, markCommentsSeen, type CardCommentCounts, type CommentItemCounts, type CommentView, type MarkerChartContext, type RunComment, type RunCommentThread } from '@/lib/test-run-comments';
 import { TAB_CARDS } from '../../hooks/useExpansionState';
 import type { ExpansionState } from '../../types';
 
@@ -47,8 +47,23 @@ export function expansionKeyOf(card: string): keyof ExpansionState | undefined {
   );
 }
 
+/**
+ * A marker being placed on the Graphs card (design DR5/DR12). The Graphs card owns the chart,
+ * so it hands over the buckets the draft may snap to and how to read the chart's view at
+ * post time; the drawer owns the text.
+ */
+export interface MarkerDraft {
+  /** The bucket the pending pin sits on. */
+  time: string;
+  /** Every bucket on the chart, in time order, for the drawer's step buttons. */
+  steps: string[];
+  capture: () => MarkerChartContext;
+}
+
 interface CommentsContextValue {
   runId: string;
+  /** The run's start, for "+mm:ss" marker times. */
+  runStart?: string | null;
   /** Per card: total comments and unread ones. */
   counts: CardCommentCounts;
   unread: Partial<Record<CommentCardKey, number>>;
@@ -59,7 +74,7 @@ interface CommentsContextValue {
   focusCommentId: string | null;
   lastEvent: CommentEvent | null;
   live: boolean;
-  openDrawer: (card: CommentCardKey, focusCommentId?: string) => void;
+  openDrawer: (card: CommentCardKey, focusCommentId?: string, replay?: boolean) => void;
   closeDrawer: () => void;
   /** Reveal and open the first card in page order that has unread comments. */
   jumpToNextUnread: () => void;
@@ -76,6 +91,22 @@ interface CommentsContextValue {
   /** The last "show me this row" request; cards answer it through useCommentItemFocus. */
   itemFocus: { card: CommentCardKey; itemKey: string; seq: number } | null;
   focusItem: (card: CommentCardKey, itemKey: string) => void;
+  /** True when the open drawer was opened by a deep link that should replay a marker's view. */
+  focusReplay: boolean;
+  markerDraft: MarkerDraft | null;
+  startMarker: (draft: MarkerDraft) => void;
+  moveMarker: (time: string) => void;
+  cancelMarker: () => void;
+  /** The thread expanded in the drawer, so the chart can show its pin as selected. */
+  activeThreadId: string | null;
+  setActiveThreadId: (id: string | null) => void;
+  /** The latest "show this comment's view" request; the card it names consumes each key once. */
+  viewRequest: { card: CommentCardKey; key: string; comment: RunComment } | null;
+  restoreView: (comment: RunComment) => void;
+  /** A card (Graphs, Trends, Compare) registers how to read its current view; returns the unregister. */
+  registerViewCapture: (card: CommentCardKey, capture: () => CommentView | null) => () => void;
+  /** The card's current view, for a root comment to record; null when the card records none. */
+  captureView: (card: CommentCardKey) => CommentView | null;
 }
 
 const CommentsContext = createContext<CommentsContextValue | null>(null);
@@ -93,11 +124,13 @@ export function useComments(): CommentsContextValue | null {
  */
 export function CommentsProvider({
   runId,
+  runStart,
   reveal,
   children,
 }: {
   /** The run's uuid (`test_runs.id`), which keys the per-run socket room. */
   runId: string;
+  runStart?: string | null;
   /** Switch to the card's tab, expand it and scroll to it. */
   reveal: (expansionKey: keyof ExpansionState) => void;
   children: React.ReactNode;
@@ -113,6 +146,11 @@ export function CommentsProvider({
   const [live, setLive] = useState(socketManager.isConnected());
   const [composeAnchor, setComposeAnchor] = useState<CommentsContextValue['composeAnchor']>(null);
   const [itemFocus, setItemFocus] = useState<CommentsContextValue['itemFocus']>(null);
+  const [focusReplay, setFocusReplay] = useState(false);
+  const [markerDraft, setMarkerDraft] = useState<MarkerDraft | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [viewRequest, setViewRequest] = useState<CommentsContextValue['viewRequest']>(null);
+  const captures = useRef(new Map<CommentCardKey, () => CommentView | null>());
   const openCardRef = useRef(openCard);
   openCardRef.current = openCard;
   const seqRef = useRef(0);
@@ -151,9 +189,11 @@ export function CommentsProvider({
   }, [runId, refreshUnread]);
 
   const openDrawer = useCallback(
-    (card: CommentCardKey, focus?: string) => {
+    (card: CommentCardKey, focus?: string, replay = false) => {
       setOpenCard(card);
       setFocusCommentId(focus ?? null);
+      setFocusReplay(replay);
+      if (card !== 'graphs') setMarkerDraft(null);
       // The drawer marks the card seen on the server once it has read the previous mark.
       setCounts((prev) => (prev[card] ? { ...prev, [card]: { ...prev[card]!, unread: 0 } } : prev));
     },
@@ -163,7 +203,37 @@ export function CommentsProvider({
     setOpenCard(null);
     setFocusCommentId(null);
     setComposeAnchor(null);
+    setMarkerDraft(null); // closing the drawer removes the pending pin (DR5)
+    setActiveThreadId(null);
   }, []);
+  const startMarker = useCallback(
+    (draft: MarkerDraft) => {
+      setComposeAnchor(null);
+      setMarkerDraft(draft);
+      setOpenCard('graphs');
+      setFocusCommentId(null);
+    },
+    [],
+  );
+  const moveMarker = useCallback((time: string) => setMarkerDraft((d) => (d ? { ...d, time } : d)), []);
+  const cancelMarker = useCallback(() => setMarkerDraft(null), []);
+  const restoreView = useCallback(
+    (comment: RunComment) => {
+      if (!comment.chartContext) return;
+      const key = expansionKeyOf(comment.cardKey);
+      if (key) reveal(key);
+      // A fresh key per request, so "Restore view" twice replays twice; the card skips seen keys.
+      setViewRequest({ card: comment.cardKey, key: `comment:${comment.id}:${++seqRef.current}`, comment });
+    },
+    [reveal],
+  );
+  const registerViewCapture = useCallback((card: CommentCardKey, capture: () => CommentView | null) => {
+    captures.current.set(card, capture);
+    return () => {
+      if (captures.current.get(card) === capture) captures.current.delete(card);
+    };
+  }, []);
+  const captureView = useCallback((card: CommentCardKey) => captures.current.get(card)?.() ?? null, []);
   const commentOnItem = useCallback(
     (card: CommentCardKey, itemKey: string, itemLabel: string) => {
       openDrawer(card);
@@ -203,8 +273,8 @@ export function CommentsProvider({
   const totalUnread = Object.values(unread).reduce<number>((a, b) => a + (b ?? 0), 0);
 
   const value = useMemo(
-    () => ({ runId, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem }),
-    [runId, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem],
+    () => ({ runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, registerViewCapture, captureView }),
+    [runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, registerViewCapture, captureView],
   );
   return <CommentsContext.Provider value={value}>{children}</CommentsContext.Provider>;
 }
@@ -229,6 +299,30 @@ export function useCommentItemCounts(card: CommentCardKey, enabled: boolean): Co
     };
   }, [runId, card, enabled, relevant, drawerOpen]);
   return counts;
+}
+
+/**
+ * The Graphs card's markers (roots with a number), deleted ones included so their pins stay
+ * greyed (design delete rule). Fetched while `enabled`, refreshed on any Graphs comment event.
+ */
+export function useGraphMarkers(enabled: boolean): RunCommentThread[] {
+  const ctx = useComments();
+  const [markers, setMarkers] = useState<RunCommentThread[]>([]);
+  const runId = ctx?.runId;
+  const evt = ctx?.lastEvent;
+  const relevant = evt && evt.comment.cardKey === 'graphs' ? evt.seq : 0;
+  const drawerOpen = ctx?.openCard === 'graphs';
+  useEffect(() => {
+    if (!runId || !enabled) return;
+    let live = true;
+    fetchCommentThreads(runId, 'graphs')
+      .then((r) => live && setMarkers(r.threads.filter((t) => t.markerSeq !== null && t.markerTime)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [runId, enabled, relevant, drawerOpen]);
+  return markers;
 }
 
 /**

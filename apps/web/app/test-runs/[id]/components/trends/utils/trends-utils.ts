@@ -1,4 +1,4 @@
-import { TrendsSeries, MetricStatistic } from '../types';
+import { TrendsSeries, MetricStatistic, TIME_RANGE_OPTIONS, type TimeRange } from '../types';
 
 /**
  * `getSeriesColor`, `UNIT_SUFFIXES` and `getYAxisConfigs` used to live here. Colours come
@@ -48,4 +48,20 @@ export function buildAggregatedTrendsStatistics(
     });
   }
   return out;
+}
+
+/**
+ * The absolute window a Trends time range covers right now: the custom dates, or `now` minus the
+ * option's days or months. One definition for the fetch and for a comment's recorded view.
+ */
+export function resolveTimeRange(
+  timeRange: (typeof TIME_RANGE_OPTIONS)[number],
+  custom: TimeRange,
+  now: Date = new Date(),
+): TimeRange {
+  if (timeRange.value === 'custom') return custom;
+  const from = new Date(now);
+  if (timeRange.type === 'months') from.setMonth(from.getMonth() - timeRange.value);
+  else from.setTime(now.getTime() - timeRange.value * 24 * 60 * 60 * 1000);
+  return { from, to: now };
 }

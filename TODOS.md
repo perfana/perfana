@@ -304,6 +304,25 @@ to drop it, remove `body` (and possibly `authorName`) from the list and regenera
 auditable-fields snapshot. Also move `logDelete` after the transaction commits, so a failed delete
 leaves no audit row.
 
+### Graph markers: the parts of PR2 left out (P1)
+
+Deferred from plan: docs/designs/test-run-comments.md. PR2 shipped placement, pins, Restore view, the
+deep-link replay and Undo. Not done:
+
+- **Focusable pins (DR12/DR13).** Pins as buttons with an aria-label ("Marker n, time, k replies"),
+  Enter/Space to open the thread and a 44px target. Plotly annotations take no focus, so keyboard
+  users reach markers through the drawer list and place them with its step buttons.
+- **A marker colour token (D-T3).** Add it to `apps/web/lib/charts/tokens.ts` and its copy in
+  `apps/api/src/modules/reports/renderers/chart-tokens.ts`; pins use the theme primary today.
+- **The "Outside current view · Show" chip** in the drawer for a pin outside the plotted range; such a
+  pin is simply not drawn.
+- **R10 regression assertions** in `MetricSeriesCascade.preselect.test.tsx` and
+  `metric-card-links.test.ts` that "Open in Graphs" still adds series while a marker replay replaces.
+
+Smaller, from the same plan items: show "Placed on a different view" only when the current chart
+differs (Restore view is always offered), and put the "N of M series have no data" note in the drawer
+too (it is in the replay toast only). The pin box is 14px wide, so numbers from 100 up are clipped.
+
 ### The test-run list's comment badges do not update live (P3)
 
 `comment:badge` is emitted to the organization and team rooms on every comment, but nothing in

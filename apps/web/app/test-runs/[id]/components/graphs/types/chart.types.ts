@@ -1,6 +1,7 @@
 import { SeriesConfig, MetricDataPoint } from './graphs.types';
 import { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
+import type { RunComment } from '@/lib/test-run-comments';
 import type { AxisDisplayMode } from '@/components/charts';
 
 /**
@@ -49,6 +50,16 @@ export interface GraphsChartProps {
   onZoomRange?: (range: ChartTimeRange | null) => void;
   /** True while a zoom window is in force — the chart holds that window's data only. */
   zoomed?: boolean;
+  /** Numbered comment markers to pin (design PR2); deleted ones render greyed. */
+  markers?: RunComment[];
+  /** The marker whose thread is open, drawn filled. */
+  selectedMarkerId?: string | null;
+  /** The pending marker's bucket; set = marker mode, a click on the plot moves it. */
+  markerDraftTime?: string | null;
+  /** "+ Add marker": the buckets the draft may snap to, and where it starts. */
+  onStartMarker?: (steps: string[], initial: string) => void;
+  onPlaceMarker?: (time: string) => void;
+  onMarkerClick?: (id: string) => void;
 }
 
 /**

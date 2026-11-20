@@ -1,12 +1,13 @@
 import { TestRun } from '@/types/test-runs';
 import type { ControlGroup } from '@/lib/control-group-baseline';
+import type { ToastAction } from '../../../types';
 
 export interface CompareCardProps {
   testRun: TestRun | null;
   testRunId: string;
   compareExpanded: boolean;
   onCompareExpand: () => void;
-  showToast: (message: string) => void;
+  showToast: (message: string, action?: ToastAction) => void;
 }
 
 export interface RelatedTestRun {

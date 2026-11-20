@@ -13,7 +13,15 @@ import { AuthorizationService } from '../../common/services/authorization.servic
 import { TestRunsGateway } from '../test-runs/gateways/test-runs.gateway';
 import { AuditService } from '../audit/audit.service';
 import type { OwnedResource } from '@perfana/shared';
-import type { CommentResponse, CommentThreadResponse, CreateCommentDto } from './dto/comment.dto';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import {
+  CHART_CONTEXT_DTO_BY_CARD,
+  CHART_CONTEXT_MAX_BYTES,
+  type CommentResponse,
+  type CommentThreadResponse,
+  type CreateCommentDto,
+} from './dto/comment.dto';
 import { commentCountsByCard, type CommentCounts } from './comment-unread.sql';
 import { COMMENT_UNREAD_WINDOW_DAYS } from '@perfana/shared/constants/comment-cards';
 
@@ -33,7 +41,7 @@ export interface CommentCaller {
 }
 
 /**
- * Test-run comments (design: docs/designs/test-run-comments.md, PR1).
+ * Test-run comments and Graphs markers (design: docs/designs/test-run-comments.md, PR1 + PR2).
  *
  * Tenant boundary: every route takes the caller's accessible organizations (`null` = global
  * admin) and answers 404, never 403, for a run or comment outside them (root CLAUDE.md #48).
@@ -143,6 +151,17 @@ export class CommentsService {
       if (Boolean(dto.itemKey) !== Boolean(dto.itemLabel)) {
         throw new BadRequestException('itemKey and itemLabel go together');
       }
+      const isMarker = Boolean(dto.markerTime);
+      if (isMarker) {
+        if (!dto.chartContext) throw new BadRequestException('A marker needs a chartContext');
+        if (dto.card !== 'graphs' || dto.parentId || dto.itemKey) {
+          throw new BadRequestException('A marker is a root comment on the Graphs card');
+        }
+        // @IsISO8601 accepts forms Date cannot read (week dates such as 2026-W01): refuse them
+        // here rather than let the INSERT fail with a 500 inside the request transaction.
+        if (Number.isNaN(Date.parse(dto.markerTime!))) throw new BadRequestException('markerTime must be a readable timestamp');
+      }
+      const chartContext = dto.chartContext ? validateChartContext(dto.card, dto.parentId, dto.chartContext) : null;
       if (dto.parentId) {
         // Lock the parent so a concurrent hard delete cannot orphan the reply.
         const parents: { test_run_id: string; card_key: string; parent_id: string | null; deleted_at: Date | null }[] =
@@ -156,6 +175,18 @@ export class CommentsService {
         }
         if (parent.deleted_at) throw new BadRequestException('Cannot reply to a deleted comment');
       }
+      let markerSeq: number | null = null;
+      if (isMarker) {
+        // Serialize numbering per run instead of retrying on the unique index: a failed INSERT
+        // would abort the request's RLS transaction. Never reused: marker roots are only ever
+        // soft-deleted, so MAX never goes down (design: marker_seq assignment).
+        await em.query(`SELECT pg_advisory_xact_lock(hashtextextended('test_run_comments:marker:' || $1, 0))`, [run.id]);
+        const [next]: { seq: number }[] = await em.query(
+          `SELECT COALESCE(MAX(marker_seq), 0) + 1 AS seq FROM test_run_comments WHERE test_run_id = $1`,
+          [run.id],
+        );
+        markerSeq = Number(next!.seq);
+      }
       const repo = em.getRepository(TestRunComment);
       return repo.save(
         repo.create({
@@ -164,6 +195,9 @@ export class CommentsService {
           parentId: dto.parentId ?? null,
           itemKey: dto.itemKey ?? null,
           itemLabel: dto.itemLabel ?? null,
+          markerSeq,
+          markerTime: isMarker ? new Date(dto.markerTime!) : null,
+          chartContext,
           body: dto.body,
           authorId: caller.userId,
           authorName: (caller.displayName || caller.userId).slice(0, 255),
@@ -212,6 +246,8 @@ export class CommentsService {
       if (comment.markerSeq !== null || hasReplies) {
         comment.deletedAt = new Date();
         comment.body = '';
+        // The recorded view is the author's content too; the greyed pin needs only marker_seq/time.
+        comment.chartContext = null;
         return { comment: await repo.save(comment), soft: true };
       }
       await repo.delete({ id: comment.id });
@@ -276,6 +312,33 @@ export class CommentsService {
       this.logger.warn(`Failed to emit ${type} for comment ${row.id}: ${msg}`);
     }
   }
+}
+
+/**
+ * Check a comment's recorded view against its card's shape and return what to store: the
+ * validated, whitelisted fields plus `kind` (the card), stamped here rather than trusted from
+ * the body. Only Graphs, Trends and Compare roots record a view.
+ */
+export function validateChartContext(card: string, parentId: string | undefined, raw: Record<string, unknown>): Record<string, unknown> {
+  const cls = (CHART_CONTEXT_DTO_BY_CARD as Record<string, new () => object>)[card];
+  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends or Compare records a view');
+  if (Buffer.byteLength(JSON.stringify(raw)) > CHART_CONTEXT_MAX_BYTES) throw new BadRequestException('chartContext is too large');
+  const view = plainToInstance(cls, raw);
+  const errors = validateSync(view, { whitelist: true });
+  if (errors.length > 0) {
+    const first = errors[0]!;
+    throw new BadRequestException(`chartContext.${first.property}: ${Object.values(first.constraints ?? {})[0] ?? 'is invalid'}`);
+  }
+  // @IsISO8601 accepts forms Date cannot read (week dates such as 2026-W01): refuse them here
+  // rather than let a replay fetch nothing. A window must also run forwards.
+  for (const key of ['xRange', 'customRange'] as const) {
+    const range = (view as Record<string, unknown>)[key] as [string, string] | undefined;
+    if (!range) continue;
+    const [from, to] = range.map((t) => Date.parse(t));
+    if (Number.isNaN(from) || Number.isNaN(to)) throw new BadRequestException(`chartContext.${key} must be readable timestamps`);
+    if (from! >= to!) throw new BadRequestException(`chartContext.${key} must run forwards`);
+  }
+  return { ...JSON.parse(JSON.stringify(view)), kind: card };
 }
 
 export function toResponse(row: TestRunComment): CommentResponse {
