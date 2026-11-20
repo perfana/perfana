@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material';
 import React from 'react';
 import { formatImpactShare, sumImpact } from '@perfana/shared/utils';
+import { throughputSeconds } from '../../utils/throughput-seconds';
 
 export interface UseTop10TableDataProps {
   testRunId: string;
@@ -71,8 +72,7 @@ export function useTop10TableData({ testRunId, selectedScenarios = [], excludeRa
         throw new Error('Failed to fetch test run details');
       }
       const testRunData = await testRunResponse.json();
-      const durationSeconds = testRunData.duration || 1;
-      setTestDuration(durationSeconds);
+      setTestDuration(throughputSeconds(testRunData, excludeRampUp));
 
       const transactionsResponse = await authenticatedFetch(
         `/test-runs/${testRunId}/transactions?excludeRampUp=${excludeRampUp}`

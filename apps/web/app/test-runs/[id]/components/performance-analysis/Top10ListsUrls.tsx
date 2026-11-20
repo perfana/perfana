@@ -28,6 +28,7 @@ import { Top10Filter } from './components';
 import { ClippedUrl, URL_CELL_MAX_WIDTH_SX } from '@/components/ui/clipped-url';
 import { formatImpactShare, sumImpact } from '@perfana/shared/utils';
 import { fetchRunSamplers, RunSampler } from './utils/run-samplers';
+import { throughputSeconds } from './utils/throughput-seconds';
 
 interface Top10Item {
   url: string;
@@ -73,8 +74,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
         throw new Error('Failed to fetch test run details');
       }
       const testRunData = await testRunResponse.json();
-      const durationSeconds = testRunData.duration || 1;
-      setTestDuration(durationSeconds);
+      setTestDuration(throughputSeconds(testRunData, excludeRampUp));
 
       const allSamplers = await fetchRunSamplers(testRunId, excludeRampUp);
 
