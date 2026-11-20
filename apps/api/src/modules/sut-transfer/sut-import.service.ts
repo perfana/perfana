@@ -347,22 +347,26 @@ export class SutImportService {
     table: string,
     toInsert: Record<string, unknown>[],
   ): Promise<number> {
-    const conflict = 'ON CONFLICT DO NOTHING';
-    if (SERIAL_ID_TABLES.has(table)) {
-      // Omit the serial `id` so the target sequence assigns a fresh one, sidestepping
-      // the env-local integer-id collision. Column list comes from the catalog (not the
-      // untrusted bundle keys), so it can't be used for injection.
-      const cols = await this.nonIdColumns(manager, table);
-      const colList = cols.map((c) => `"${c}"`).join(', ');
-      const written: unknown[] = await manager.query(
-        `INSERT INTO ${table} (${colList}) SELECT ${colList} FROM json_populate_recordset(null::${table}, $1::json) ${conflict} RETURNING 1`,
-        [JSON.stringify(toInsert)],
+    // Name only the columns the bundle actually carries. A bundle exported before a column
+    // existed has no key for it, and json_populate_recordset turns a missing key into NULL —
+    // which bypasses the column DEFAULT and fails a NOT NULL added later (notification_channels
+    // .notify_on_comment, v0.2.97.89). Left out of the list, the column takes its DEFAULT.
+    // SERIAL_ID_TABLES also omit `id` so the target sequence assigns a fresh one, sidestepping
+    // the env-local integer-id collision. Names come from the catalog, filtered by the bundle
+    // keys, so an untrusted key can never be interpolated.
+    const present = new Set(toInsert.flatMap((r) => Object.keys(r)));
+    const skipId = SERIAL_ID_TABLES.has(table);
+    const cols = (await this.tableColumns(manager, table)).filter(
+      (c) => present.has(c) && !(skipId && c === 'id'),
+    );
+    if (cols.length === 0) {
+      throw new BadRequestException(
+        `No column of ${table} here matches the bundle's rows: has this environment run its migrations?`,
       );
-      return written.length;
     }
-
+    const colList = cols.map((c) => `"${c}"`).join(', ');
     const written: unknown[] = await manager.query(
-      `INSERT INTO ${table} SELECT * FROM json_populate_recordset(null::${table}, $1::json) ${conflict} RETURNING 1`,
+      `INSERT INTO ${table} (${colList}) SELECT ${colList} FROM json_populate_recordset(null::${table}, $1::json) ON CONFLICT DO NOTHING RETURNING 1`,
       [JSON.stringify(toInsert)],
     );
     return written.length;
@@ -510,20 +514,28 @@ export class SutImportService {
     return kept;
   }
 
-  // Non-id column names for a table, straight from the catalog and cached per table.
-  // Trusted source → safe to interpolate into the column list.
-  private readonly columnCache = new Map<string, string[]>();
-  private async nonIdColumns(manager: EntityManager, table: string): Promise<string[]> {
-    const cached = this.columnCache.get(table);
+  // Column names for a table, straight from the catalog. Trusted source → safe to interpolate
+  // into the column list. Cached per import (keyed on its transaction's manager), never per
+  // process: the API can serve an import before the migration runner finishes, and a list
+  // cached then would name a dropped column (42703) until a restart. Per batch would be a
+  // catalog query every 1000 rows, ~20k of them on a large raw-data import.
+  private readonly columnCache = new WeakMap<EntityManager, Map<string, string[]>>();
+  private async tableColumns(manager: EntityManager, table: string): Promise<string[]> {
+    let perImport = this.columnCache.get(manager);
+    if (!perImport) {
+      perImport = new Map();
+      this.columnCache.set(manager, perImport);
+    }
+    const cached = perImport.get(table);
     if (cached) return cached;
     const rows: { column_name: string }[] = await manager.query(
       `SELECT column_name FROM information_schema.columns
-       WHERE table_schema = current_schema() AND table_name = $1 AND column_name <> 'id'
+       WHERE table_schema = current_schema() AND table_name = $1
        ORDER BY ordinal_position`,
       [table],
     );
     const cols = rows.map((r) => r.column_name);
-    this.columnCache.set(table, cols);
+    perImport.set(table, cols);
     return cols;
   }
 }

@@ -55,6 +55,10 @@ describe('compare-config template provenance in the SUT bundle', () => {
         cb({
           query: jest.fn(async (sql: string, params: unknown[] = []) => {
             statements.push({ sql, params });
+            // The catalog has a column this (older) bundle never heard of.
+            if (/information_schema\.columns/.test(sql)) {
+              return [...Object.keys(CONFIG_ROW), 'added_after_export'].map((column_name) => ({ column_name }));
+            }
             return /^INSERT INTO/.test(sql) ? JSON.parse(params[0] as string).map(() => ({ '?column?': 1 })) : [];
           }),
         }),
@@ -72,8 +76,11 @@ describe('compare-config template provenance in the SUT bundle', () => {
     );
 
     const insert = statements.find((s) => s.sql.startsWith('INSERT INTO ds_compare_config '))!;
+    // Only the bundle's columns are named, so a column added after the export takes its DEFAULT
+    // instead of the NULL json_populate_recordset would give it (a NOT NULL there aborts the import).
+    const colList = Object.keys(CONFIG_ROW).map((c) => `"${c}"`).join(', ');
     expect(insert.sql).toBe(
-      'INSERT INTO ds_compare_config SELECT * FROM json_populate_recordset(null::ds_compare_config, $1::json) ON CONFLICT DO NOTHING RETURNING 1',
+      `INSERT INTO ds_compare_config (${colList}) SELECT ${colList} FROM json_populate_recordset(null::ds_compare_config, $1::json) ON CONFLICT DO NOTHING RETURNING 1`,
     );
     const [row] = JSON.parse(insert.params[0] as string) as Row[];
     expect(row).toEqual({ ...CONFIG_ROW, organization_id: TARGET_ORG });

@@ -227,6 +227,58 @@ describe('SutImportService (integration)', () => {
     }
   });
 
+  // Value: protects=a bundle exported before a NOT NULL DEFAULT column existed still imports, on both the
+  // plain and the SERIAL_ID_TABLES insert path, with the column taking its DEFAULT; fails_when=writeRows
+  // names a catalog column the bundle rows lack (json_populate_recordset turns the missing key into NULL
+  // -> 23502), or the serial path stops omitting `id`; why_new=the existing serial test sends full rows
+  // (created_at/updated_at present) and the compare-template/series-grouping specs mock the manager, so
+  // nothing exercised a real DEFAULT; seam=none; no_claim=does not cover a key the catalog lacks
+  // (a column dropped since export) or notification_channels.notify_on_comment specifically.
+  it('lets a column the bundle predates take its DEFAULT, on the plain and the serial-id path', async () => {
+    const fixtureSut = '13131313-0000-0000-0000-000000000001';
+    const manifestSut = '13131313-0000-0000-0000-000000000002'; // must NOT exist → passes pre-check
+    const gi = '13131313-0000-0000-0000-000000000003';
+    const gd = '13131313-0000-0000-0000-000000000004';
+    const ad = '13131313-0000-0000-0000-000000000005';
+    const importedGi = '13131313-0000-0000-0000-000000000006';
+    const panelRunKey = 'old-bundle-default-run';
+    try {
+      await dataSource.query(`INSERT INTO systems_under_test (id, name, description, organization_id) VALUES ($1,'old-bundle-sut','ob',$2)`, [fixtureSut, targetOrg]);
+      await dataSource.query(`INSERT INTO grafana_instances (id, label, client_url, org_id, organization_id) VALUES ($1,'ob-grafana','https://g.example.com','1',$2)`, [gi, targetOrg]);
+      await dataSource.query(`INSERT INTO grafana_dashboards (id, grafana_instance_id, grafana_id, uid, name, panels, organization_id) VALUES ($1,$2,1,'ob-uid','ob-dash','{}'::jsonb,$3)`, [gd, gi, targetOrg]);
+      await dataSource.query(`INSERT INTO application_dashboards (id, system_under_test_id, test_environment, grafana_instance_id, grafana_dashboard_id, dashboard_name, dashboard_label, organization_id) VALUES ($1,$2,'test',$3,$4,'ob-app','ob-label',$5)`, [ad, fixtureSut, gi, gd, targetOrg]);
+
+      // Neither row carries use_proxy / created_at / updated_at — all NOT NULL with a DEFAULT —
+      // exactly as a bundle exported before such a column was added.
+      const lines = [
+        JSON.stringify({ __manifest__: { schemaVersion: 1, sourceSutId: manifestSut, sutName: 'old-bundle' } }),
+        JSON.stringify({ __table__: 'grafana_instances' }),
+        JSON.stringify({ id: importedGi, label: 'ob-imported', client_url: 'https://g2.example.com', org_id: '1', organization_id: srcOrg }),
+        JSON.stringify({ __table__: 'ds_panels' }),
+        JSON.stringify({ id: 999999001, test_run_id: panelRunKey, application_dashboard_id: ad, organization_id: srcOrg }),
+      ];
+      const summary = await importService.import(gzipSync(Buffer.from(lines.join('\n') + '\n')), targetOrg);
+      expect(summary.rowCounts['grafana_instances']).toBe(1);
+      expect(summary.rowCounts['ds_panels']).toBe(1);
+
+      const [inst] = await dataSource.query(`SELECT use_proxy, created_at, label FROM grafana_instances WHERE id = $1`, [importedGi]);
+      expect(inst).toMatchObject({ use_proxy: false, label: 'ob-imported' });
+      expect(inst.created_at).not.toBeNull();
+
+      const panels = await dataSource.query(`SELECT id, created_at, organization_id FROM ds_panels WHERE test_run_id = $1`, [panelRunKey]);
+      expect(panels).toHaveLength(1);
+      expect(panels[0].id).not.toBe(999999001); // serial path still omits `id`
+      expect(panels[0].created_at).not.toBeNull();
+      expect(panels[0].organization_id).toBe(targetOrg);
+    } finally {
+      await dataSource.query(`DELETE FROM ds_panels WHERE test_run_id = $1`, [panelRunKey]);
+      await dataSource.query(`DELETE FROM application_dashboards WHERE id = $1`, [ad]);
+      await dataSource.query(`DELETE FROM grafana_dashboards WHERE id = $1`, [gd]);
+      await dataSource.query(`DELETE FROM grafana_instances WHERE id = ANY($1)`, [[gi, importedGi]]);
+      await dataSource.query(`DELETE FROM systems_under_test WHERE id = $1`, [fixtureSut]);
+    }
+  });
+
   // Series grouping (migration 1819). The rule FKs into the SUT and its application dashboard,
   // and the membership rows FK into both the dashboard and the rule (rule_id), so this only
   // lands if the bundle carries the rule first and neither id is remapped on the way in.

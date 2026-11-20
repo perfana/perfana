@@ -183,6 +183,11 @@ function buildImportService(opts: { slotHeldByOtherRule?: boolean } = {}): {
       cb({
         query: jest.fn(async (sql: string, params: unknown[] = []) => {
           manager.push({ sql, params });
+          if (/information_schema\.columns/.test(sql)) {
+            return ['id', 'system_under_test_id', 'application_dashboard_id', 'organization_id', 'team_id'].map(
+              (column_name) => ({ column_name }),
+            );
+          }
           if (/^INSERT INTO series_grouping_rules /.test(sql)) {
             const rows = JSON.parse(params[0] as string) as Row[];
             if (opts.slotHeldByOtherRule) return []; // skipped by the slot's unique index
@@ -312,14 +317,14 @@ describe('series grouping in the SUT bundle', () => {
       expect(at('series_grouping_rules')).toBeLessThan(at('ds_metric_series_groups'));
     });
 
-    it('writes both as plain SELECT * inserts, so the source primary keys survive (no serial-id path)', async () => {
+    it('writes both with their id column, so the source primary keys survive (no serial-id path)', async () => {
       const { manager } = await roundTrip();
 
       for (const table of ['series_grouping_rules', 'ds_metric_series_groups']) {
         const [insert, ...rest] = insertsFor(manager, table);
         expect(rest).toHaveLength(0);
-        expect(insert!.sql).toBe(
-          `INSERT INTO ${table} SELECT * FROM json_populate_recordset(null::${table}, $1::json) ON CONFLICT DO NOTHING RETURNING 1`,
+        expect(insert!.sql).toMatch(
+          new RegExp(`^INSERT INTO ${table} \\(${table === 'series_grouping_rules' ? '"id", ' : ''}.* FROM json_populate_recordset\\(null::${table}, \\$1::json\\) ON CONFLICT DO NOTHING RETURNING 1$`),
         );
       }
     });
