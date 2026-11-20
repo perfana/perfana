@@ -11,8 +11,8 @@ Browse all your test runs, narrow the list to the ones you care about, share tha
    ![The Test Runs list with the filter bar and the runs table](../assets/test-runs-list.png)
    *Figure: the Test Runs list - filter by System, Environment, and Workload.*
 2. Narrow the list with the **System**, **Environment**, and **Workload** filters at the top.
-   The table updates to show only matching runs.
-3. To clear all filters, click **Reset filters**.
+   Each filter lists its values A–Z, ignoring upper and lower case. Start typing to narrow the list, then pick a value. An empty filter shows all. The table updates to show only matching runs.
+3. To clear one filter, click the clear (**×**) button in its field. To clear all filters, click **Clear All**.
    The table returns to showing every run.
 4. To share exactly what you're looking at, click the **Share** icon.
    A link to the current filtered view is copied to your clipboard, ready to paste to a teammate.
@@ -31,7 +31,7 @@ Browse all your test runs, narrow the list to the ones you care about, share tha
 You've found the runs you need, optionally shared the view, and run any batch action across your selection.
 
 **Troubleshooting**
-- *The list is empty* — check that the correct organization is active and that your filters aren't too narrow. Click **Reset filters** to start fresh.
+- *The list is empty* — check that the correct organization is active and that your filters aren't too narrow. Click **Clear All** to start fresh.
 - *A run shows progress but no results yet* — collection or analysis is still running. The live progress banner at the top of the page shows active jobs.
 
 **Related**

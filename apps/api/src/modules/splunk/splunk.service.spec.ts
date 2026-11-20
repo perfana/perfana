@@ -245,6 +245,23 @@ describe('SplunkService runSummary', () => {
     expect(panelLink.searchParams.get('earliest')).toBe(String(Math.floor(run.startTime.getTime() / 1000)));
     expect(panelLink.searchParams.get('latest')).toBe(String(Math.ceil(run.endTime.getTime() / 1000)));
   });
+
+  it('names the dashboard each panel is stored under, so the card can open it in Graphs', async () => {
+    // protects: GET /splunk/runs/:id/summary returns each panel's dashboardLabel from its query row
+    // fails_when: the field is dropped or taken from the wrong source, so the card's Open in Graphs/Compare/Trends links carry dashboard=undefined
+    // seam: none
+    // kind: unit
+    // no_claim: does not check the label matches a real application_dashboards row
+    const ctx = build();
+    withMappings(ctx);
+    ctx.testRunRepo.findOne.mockResolvedValue(run);
+    ctx.queryRepo.find.mockResolvedValue([{ ...query, dashboardLabel: 'Splunk logs' }]);
+    ctx.configRepo.find.mockResolvedValue([{ id: CFG, label: 'prod', host: 'https://s:8089', splunkApp: 'search' }]);
+    ctx.dataSource.manager.query.mockResolvedValue([]);
+    const summary = await ctx.service.runSummary('run-1', 'u', []);
+    if (!summary.configured) throw new Error('expected configured');
+    expect(summary.panels[0]).toMatchObject({ panelId: 1, dashboardLabel: 'Splunk logs' });
+  });
 });
 
 describe('SplunkService review regressions', () => {

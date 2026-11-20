@@ -221,6 +221,8 @@ export function describeMapping(m: Pick<SplunkEntityMapping, 'indexName' | 'sour
 
 export interface SplunkRunPanel {
   panelId: number;
+  /** The artificial dashboard this panel's series are stored under in ds_metrics. */
+  dashboardLabel: string;
   title: string;
   aggregation: string;
   splitBy: string | null;
