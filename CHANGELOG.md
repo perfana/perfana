@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.86] - 2026-11-20
+
+### Added
+- **Open a Splunk panel in the Graphs, Compare or Trends card.** Each panel on the Splunk Logs card that has data now has a ⋮ menu with Open in Graphs, Open in Compare and Open in Trends, the same menu the other cards offer. It adds every series on that panel to the chosen card, on the same page or, with the trailing icon, in a new tab.
+
+### Changed
+- **The System, Environment and Workload filters on the test runs list are sorted A–Z ignoring case, and you can type to narrow them.** Each filter is now a search field: start typing to find a system, environment or workload, and clear it to go back to all. A filter set from a shared link shows straight away, before the list of values has loaded.
+
 ## [0.2.97.85] - 2026-11-19
 
 ### Fixed

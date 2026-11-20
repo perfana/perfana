@@ -185,6 +185,12 @@ The run's Splunk card lists the mappings in effect for that run (read from the r
 from the first mapping row — Common Issue #42) and an **Open in Splunk** link with the run's
 `$entities` filter and time window.
 
+Each panel with series also carries the shared **Open in Graphs / Compare / Trends** menu
+(`OpenInCardMenuItems`, v0.2.97.86). It sends a panel-wide link with no `metric`, so the card adds
+every series on that panel. The run summary (`GET /splunk/runs/:testRunId/summary`) returns each
+panel's `dashboardLabel` for this: the artificial dashboard its series are stored under in
+`ds_metrics`.
+
 ## Querying Splunk
 
 One endpoint: `POST {host}/servicesNS/-/{splunk_app}/search/v2/jobs/export`, form-encoded,

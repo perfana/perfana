@@ -25,6 +25,9 @@ This lets you go from "a run regressed" to "here is where it went wrong" by digg
 5. Use the **AWR Report** card for Oracle database analysis.
    You can review the Oracle AWR report for database-side bottlenecks.
 
+6. Use the **Splunk Logs** card to see what the run's logs did, per panel: error and warning counts, exceptions by type, or any value your logs carry.
+   Each panel has an **Open in Splunk** link for the run's time window. A panel with data also has a **⋮** menu with **Open in Graphs**, **Open in Compare** and **Open in Trends**, which adds every series on that panel to the chosen card; the icon at the end of each item opens it in a new tab. Appears only when Splunk is configured for the system — see [Connect Splunk](../integrations/connect-splunk.md).
+
 **Result**
 You have pinpointed where the regression comes from — application, a downstream service, code hot spots, or the database — instead of just knowing that the run was slow.
 

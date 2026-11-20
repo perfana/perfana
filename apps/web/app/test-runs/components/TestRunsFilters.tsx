@@ -1,15 +1,7 @@
 'use client';
 
-import {
-  Box,
-  Card,
-  CardContent,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Button,
-} from '@mui/material';
+import { useMemo } from 'react';
+import { Autocomplete, Box, Button, Card, CardContent, TextField } from '@mui/material';
 import { FilterList, FilterListOff } from '@mui/icons-material';
 import { FilterOptions } from '../types';
 
@@ -41,47 +33,9 @@ export function TestRunsFilters({
       <CardContent>
         <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
           <FilterList color="action" />
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>System</InputLabel>
-            <Select
-              value={systemFilter}
-              label="System"
-              onChange={(e) => onSystemChange(e.target.value)}
-            >
-              <MenuItem value="">All Systems</MenuItem>
-              {filterOptions.systems.map(system => (
-                <MenuItem key={system} value={system}>{system}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>Environment</InputLabel>
-            <Select
-              value={environmentFilter}
-              label="Environment"
-              onChange={(e) => onEnvironmentChange(e.target.value)}
-            >
-              <MenuItem value="">All Environments</MenuItem>
-              {filterOptions.environments.map(env => (
-                <MenuItem key={env} value={env}>{env}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>Workload</InputLabel>
-            <Select
-              value={workloadFilter}
-              label="Workload"
-              onChange={(e) => onWorkloadChange(e.target.value)}
-            >
-              <MenuItem value="">All Workloads</MenuItem>
-              {filterOptions.workloads.map(workload => (
-                <MenuItem key={workload} value={workload}>{workload}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <FilterSelect label="System" value={systemFilter} options={filterOptions.systems} onChange={onSystemChange} />
+          <FilterSelect label="Environment" value={environmentFilter} options={filterOptions.environments} onChange={onEnvironmentChange} />
+          <FilterSelect label="Workload" value={workloadFilter} options={filterOptions.workloads} onChange={onWorkloadChange} />
 
           <Button
             variant="outlined"
@@ -95,5 +49,29 @@ export function TestRunsFilters({
         </Box>
       </CardContent>
     </Card>
+  );
+}
+
+/** Typeahead over one filter's values, sorted case-insensitively. Cleared means "all". */
+function FilterSelect({ label, value, options, onChange }: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  const sorted = useMemo(() => {
+    const list = [...options].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    // A URL filter can arrive before (or without) its options; keep it selectable rather than invalid.
+    return value && !list.includes(value) ? [...list, value] : list;
+  }, [options, value]);
+  return (
+    <Autocomplete
+      size="small"
+      sx={{ width: { xs: '100%', sm: 240 } }}
+      options={sorted}
+      value={value || null}
+      onChange={(_, v) => onChange(v ?? '')}
+      renderInput={(params) => <TextField {...params} label={label} placeholder="All" slotProps={{ inputLabel: { shrink: true } }} />}
+    />
   );
 }

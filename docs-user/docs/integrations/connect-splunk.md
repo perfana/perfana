@@ -61,7 +61,7 @@ To change the connection later, open the Splunk card and click **Settings**.
 
 ## Result
 
-New test runs of that workload collect the Splunk panels while the test runs and again at analysis. A **Splunk Logs** card appears in the run's Root Cause Analysis tab, with an **Open in Splunk** link per panel for the run's time window. The series are available in Graphs, Trends and Compare, can be used in SLOs (for example `ERROR count < 10`), and are compared against the baseline by ADAPT.
+New test runs of that workload collect the Splunk panels while the test runs and again at analysis. A **Splunk Logs** card appears in the run's Root Cause Analysis tab, with an **Open in Splunk** link per panel for the run's time window, and a **⋮** menu on each panel with data that opens all of its series in Graphs, Compare or Trends. The series are available in Graphs, Trends and Compare, can be used in SLOs (for example `ERROR count < 10`), and are compared against the baseline by ADAPT.
 
 Runs that finished before you set this up are not collected automatically. Re-evaluate such a run with **force refetch** to collect its Splunk data, as long as Splunk still holds the logs for that window.
 
