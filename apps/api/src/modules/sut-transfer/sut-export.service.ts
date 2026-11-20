@@ -125,6 +125,15 @@ export class SutExportService {
   }
 
   private buildQuery(resource: SutResource, ctx: ExportContext): { sql: string; params: unknown[] } {
+    const query = this.buildFilteredQuery(resource, ctx);
+    if (resource.orderBy && resource.filter !== 'byReference') {
+      // orderBy is a literal from SUT_RESOURCES, never bundle or request input.
+      return { ...query, sql: `${query.sql} ORDER BY ${resource.orderBy}` };
+    }
+    return query;
+  }
+
+  private buildFilteredQuery(resource: SutResource, ctx: ExportContext): { sql: string; params: unknown[] } {
     switch (resource.filter) {
       case 'byReference':
         return { sql: resource.customSql!, params: [ctx.sutId] };

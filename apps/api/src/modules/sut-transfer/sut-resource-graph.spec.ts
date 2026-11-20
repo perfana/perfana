@@ -21,7 +21,7 @@ describe('SUT_RESOURCES', () => {
       'ds_compare_config', 'provisioned_template_ds_compare_configs',
       'ds_control_groups', 'ds_control_group_statistics',
       'ds_metrics', 'test_run_configs', 'awr_reports', 'generated_reports',
-      'test_run_alerts', 'test_run_events', 'graph_presets',
+      'test_run_alerts', 'test_run_events', 'test_run_comments', 'graph_presets',
       'requests_raw', 'requests_error', 'transactions', 'virtual_users',
       'ds_adapt_results', 'ds_adapt_conclusion', 'ds_adapt_tracked_results',
       'ds_change_points', 'check_results', 'ds_metric_statistics',
@@ -92,6 +92,28 @@ describe('SUT_RESOURCES', () => {
       const tables = selectResources({ includeOptional: false, includeRaw: false }).map((r) => r.table);
       expect(tables).toContain('series_grouping_rules');
       expect(tables).toContain('ds_metric_series_groups');
+    });
+  });
+
+  // Test-run comments (design R9): they travel with every exported run, replies after their
+  // roots, and the per-user read state stays behind.
+  describe('test-run comments', () => {
+    const comments = (): SutResource | undefined =>
+      SUT_RESOURCES.find((r) => r.table === 'test_run_comments');
+
+    it('exports comments by run uuid as core data, after test_runs', () => {
+      expect(comments()).toMatchObject({ filter: 'byTestRunUuid', group: 'core' });
+      expect(idx('test_run_comments')).toBeGreaterThan(idx('test_runs'));
+      const tables = selectResources({ includeOptional: false, includeRaw: false }).map((r) => r.table);
+      expect(tables).toContain('test_run_comments');
+    });
+
+    it('orders roots before replies, because parent_id is an FK within the table', () => {
+      expect(comments()!.orderBy).toMatch(/^\(t\.parent_id IS NOT NULL\)/);
+    });
+
+    it('does not export test_run_comment_reads', () => {
+      expect(SUT_RESOURCES.map((r) => r.table)).not.toContain('test_run_comment_reads');
     });
   });
 

@@ -7,6 +7,12 @@ export interface SutResource {
   group: SutGroup;
   /** Only for group: 'shared' (filter: 'byReference'). $1 = sutId. Must SELECT row_to_json(t) AS r. */
   customSql?: string;
+  /**
+   * ORDER BY for a filtered export query (not for byReference, whose customSql is used as is).
+   * Only needed where rows of one table reference each other: the importer inserts in 1000-row
+   * batches, so a child row that lands in an earlier batch than its parent FK-violates.
+   */
+  orderBy?: string;
 }
 
 // Insert (dependency) order. This is the REVERSE of the delete cascade in
@@ -132,6 +138,14 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'generated_reports', filter: 'byTestRunUuid', group: 'optional' },
   { table: 'test_run_alerts', filter: 'byTestRunUuid', group: 'optional' },
   { table: 'test_run_events', filter: 'byTestRunUuid', group: 'optional' },
+  // Test-run comments (migrations 1827/1828), core so they travel with every exported run.
+  // parent_id points at another comment of the same run, so roots are written before replies.
+  // Soft-deleted rows travel too (empty body), because a marker root keeps its number and its
+  // replies hang off it. test_run_comment_reads is deliberately NOT exported: read state is
+  // per user and per environment. The importer stamps notified_at so the target's
+  // notification sweep never announces an imported comment (design R9).
+  { table: 'test_run_comments', filter: 'byTestRunUuid', group: 'core',
+    orderBy: '(t.parent_id IS NOT NULL), t.created_at, t.id' },
   { table: 'graph_presets', filter: 'byTestRunVarchar', group: 'optional' },
 
   // --- raw sample hypertables (off by default) ---

@@ -100,6 +100,15 @@ const PURGE_BY_RUN_TABLES = new Set<string>([
  */
 const PURGE_SCOPE_COLUMN = 'test_run_id';
 
+/**
+ * Test-run comments carry their source `notified_at`, which is NULL for any comment the source's
+ * notification sweep had not claimed yet. Imported as is, the target's sweep would post those to
+ * the target's Slack/Teams/Mattermost channels as new discussion. Every imported comment is
+ * stamped announced instead (design R9), whatever the bundle says, and an older bundle without
+ * the column is stamped the same way.
+ */
+const COMMENTS_TABLE = 'test_run_comments';
+
 @Injectable()
 export class SutImportService {
   private readonly logger = new Logger(SutImportService.name);
@@ -117,6 +126,7 @@ export class SutImportService {
     const droppedCounts: Record<string, number> = {};
     // (table, scope) pairs already cleared this import — see SERIAL_ID_SCOPE_COLUMN.
     const purgedScopes = new Set<string>();
+    const importedAt = new Date().toISOString();
 
     // Read the manifest first (line 1) so we can run the conflict check before writing.
     // We buffer per-table batches and flush inside a single transaction.
@@ -210,6 +220,7 @@ export class SutImportService {
           // Remap ownership on any row that carries these columns.
           if ('organization_id' in obj) obj.organization_id = targetOrganizationId;
           if ('team_id' in obj) obj.team_id = null;
+          if (currentTable === COMMENTS_TABLE) obj.notified_at = importedAt;
           batch.push(obj);
           if (batch.length >= BATCH_SIZE) await flush();
         }
@@ -261,8 +272,7 @@ export class SutImportService {
     // DO NOTHING on every table (not just the shared ones) is what makes a re-import a no-op
     // instead of a 23505: rows carry their source PK, so one already here simply loses.
     // RETURNING 1 yields one row per insert, which is the only honest way to count them —
-    // batch.length would report skipped rows as imported.
-    const conflict = 'ON CONFLICT DO NOTHING';
+    // batch.length would report skipped rows as imported. See writeRows.
 
     // generated_reports.template_id is an FK to report_templates, which now travels
     // in the bundle. Bundles exported before that fix carry the reports but not their
@@ -291,6 +301,53 @@ export class SutImportService {
       await this.purgeRunScopes(manager, table, toInsert, purgedScopes);
     }
 
+    if (table === COMMENTS_TABLE) return this.insertComments(manager, toInsert);
+
+    return { inserted: await this.writeRows(manager, table, toInsert), dropped };
+  }
+
+  /**
+   * Comments reference each other (`parent_id` → a root of the same run), so roots and replies
+   * go in as two statements, and a reply whose root did not land is dropped rather than left to
+   * FK-violate and abort the whole import.
+   *
+   * The export orders roots first, but that alone is not enough on a merge-import: a bundle root
+   * can lose ON CONFLICT DO NOTHING to a DIFFERENT comment already here, because an unqualified
+   * ON CONFLICT arbitrates on every unique index and `uq_test_run_comments_marker_seq` makes
+   * (run, marker number) unique. That happens when a run imported earlier gained a marker in
+   * BOTH environments before the top-up: the two new markers share the next number. The bundle's
+   * root is then "already present", and its replies would point at an id that does not exist.
+   */
+  private async insertComments(
+    manager: EntityManager,
+    rows: Record<string, unknown>[],
+  ): Promise<{ inserted: number; dropped: number }> {
+    const roots = rows.filter((r) => r.parent_id == null);
+    const replies = rows.filter((r) => r.parent_id != null);
+    const insertedRoots = roots.length > 0 ? await this.writeRows(manager, COMMENTS_TABLE, roots) : 0;
+    const keptReplies = replies.length > 0
+      ? await this.dropRowsMissingParent(
+          manager,
+          COMMENTS_TABLE,
+          replies,
+          'parent_id',
+          COMMENTS_TABLE,
+          'their thread root was not imported (a different comment here already holds its marker number).',
+        )
+      : [];
+    const insertedReplies = keptReplies.length > 0
+      ? await this.writeRows(manager, COMMENTS_TABLE, keptReplies)
+      : 0;
+    return { inserted: insertedRoots + insertedReplies, dropped: replies.length - keptReplies.length };
+  }
+
+  /** INSERT … ON CONFLICT DO NOTHING; returns how many rows actually landed. */
+  private async writeRows(
+    manager: EntityManager,
+    table: string,
+    toInsert: Record<string, unknown>[],
+  ): Promise<number> {
+    const conflict = 'ON CONFLICT DO NOTHING';
     if (SERIAL_ID_TABLES.has(table)) {
       // Omit the serial `id` so the target sequence assigns a fresh one, sidestepping
       // the env-local integer-id collision. Column list comes from the catalog (not the
@@ -301,14 +358,14 @@ export class SutImportService {
         `INSERT INTO ${table} (${colList}) SELECT ${colList} FROM json_populate_recordset(null::${table}, $1::json) ${conflict} RETURNING 1`,
         [JSON.stringify(toInsert)],
       );
-      return { inserted: written.length, dropped };
+      return written.length;
     }
 
     const written: unknown[] = await manager.query(
       `INSERT INTO ${table} SELECT * FROM json_populate_recordset(null::${table}, $1::json) ${conflict} RETURNING 1`,
       [JSON.stringify(toInsert)],
     );
-    return { inserted: written.length, dropped };
+    return written.length;
   }
 
   /**
@@ -434,6 +491,7 @@ export class SutImportService {
     rows: Record<string, unknown>[],
     column: string,
     parentTable: string,
+    reason = 're-export the SUT with the current version to include them.',
   ): Promise<Record<string, unknown>[]> {
     const ids = [...new Set(rows.map((r) => r[column]).filter((v) => v != null).map(String))];
     if (ids.length === 0) return rows;
@@ -446,8 +504,7 @@ export class SutImportService {
     const dropped = rows.length - kept.length;
     if (dropped > 0) {
       this.logger.warn(
-        `Dropped ${dropped} ${table} row(s) referencing a missing ${parentTable} — ` +
-          `re-export the SUT with the current version to include them.`,
+        `Dropped ${dropped} ${table} row(s) referencing a missing ${parentTable} — ${reason}`,
       );
     }
     return kept;
