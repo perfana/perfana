@@ -25,6 +25,8 @@ import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
+import { CommentsRenderer } from '../renderers/comments-renderer';
+import { ReportsModule } from '../reports.module';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
 import {
@@ -85,6 +87,7 @@ describe('ReportHtmlCompilerService', () => {
   let top10ListsRenderer: jest.Mocked<Top10ListsRenderer>;
   let errorAnalysisRenderer: jest.Mocked<ErrorAnalysisRenderer>;
   let placeholderRenderer: jest.Mocked<PlaceholderRenderer>;
+  let commentsRenderer: jest.Mocked<CommentsRenderer>;
   // Real utils so we can verify escaping behaviour without extra mocking noise
   let utils: ReportUtilsService;
 
@@ -182,6 +185,12 @@ describe('ReportHtmlCompilerService', () => {
           },
         },
         {
+          provide: CommentsRenderer,
+          useValue: {
+            renderCommentsSection: jest.fn().mockResolvedValue('<div>comments</div>'),
+          },
+        },
+        {
           provide: PlaceholderRenderer,
           useValue: {
             renderPlaceholderSection: jest
@@ -222,6 +231,7 @@ describe('ReportHtmlCompilerService', () => {
     top10ListsRenderer = module.get(Top10ListsRenderer);
     errorAnalysisRenderer = module.get(ErrorAnalysisRenderer);
     placeholderRenderer = module.get(PlaceholderRenderer);
+    commentsRenderer = module.get(CommentsRenderer);
   });
 
   afterEach(() => {
@@ -340,6 +350,25 @@ describe('ReportHtmlCompilerService', () => {
           'user-1',
           ['user'],
         );
+      });
+
+      // Added by the /ship test coverage audit.
+      // Value: protects=a comments section reaches CommentsRenderer with the caller's identity;
+      // fails_when=the 'comments' case is dropped or the renderer is not wired (it is @Optional,
+      // so either degrades silently to a placeholder); why_new=no compiler spec dispatched
+      // 'comments'; seam=none; no_claim=what the renderer draws (renderer mocked).
+      it('should render a comments section through CommentsRenderer, not the placeholder', async () => {
+        const testRun = makeTestRun();
+        const sections = [makeSection('comments', 0)];
+        const result = await service.renderSections(sections, testRun, null, 'user-1', ['user']);
+
+        expect(commentsRenderer.renderCommentsSection).toHaveBeenCalledWith(sections[0], testRun, 'user-1', ['user']);
+        expect(result).toContain('<div>comments</div>');
+        expect(placeholderRenderer.renderPlaceholderSection).not.toHaveBeenCalled();
+      });
+
+      it('wires CommentsRenderer into ReportsModule, since the compiler takes it @Optional', () => {
+        expect(Reflect.getMetadata('providers', ReportsModule)).toContain(CommentsRenderer);
       });
 
       it('should delegate unknown section types to placeholderRenderer', async () => {
