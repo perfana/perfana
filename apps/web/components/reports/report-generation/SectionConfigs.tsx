@@ -30,6 +30,7 @@ import {
   SECTION_ANCHOR_PREFIX,
 } from '@perfana/shared/utils';
 import { SECTION_RENDER_TITLES, isLinkableSection, DEFAULT_DYNATRACE_HOST_COLUMNS, type DynatraceHostColumn } from '@perfana/shared/types';
+import { COMMENT_CARD_KEYS, COMMENT_CARD_LABELS, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
@@ -1911,6 +1912,57 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
           <Button size="small" onClick={() => onChange({ ...config, dashboardMap: [...(config.dashboardMap ?? []), { current: '', baseline: '' }] })}>Add dashboard mapping</Button>
         </Box>
       )}
+    </SectionConfigShell>
+  );
+}
+
+// ==================== Comments Config ====================
+
+/** @public */
+export interface CommentsConfig {
+  /** Card keys whose threads to include; empty or absent = every card. */
+  cards?: string[];
+}
+
+interface CommentsConfigFormProps {
+  config: CommentsConfig;
+  onChange: (config: CommentsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
+  testRunId?: string;
+  allSections?: ReportSectionConfig[];
+}
+
+export function CommentsConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: CommentsConfigFormProps) {
+  const known = new Set<string>(COMMENT_CARD_KEYS);
+  const selected = (Array.isArray(config.cards) ? config.cards : []).filter((c): c is CommentCardKey => known.has(c));
+  return (
+    <SectionConfigShell
+      sectionTitle="Comments"
+      sectionType="Comments"
+      previewType="comments"
+      previewConfig={config}
+      text={text}
+      onTextChange={onTextChange}
+      testRunId={testRunId}
+      allSections={allSections}
+    >
+      <Autocomplete
+        multiple
+        size="small"
+        options={[...COMMENT_CARD_KEYS]}
+        value={selected}
+        getOptionLabel={(key) => COMMENT_CARD_LABELS[key] ?? key}
+        onChange={(_e, value) => onChange({ ...config, cards: value })}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Cards"
+            placeholder={selected.length ? '' : 'All cards'}
+            helperText="Empty = threads from every card. Graphs markers are drawn on their chart."
+          />
+        )}
+      />
     </SectionConfigShell>
   );
 }

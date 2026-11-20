@@ -34,6 +34,30 @@ export const COMMENT_CARD_KEYS: readonly CommentCardKey[] = Object.freeze(
   Object.values(COMMENT_CARD_BY_EXPANSION_KEY),
 );
 
+/**
+ * What each card is called on the run page, for the drawer heading and a report's Comments
+ * section. Display text only: rename freely, unlike the stored keys above.
+ */
+export const COMMENT_CARD_LABELS: Readonly<Record<CommentCardKey, string>> = Object.freeze({
+  details: 'Test run details',
+  config: 'Configuration',
+  dashboards: 'Dashboards',
+  anomaly: 'Anomaly detection',
+  performance: 'Performance analysis',
+  slo: 'Service level objectives',
+  'deep-links': 'Deep links',
+  events: 'Events',
+  dynatrace: 'Dynatrace',
+  'distributed-tracing': 'Distributed tracing',
+  pyroscope: 'Pyroscope',
+  splunk: 'Splunk',
+  awr: 'AWR report',
+  report: 'Reports',
+  trends: 'Trends',
+  compare: 'Compare',
+  graphs: 'Graphs',
+});
+
 /** Comments older than this never count as unread (design R7). */
 export const COMMENT_UNREAD_WINDOW_DAYS = 30;
 

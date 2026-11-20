@@ -1,4 +1,5 @@
 import { TestRun } from '@perfana/shared';
+import { CommentDigest, commentDetail, commentHeadline } from './comment-digest';
 
 /**
  * Microsoft Teams MessageCard format
@@ -90,6 +91,25 @@ export class TeamsMessageBuilder {
   /**
    * Build a test notification message
    */
+  /** One post per comment burst: count, latest author, card and a link; no comment text. */
+  buildCommentMessage(digest: CommentDigest): TeamsMessage {
+    const headline = commentHeadline(digest);
+    return {
+      '@type': 'MessageCard',
+      '@context': 'http://schema.org/extensions',
+      themeColor: '0076D7',
+      summary: headline,
+      sections: [{ activityTitle: headline, text: commentDetail(digest), markdown: true }],
+      potentialAction: [
+        {
+          '@type': 'OpenUri',
+          name: 'View comments in Perfana',
+          targets: [{ os: 'default', uri: digest.link }],
+        },
+      ],
+    };
+  }
+
   buildTestMessage(systemName: string): TeamsMessage {
     return {
       '@type': 'MessageCard',

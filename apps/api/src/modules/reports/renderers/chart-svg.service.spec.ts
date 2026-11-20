@@ -734,4 +734,33 @@ describe('ChartSvgService', () => {
     });
   });
 
+  // Added by the /ship test coverage audit.
+  // Value: protects=a comment-marker callout outside the plotted x range is not drawn, and its
+  // label is escaped; fails_when=the range/finite filter on style.callouts is dropped;
+  // why_new=comments-renderer.spec.ts only draws an in-range callout; seam=none;
+  // no_claim=visual placement in a browser (string assertions on the SVG only).
+  describe('comment marker callouts', () => {
+    const start = 1_700_000_000_000;
+    const callouts = (html: string) => html.match(/<g class="chart-callout">/g)?.length ?? 0;
+
+    it('draws only the callouts inside the plotted time range, with an escaped label', () => {
+      const html = render([series()], {
+        style: {
+          callouts: [
+            { time: start + 60_000, label: '<1>' },
+            { time: start - 60_000, label: '2' },
+            { time: start + 10 * 60_000, label: '3' },
+            { time: Number.NaN, label: '4' },
+          ],
+        },
+      });
+      expect(callouts(html)).toBe(1);
+      expect(html).toContain('&lt;1&gt;</text></g>');
+      expect(html).not.toContain('<1></text>');
+    });
+
+    it('draws none when no callouts are passed', () => {
+      expect(callouts(render([series()]))).toBe(0);
+    });
+  });
 });

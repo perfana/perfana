@@ -290,9 +290,52 @@ Deferred while shipping. Each was reviewed and judged not to affect a dashboard 
 
 ## Test-run comments
 
-Filed from the v0.2.97.87 review (threads, PR1 of `docs/designs/test-run-comments.md`). Graph
-markers (PR2) and notifications, the report section and SUT export (PR3) are planned there and not
-repeated here.
+Filed from the reviews of `docs/designs/test-run-comments.md`: threads (PR1, v0.2.97.87), graph
+markers (PR2, v0.2.97.88), and channel notifications, the Comments report section and SUT export
+(PR3, v0.2.97.89).
+
+### Comment notifications: rough edges the v0.2.97.89 review left in (P2)
+
+Noted, not fixed, in the PR3 review (none loses a post outright or breaks a deploy that runs the
+migration first). All in `apps/api/src/modules/notifications/comment-notification-scheduler.service.ts`
+unless named:
+
+- **A comment written during a retry wait goes out on its own.** `claim()` skips rows whose
+  `notify_after` is in the future, so a new comment becomes due by itself and is posted alone; the
+  waiting batch follows in a second post. Its give-up clock is also its own. Fix: once the finder has
+  chosen a run, claim all of its unannounced rows.
+- **Give-up is decided by the oldest comment of a batch, on the API clock.** A comment merged into an
+  expiring batch gets one attempt, and `Date.now()` is compared with a Postgres `created_at` while
+  the backoff uses `now()`. Fix: decide per comment, in SQL.
+- **Starvation is bounded, not gone.** A released run returns after 5 minutes at the head of the
+  `ORDER BY MIN(created_at)` queue, so roughly 500 runs failing at once still fill every 50-slot tick
+  for up to the hour. Fix: order by when a run became eligible.
+- **One hung webhook stalls the sweep.** `sendWebhook` in `notifications.service.ts` calls `fetch`
+  with no `AbortSignal`, so Slack, Teams and proxied deliveries are bounded only by undici's ~300 s
+  defaults, and the sweep posts serially. Pre-existing for finished-run messages. Fix:
+  `signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS)`.
+- **Untested: a backed-off batch is retried once its wait is over** (the state-matrix cell
+  backoff-elapsed); an inverted `notify_after` predicate would stop every retry silently.
+- **An editing user's comment can cause a second post.** `FOR UPDATE SKIP LOCKED` skips a row a
+  concurrent PATCH holds; it is announced on the next tick.
+- **A demo or staging stack that ran this branch's migration 1828 before `notify_after` was added
+  lacks the column.** Add it by hand (`ALTER TABLE test_run_comments ADD COLUMN IF NOT EXISTS
+  notify_after timestamptz`); production never ran the earlier 1828.
+
+### Comments report section: smaller gaps from the v0.2.97.89 review (P3)
+
+In `apps/api/src/modules/reports/`:
+
+- **Two Comments sections in one report share SVG clip ids.** The chart index restarts per section,
+  so the second section's marker charts clip to the first one's plot area when sizes differ. Fix: a
+  per-document counter, or the comment id in the clip id. Two Custom Graphs sections with equal
+  preset names have the same, older, problem.
+- **The user's org filter still reads `test_runs.organization_id`** (`getTestRunComments` passes
+  alias `tr` to `resolveOrgFilter`) while the row check now reads the system's organization; and a
+  system moved to another organization keeps its comments under the old one, so they drop out of
+  reports. Fix: filter on `sut`, and move comments with their system.
+- **A deleted comment's text stays in reports generated before the delete**, including shared ones.
+  Say so in the delete confirmation and `docs-user/docs/test-runs/comments.md`, or offer to unshare.
 
 ### Decide whether a deleted comment's text stays in the audit log (P2)
 

@@ -36,6 +36,14 @@
 
     [:octicons-arrow-right-24: Read a run](read-a-run.md)
 
+-   :material-comment-text-multiple-outline:{ .lg .middle } **Comment on a test run**
+
+    ---
+
+    Threads on cards and rows, graph markers, unread badges.
+
+    [:octicons-arrow-right-24: Comment](comments.md)
+
 -   :material-check-decagram:{ .lg .middle } **Check SLO results**
 
     ---

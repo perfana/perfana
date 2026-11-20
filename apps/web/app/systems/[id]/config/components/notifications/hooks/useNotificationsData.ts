@@ -227,6 +227,7 @@ export function useNotificationsData({
       name: channel.name,
       webhookUrl: channel.webhookUrl,
       notifyOnFailedOnly: channel.notifyOnFailedOnly,
+      notifyOnComment: channel.notifyOnComment ?? false,
       enabled: channel.enabled,
       useProxy: channel.useProxy ?? false,
     });

@@ -46,6 +46,13 @@ export class UpdateNotificationChannelDto {
   notifyOnFailedOnly?: boolean;
 
   @ApiPropertyOptional({
+    description: 'Post a digest when test run comments are added (one post per burst, no comment text)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyOnComment?: boolean;
+
+  @ApiPropertyOptional({
     description: 'Whether the notification channel is enabled',
   })
   @IsOptional()

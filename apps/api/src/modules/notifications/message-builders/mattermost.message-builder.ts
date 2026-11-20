@@ -1,4 +1,5 @@
 import { TestRun } from '@perfana/shared';
+import { CommentDigest, commentDetail, commentHeadline } from './comment-digest';
 
 /**
  * Mattermost incoming-webhook payload.
@@ -84,6 +85,22 @@ export class MattermostMessageBuilder {
   /**
    * Build a test notification message
    */
+  /** One post per comment burst: count, latest author, card and a link; no comment text. */
+  buildCommentMessage(digest: CommentDigest): MattermostMessage {
+    const headline = commentHeadline(digest);
+    return {
+      username: 'Perfana',
+      text: `:speech_balloon: **${headline}**`,
+      attachments: [
+        {
+          fallback: headline,
+          color: COLOR_INFO,
+          text: `${commentDetail(digest)}\n\n[View comments in Perfana](${digest.link})`,
+        },
+      ],
+    };
+  }
+
   buildTestMessage(systemName: string): MattermostMessage {
     return {
       username: 'Perfana',

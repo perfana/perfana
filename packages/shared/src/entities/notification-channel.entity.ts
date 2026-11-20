@@ -32,6 +32,9 @@ export class NotificationChannel {
   @Column({ name: 'notify_on_failed_only', type: 'boolean', default: false })
   notifyOnFailedOnly!: boolean;
 
+  @Column({ name: 'notify_on_comment', type: 'boolean', default: false })
+  notifyOnComment!: boolean;
+
   @Column({ type: 'boolean', default: true })
   enabled!: boolean;
 

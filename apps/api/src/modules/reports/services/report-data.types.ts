@@ -588,3 +588,23 @@ export interface ReportErrorOverTimePoint {
   time: Date;
   countsByCode: Record<string, number>;
 }
+
+/**
+ * One `test_run_comments` row as the Comments section reads it. A soft-deleted root keeps its
+ * place (and marker number) with `body` already wiped by the delete; `chartContext` is the
+ * card's recorded view (`kind` stamped by the comments service).
+ */
+export interface ReportCommentRow {
+  id: string;
+  cardKey: string;
+  parentId: string | null;
+  body: string;
+  authorName: string;
+  itemLabel: string | null;
+  markerSeq: number | null;
+  markerTime: Date | null;
+  chartContext: Record<string, unknown> | null;
+  createdAt: Date;
+  editedAt: Date | null;
+  deletedAt: Date | null;
+}

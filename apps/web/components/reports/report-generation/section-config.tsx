@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ChatBubbleOutline as CommentIcon,
   CompareArrows as CompareIcon,
   Dns as DnsIcon,
   ErrorOutline as ErrorIcon,
@@ -114,6 +115,12 @@ export const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; 
     label: 'Dynatrace Hosts',
     description: 'Per-host CPU, memory, disk and network averages from Dynatrace over the run',
     color: '#6d4c41',
+  },
+  comments: {
+    icon: <CommentIcon />,
+    label: 'Comments',
+    description: "The run's comment threads by card, with each Graphs marker drawn on its chart",
+    color: '#827717',
   },
   index: {
     icon: <TocIcon />,

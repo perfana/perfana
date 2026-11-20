@@ -22,7 +22,7 @@ import { AuthorizationService } from '../../common/services/authorization.servic
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { Capability } from '../../constants/capabilities.constants';
 import { CreateNotificationChannelDto, UpdateNotificationChannelDto } from './dto';
-import { MattermostMessageBuilder, SlackMessageBuilder, TeamsMessageBuilder } from './message-builders';
+import { CommentDigest, MattermostMessageBuilder, SlackMessageBuilder, TeamsMessageBuilder } from './message-builders';
 import { MASKED_WEBHOOK_URL } from './notifications.constants';
 import { checkWebhookTarget, postJsonGuarded } from './webhook-target-guard';
 
@@ -374,6 +374,7 @@ export class NotificationsService implements OnApplicationBootstrap {
         webhookUrl: dto.webhookUrl,
         notifyOnFinished: dto.notifyOnFinished ?? true,
         notifyOnFailedOnly: dto.notifyOnFailedOnly ?? false,
+        notifyOnComment: dto.notifyOnComment ?? false,
         enabled: dto.enabled ?? true,
         useProxy: dto.useProxy ?? false,
         createdBy: userId,
@@ -437,6 +438,7 @@ export class NotificationsService implements OnApplicationBootstrap {
       if (newWebhookUrl !== undefined) channel.webhookUrl = newWebhookUrl;
       if (dto.notifyOnFinished !== undefined) channel.notifyOnFinished = dto.notifyOnFinished;
       if (dto.notifyOnFailedOnly !== undefined) channel.notifyOnFailedOnly = dto.notifyOnFailedOnly;
+      if (dto.notifyOnComment !== undefined) channel.notifyOnComment = dto.notifyOnComment;
       if (dto.enabled !== undefined) channel.enabled = dto.enabled;
       if (dto.useProxy !== undefined) channel.useProxy = dto.useProxy;
       channel.updatedBy = userId;
@@ -581,6 +583,50 @@ export class NotificationsService implements OnApplicationBootstrap {
       this.logger.error('Failed to send test run notifications:', error);
       // Don't throw - notifications should not block test run completion
     }
+  }
+
+  /**
+   * Post one comment digest to a channel (comment notification sweep). Throws on failure;
+   * `isRetryableDeliveryError` tells the caller whether trying again can help.
+   */
+  async sendCommentDigest(channel: NotificationChannel, digest: CommentDigest): Promise<void> {
+    let message: unknown;
+    switch (channel.type) {
+      case 'slack':
+        message = this.slackBuilder.buildCommentMessage(digest);
+        break;
+      case 'teams':
+        message = this.teamsBuilder.buildCommentMessage(digest);
+        break;
+      case 'mattermost':
+        message = this.mattermostBuilder.buildCommentMessage(digest);
+        break;
+      default:
+        throw new Error(`Unsupported notification type: ${channel.type}`);
+    }
+    await this.deliver(channel, message);
+  }
+
+  /** Base URL for deep links, as the finished-run messages use it. */
+  getPerfanaUrl(): string {
+    return this.perfanaUrl;
+  }
+
+  /**
+   * Whether a failed delivery may succeed if repeated: a timeout, a network error, a 5xx or
+   * a 429. An SSRF refusal, a 4xx, an undecryptable URL or a missing key never will.
+   */
+  static isRetryableDeliveryError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message : String(error);
+    const status = /failed with status (\d{3})/.exec(msg)?.[1];
+    if (status) return Number(status) >= 500 || status === '429';
+    if (/timed out|timeout/i.test(msg)) return true;
+    const code = (error as { code?: string; cause?: { code?: string } } | null);
+    const errCode = code?.code ?? code?.cause?.code;
+    if (errCode && /^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR_.*)$/.test(errCode)) {
+      return true;
+    }
+    return /fetch failed|socket hang up/i.test(msg);
   }
 
   /**

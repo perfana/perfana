@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.89] - 2026-11-20
+
+### Added
+- **Get a chat message when someone comments on a test run.** A Slack, Teams or Mattermost channel of a system can now be set to "Notify when test run comments are added". Comments that arrive close together become one message, sent about two minutes after the first, saying how many there are, who wrote the latest and on which card, with a link straight to it. The message never contains the comment text. Deleted comments are not announced, and neither are comments that existed before this version. If the chat service is down, Perfana tries again every 5 minutes for up to an hour.
+- **Put a run's discussion in a report.** A new "Comments" report section lists the run's comment threads grouped by card, with author and time, optionally limited to some cards. Each numbered graph marker is printed on its chart, drawn over the range its author was looking at, with the marker's number at its moment.
+- **Exported systems carry their comments.** Exporting a system now includes the comments on its test runs. Imported comments are never announced to the target's chat channels, and who has read what stays behind.
+
+### Fixed
+- **Organization admins can delete other people's comments from the comment panel.** The API already allowed it, but the panel only offered Delete on your own comments. Edit stays with the author.
+
 ## [0.2.97.88] - 2026-11-20
 
 ### Added

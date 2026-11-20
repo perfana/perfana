@@ -59,6 +59,9 @@
     "tsconfig*.json": [],
     "packages/shared/src/database/migrations/1827000000000-TestRunComments.ts": [
       "apps/api/src/test/rls/test-run-comments.spec.ts"
+    ],
+    "packages/shared/src/database/migrations/1828000000000-CommentNotifications.ts": [
+      "apps/api/src/modules/sut-transfer/sut-import.service.spec.ts"
     ]
   },
   "strays": {

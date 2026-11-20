@@ -58,6 +58,7 @@ import {
   RegressionsData,
   RegressionsMetric,
   GraphPresetPanels,
+  ReportCommentRow,
   ReportErrorAnalysis,
   ReportTransaction,
   ScenarioData,
@@ -148,6 +149,34 @@ function sameControllerChain(a: ControllerRef[], b: ControllerRef[]): boolean {
     && a.every((c, i) => c.name === b[i]?.name
       && c.class === b[i]?.class
       && (c.occurrence ?? 0) === (b[i]?.occurrence ?? 0));
+}
+
+/**
+ * A graph preset's stored series as panel selectors, deduped. Shared by the Custom Graphs
+ * section (presets) and the Comments section (a Graphs marker's recorded view, which stores
+ * the same series shape), so both resolve a series the same way.
+ */
+export function selectorsFromPresetSeries(
+  series: ReadonlyArray<{ dashboardLabel?: string; panelTitle?: string; metricName?: string; panelId?: number }>,
+): MetricsPanelSelector[] {
+  const seen = new Set<string>();
+  const panels: MetricsPanelSelector[] = [];
+  for (const s of series) {
+    const selector: MetricsPanelSelector = {
+      dashboardLabel: s.dashboardLabel,
+      panelTitle: s.panelTitle,
+      metricName: s.metricName,
+      // The graphs card offers a run-wide aggregate that has no ds_metrics rows; the
+      // preset stores it like any other series, so it has to be recognised here or the
+      // report queries a metric name that was never written.
+      aggregate: presetAggregateSpec(s) ?? undefined,
+    };
+    const key = `${selector.dashboardLabel}\u0000${selector.panelTitle}\u0000${selector.metricName}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    panels.push(selector);
+  }
+  return panels;
 }
 
 @Injectable()
@@ -3536,30 +3565,69 @@ export class ReportDataFetcherService {
         if (!row) continue;
         // Deduped within the preset only: two presets may legitimately draw the
         // same series, and each still gets its own chart.
-        const seen = new Set<string>();
-        const panels: MetricsPanelSelector[] = [];
-        for (const series of row.series_config ?? []) {
-          const selector: MetricsPanelSelector = {
-            dashboardLabel: series.dashboardLabel,
-            panelTitle: series.panelTitle,
-            metricName: series.metricName,
-            // The graphs card offers a run-wide aggregate that has no ds_metrics rows; the
-            // preset stores it like any other series, so it has to be recognised here or the
-            // report queries a metric name that was never written.
-            aggregate: presetAggregateSpec(series) ?? undefined,
-          };
-          const key = `${selector.dashboardLabel}\u0000${selector.panelTitle}\u0000${selector.metricName}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          panels.push(selector);
-        }
-        presets.push({ id, name: row.name, panels });
+        presets.push({ id, name: row.name, panels: selectorsFromPresetSeries(row.series_config ?? []) });
       }
       return { presets, foundIds: presets.map((p) => p.id) };
     } catch (error) {
       this.logger.error(`Failed to fetch graph presets ${presetIds.join(', ')}:`, error);
       return { presets: [], foundIds: [] };
     }
+  }
+
+  /**
+   * The report run's comments, oldest first, optionally limited to some cards.
+   *
+   * Scoped twice: to the run (by its uuid, which the caller already resolved and authorized)
+   * and to its system's organization: a comment row carries the organization the comments
+   * service copied from the SYSTEM at create (not `test_runs.organization_id`, which can
+   * drift), and a row whose copy disagrees is not this run's to print. The usual
+   * org filter applies on top (empty for the background job, which runs with no user).
+   */
+  async getTestRunComments(
+    testRun: TestRun,
+    cardKeys: readonly string[] | null,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<ReportCommentRow[]> {
+    const params: unknown[] = [testRun.id];
+    let cardClause = '';
+    if (cardKeys && cardKeys.length > 0) {
+      params.push([...cardKeys]);
+      cardClause = `AND c.card_key = ANY($${params.length}::varchar[])`;
+    }
+    const orgFilter = await this.resolveOrgFilter(userId, roles, params.length + 1, 'tr');
+    const rows: Array<{
+      id: string; card_key: string; parent_id: string | null; body: string; author_name: string;
+      item_label: string | null; marker_seq: number | null; marker_time: Date | null;
+      chart_context: Record<string, unknown> | null; created_at: Date; edited_at: Date | null;
+      deleted_at: Date | null;
+    }> = await withRequestEm(this.testRunRepo).query(
+      `SELECT c.id, c.card_key, c.parent_id, c.body, c.author_name, c.item_label,
+              c.marker_seq, c.marker_time, c.chart_context, c.created_at, c.edited_at, c.deleted_at
+         FROM test_run_comments c
+         JOIN test_runs tr ON tr.id = c.test_run_id
+         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE c.test_run_id = $1
+          AND c.organization_id = sut.organization_id
+          ${cardClause}
+          ${orgFilter.clause}
+        ORDER BY c.created_at, c.id`,
+      [...params, ...orgFilter.params],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      cardKey: r.card_key,
+      parentId: r.parent_id,
+      body: r.body,
+      authorName: r.author_name,
+      itemLabel: r.item_label,
+      markerSeq: r.marker_seq,
+      markerTime: r.marker_time ? new Date(r.marker_time) : null,
+      chartContext: r.chart_context,
+      createdAt: new Date(r.created_at),
+      editedAt: r.edited_at ? new Date(r.edited_at) : null,
+      deletedAt: r.deleted_at ? new Date(r.deleted_at) : null,
+    }));
   }
 
   /**

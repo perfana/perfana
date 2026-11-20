@@ -58,6 +58,7 @@ nav:
       - Upload a JMeter result file: test-runs/upload-jtl.md
       - Find and filter test runs: test-runs/find-and-filter-runs.md
       - Read a test run: test-runs/read-a-run.md
+      - Comment on a test run: test-runs/comments.md
       - Check SLO results: test-runs/slo-check-results.md
       - Understand ADAPT verdicts: test-runs/understand-adapt.md
       - Compare test runs: test-runs/compare-runs.md

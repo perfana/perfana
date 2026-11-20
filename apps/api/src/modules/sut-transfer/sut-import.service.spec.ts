@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { gzipSync } from 'zlib';
+import { gunzipSync, gzipSync } from 'zlib';
 import { createTestApp, closeTestApp, IntegrationTestContext } from '../../../test/helpers/integration-test.helper';
 import { SutExportService } from './sut-export.service';
 import { SutImportService } from './sut-import.service';
@@ -314,6 +314,173 @@ describe('SutImportService (integration)', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  // Test-run comments (design R9). Exported with their run, soft-deleted rows included; read
+  // state stays behind; every imported comment is stamped announced so the target's
+  // notification sweep never posts it; replies land after their roots.
+  describe('test-run comments', () => {
+    const c = {
+      sut: '13131313-0000-0000-0000-000000000001',
+      run: '13131313-0000-0000-0000-000000000002',
+      root: '13131313-0000-0000-0000-000000000011',
+      reply: '13131313-0000-0000-0000-000000000012',
+      marker: '13131313-0000-0000-0000-000000000013',
+      markerReply: '13131313-0000-0000-0000-000000000014',
+      team: '13131313-0000-0000-0000-0000000000ee',
+    };
+    const commentRunKey = 'comments-run-1';
+    const cleanup = async (): Promise<void> => {
+      await dataSource.query(`DELETE FROM test_run_comment_reads WHERE test_run_id = $1`, [c.run]);
+      await dataSource.query(`DELETE FROM test_run_comments WHERE test_run_id = $1`, [c.run]);
+      await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [c.run]);
+      await dataSource.query(`DELETE FROM systems_under_test WHERE id = $1`, [c.sut]);
+    };
+    const seedSutAndRun = async (org: string): Promise<void> => {
+      await dataSource.query(`INSERT INTO systems_under_test (id, name, description, organization_id) VALUES ($1,'comments-sut','c',$2)`, [c.sut, org]);
+      await dataSource.query(`INSERT INTO test_runs (id, test_run_id, system_under_test_id, test_environment, workload, organization_id) VALUES ($1,$2,$3,'test','wl-1',$4)`, [c.run, commentRunKey, c.sut, org]);
+    };
+    const insertComment = (
+      id: string,
+      opts: { parent?: string; body?: string; deleted?: boolean; markerSeq?: number; createdAt: string },
+    ): Promise<unknown> =>
+      dataSource.query(
+        `INSERT INTO test_run_comments
+           (id, test_run_id, card_key, parent_id, body, author_id, author_name, marker_seq, marker_time,
+            organization_id, team_id, created_at, deleted_at, notified_at)
+         VALUES ($1,$2,'graphs',$3,$4,'user-a','User A',$5,$6,$7,$8,$9,$10,NULL)`,
+        [
+          id, c.run, opts.parent ?? null, opts.deleted ? '' : (opts.body ?? 'text'),
+          opts.markerSeq ?? null, opts.markerSeq ? '2026-11-01T10:05:00Z' : null,
+          srcOrg, c.team, opts.createdAt, opts.deleted ? '2026-11-01T11:00:00Z' : null,
+        ],
+      );
+    const exportBundle = (): Promise<Buffer> =>
+      exportService
+        .export(c.sut, { testRunIds: [c.run], includeOptional: false, includeRaw: false })
+        .then(streamToBuffer);
+
+    afterEach(cleanup);
+
+    it('round-trips threads, keeps soft-deleted roots, and stamps every comment announced', async () => {
+      await seedSutAndRun(srcOrg);
+      // The reply is written with an EARLIER created_at than its root, so only the export's
+      // roots-first ordering (not insertion order) can put it after its parent.
+      await insertComment(c.root, { body: 'card thread', createdAt: '2026-11-01T10:10:00Z' });
+      await insertComment(c.marker, { markerSeq: 1, createdAt: '2026-11-01T10:00:00Z' });
+      await insertComment(c.reply, { parent: c.root, body: 'reply', createdAt: '2026-11-01T10:20:00Z' });
+      await insertComment(c.markerReply, { parent: c.marker, body: 'under a deleted marker', createdAt: '2026-11-01T10:30:00Z' });
+      await dataSource.query(`UPDATE test_run_comments SET deleted_at = '2026-11-01T11:00:00Z', body = '' WHERE id = $1`, [c.marker]);
+      await dataSource.query(
+        `INSERT INTO test_run_comment_reads (user_id, test_run_id, card_key, last_seen_at, organization_id) VALUES ('user-b',$1,'graphs',now(),$2)`,
+        [c.run, srcOrg],
+      );
+
+      const bundle = await exportBundle();
+      await cleanup();
+
+      const before = new Date();
+      const summary = await importService.import(bundle, targetOrg);
+      expect(summary.rowCounts['test_run_comments']).toBe(4);
+      expect(summary.droppedCounts['test_run_comments']).toBeUndefined();
+
+      const rows: Array<Record<string, any>> = await dataSource.query(
+        `SELECT id, parent_id, body, deleted_at, marker_seq, organization_id, team_id, notified_at
+         FROM test_run_comments WHERE test_run_id = $1`,
+        [c.run],
+      );
+      expect(rows).toHaveLength(4);
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      expect(byId.get(c.reply)!.parent_id).toBe(c.root);
+      expect(byId.get(c.markerReply)!.parent_id).toBe(c.marker);
+      expect(byId.get(c.marker)).toMatchObject({ body: '', marker_seq: 1 });
+      expect(byId.get(c.marker)!.deleted_at).not.toBeNull();
+      for (const r of rows) {
+        expect(r.organization_id).toBe(targetOrg);
+        expect(r.team_id).toBeNull();
+        // Source had NULL (unannounced): the target's sweep must never see these as new.
+        expect(r.notified_at).not.toBeNull();
+        expect(new Date(r.notified_at).getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
+      }
+
+      const reads = await dataSource.query(`SELECT 1 FROM test_run_comment_reads WHERE test_run_id = $1`, [c.run]);
+      expect(reads).toHaveLength(0);
+
+      // Replay is a no-op.
+      const replay = await importService.import(bundle, targetOrg);
+      expect(replay.rowCounts['test_run_comments']).toBe(0);
+      expect(replay.skippedCounts['test_run_comments']).toBe(4);
+    });
+
+    it('imports a reply listed before its root in one batch', async () => {
+      // Merge path: the run is already here, the bundle carries only its comments.
+      await seedSutAndRun(targetOrg);
+      const lines = [
+        JSON.stringify({ __manifest__: { schemaVersion: 1, sourceSutId: c.sut, sutName: 'comments-sut' } }),
+        JSON.stringify({ __table__: 'test_run_comments' }),
+        // A bundle from before migration 1828 carries no notified_at at all
+        // (packages/shared/src/database/migrations/1828000000000-CommentNotifications.ts).
+        JSON.stringify({ id: c.reply, test_run_id: c.run, card_key: 'graphs', parent_id: c.root, body: 'reply', author_id: 'u', author_name: 'U', organization_id: srcOrg, created_at: '2026-11-01T10:00:00Z', updated_at: '2026-11-01T10:00:00Z' }),
+        JSON.stringify({ id: c.root, test_run_id: c.run, card_key: 'graphs', parent_id: null, body: 'root', author_id: 'u', author_name: 'U', organization_id: srcOrg, created_at: '2026-11-01T10:00:00Z', updated_at: '2026-11-01T10:00:00Z' }),
+      ];
+      const summary = await importService.import(gzipSync(Buffer.from(lines.join('\n') + '\n')), targetOrg);
+      expect(summary.rowCounts['test_run_comments']).toBe(2);
+      const rows = await dataSource.query(`SELECT id, notified_at FROM test_run_comments WHERE test_run_id = $1`, [c.run]);
+      expect(rows).toHaveLength(2);
+      for (const r of rows) expect(r.notified_at).not.toBeNull();
+    });
+
+    it('drops a reply whose root lost its marker number to a comment already here, instead of aborting', async () => {
+      await seedSutAndRun(srcOrg);
+      await insertComment(c.marker, { markerSeq: 1, body: 'source marker', createdAt: '2026-11-01T10:00:00Z' });
+      await insertComment(c.markerReply, { parent: c.marker, body: 'reply', createdAt: '2026-11-01T10:01:00Z' });
+      const bundle = await exportBundle();
+      await cleanup();
+
+      // The target already has this run, with its own marker 1 under a different id.
+      await seedSutAndRun(targetOrg);
+      await dataSource.query(
+        `INSERT INTO test_run_comments (id, test_run_id, card_key, body, author_id, author_name, marker_seq, marker_time, organization_id)
+         VALUES ($1,$2,'graphs','target marker','user-t','User T',1,now(),$3)`,
+        [c.root, c.run, targetOrg],
+      );
+
+      const summary = await importService.import(bundle, targetOrg);
+      expect(summary.rowCounts['test_run_comments']).toBe(0);
+      expect(summary.skippedCounts['test_run_comments']).toBe(1);
+      expect(summary.droppedCounts['test_run_comments']).toBe(1);
+      const ids = (await dataSource.query(`SELECT id FROM test_run_comments WHERE test_run_id = $1`, [c.run]))
+        .map((r: { id: string }) => r.id);
+      expect(ids).toEqual([c.root]);
+    });
+
+    it('still imports a bundle exported before comments travelled', async () => {
+      await seedSutAndRun(srcOrg);
+      const current = gunzipSync(await exportBundle()).toString('utf8').split('\n');
+      // Strip the test_run_comments section (its header and any rows up to the next header),
+      // which is what an export from before this version looks like.
+      const legacy: string[] = [];
+      let inComments = false;
+      for (const line of current) {
+        if (line.startsWith('{"__table__"')) inComments = line === JSON.stringify({ __table__: 'test_run_comments' });
+        if (inComments) continue;
+        if (line.startsWith('{"__summary__"')) {
+          const summaryLine = JSON.parse(line);
+          delete summaryLine.__summary__.counts.test_run_comments;
+          legacy.push(JSON.stringify(summaryLine));
+        } else {
+          legacy.push(line);
+        }
+      }
+      expect(legacy.join('\n')).not.toContain('test_run_comments');
+      await cleanup();
+
+      const summary = await importService.import(gzipSync(Buffer.from(legacy.join('\n'))), targetOrg);
+      expect(summary.rowCounts['test_runs']).toBe(1);
+      expect(summary.rowCounts['test_run_comments']).toBeUndefined();
+      const comments = await dataSource.query(`SELECT 1 FROM test_run_comments WHERE test_run_id = $1`, [c.run]);
+      expect(comments).toHaveLength(0);
+    });
   });
 
   it('rejects a bundle that targets a table outside the allowlist (SQL trust boundary)', async () => {

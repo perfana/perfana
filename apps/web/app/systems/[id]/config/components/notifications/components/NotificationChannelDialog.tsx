@@ -71,6 +71,10 @@ export function NotificationChannelDialog({
     onFormChange({ ...formData, notifyOnFailedOnly });
   };
 
+  const handleNotifyOnCommentChange = (notifyOnComment: boolean) => {
+    onFormChange({ ...formData, notifyOnComment });
+  };
+
   const handleUseProxyChange = (useProxy: boolean) => {
     onFormChange({ ...formData, useProxy });
   };
@@ -134,6 +138,16 @@ export function NotificationChannelDialog({
               />
             }
             label="Only notify for failed test runs"
+          />
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={formData.notifyOnComment}
+                onChange={(e) => handleNotifyOnCommentChange(e.target.checked)}
+              />
+            }
+            label="Notify when test run comments are added"
           />
 
           <FormControlLabel

@@ -158,6 +158,14 @@ describe('NotificationsService tenant scoping', () => {
       expect(result.webhookUrl).toBe(MASKED_WEBHOOK_URL);
     });
 
+    it('stores notifyOnComment, defaulting to off', async () => {
+      await service.create(dto, USER, []);
+      expect(channelRepo.create.mock.calls[0][0].notifyOnComment).toBe(false);
+
+      await service.create({ ...dto, notifyOnComment: true }, USER, []);
+      expect(channelRepo.create.mock.calls[1][0].notifyOnComment).toBe(true);
+    });
+
     it('lets an API key in the system\'s organization create without a role', async () => {
       await service.create(dto, 'api-key:abc', []);
 
@@ -187,6 +195,11 @@ describe('NotificationsService tenant scoping', () => {
       const saved = channelRepo.save.mock.calls[0][0];
       expect(saved.webhookUrl).toBe(URL);
       expect(saved.name).toBe('renamed');
+    });
+
+    it('updates notifyOnComment only when it is sent', async () => {
+      await service.update(CHANNEL, { notifyOnComment: true }, USER, []);
+      expect(channelRepo.save.mock.calls[0][0].notifyOnComment).toBe(true);
     });
 
     it('ignores an explicit null webhook URL instead of writing NULL', async () => {

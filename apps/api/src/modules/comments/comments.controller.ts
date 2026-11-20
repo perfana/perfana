@@ -30,10 +30,10 @@ export class CommentsController {
   }
 
   @Get('test-runs/:id/comments')
-  @ApiOperation({ summary: 'List comment threads on a test run', description: '`:id` is the run uuid or its test_run_id. Threads are roots with their replies, oldest first. With `card`, `lastSeenAt` is the caller\'s previous look at that card.' })
+  @ApiOperation({ summary: 'List comment threads on a test run', description: '`:id` is the run uuid or its test_run_id. Threads are roots with their replies, oldest first. With `card`, `lastSeenAt` is the caller\'s previous look at that card. `canModerate`: the caller may delete other people\'s comments here (organization admin or global admin).' })
   @ApiQuery({ name: 'card', required: false, enum: COMMENT_CARD_KEYS })
   @ApiResponse({ status: 404, description: 'Run not found or outside your organizations' })
-  async list(@Param('id') id: string, @UserCtx() ctx: UserContext, @Query('card') card?: string): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null }> {
+  async list(@Param('id') id: string, @UserCtx() ctx: UserContext, @Query('card') card?: string): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; canModerate: boolean }> {
     return this.comments.listThreads(id, card, await this.caller(ctx));
   }
 
