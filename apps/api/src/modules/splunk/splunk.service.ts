@@ -574,7 +574,7 @@ export class SplunkService {
           total: q.aggregation === 'count' && st.mean !== null && st.count !== null ? Math.round(st.mean * st.count) : null,
         }))
         .sort((a, b) => (b.total ?? b.mean ?? 0) - (a.total ?? a.mean ?? 0));
-      return { panelId: q.panelId, title: q.panelTitle, aggregation: q.aggregation, splitBy: q.splitBy, unit: q.metricUnit, series, link };
+      return { panelId: q.panelId, dashboardLabel: q.dashboardLabel, title: q.panelTitle, aggregation: q.aggregation, splitBy: q.splitBy, unit: q.metricUnit, series, link };
     });
 
     const firstConfig = configById.get(queries[0]!.splunkConfigId);

@@ -6,14 +6,15 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse, Divider, IconButton, Link,
+  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse, Divider, IconButton, Link, Menu,
   Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography,
 } from '@mui/material';
-import { OpenInNew } from '@mui/icons-material';
+import { MoreVert, OpenInNew } from '@mui/icons-material';
 import { describeMapping, fetchSplunkRunSummary, SplunkRunPanel, SplunkRunSummary } from '@/lib/splunk';
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import KPIDisplay from '../shared/KPIDisplay';
 import SoftBadge from '../shared/SoftBadge';
+import { OpenInCardMenuItems } from '../shared/metric-card-links';
 
 const SPLUNK_GREEN = '#65A637';
 const MAX_ROWS = 10;
@@ -166,6 +167,8 @@ function PanelSummary({ panel }: { panel: SplunkRunPanel }) {
   const isCount = panel.aggregation === 'count';
   const rows = panel.series.slice(0, MAX_ROWS);
   const top = Math.max(1, ...rows.map((s) => (isCount ? s.total : s.mean) ?? 0));
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const closeMenu = () => setMenuAnchor(null);
 
   return (
     <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 2 }}>
@@ -176,13 +179,38 @@ function PanelSummary({ panel }: { panel: SplunkRunPanel }) {
             {panel.aggregation}{panel.splitBy ? ` by ${panel.splitBy}` : ''}
           </Typography>
         </Box>
-        {panel.link && (
-          <Tooltip title="Open this search in Splunk for the run window">
-            <IconButton size="small" component={Link} href={panel.link} target="_blank" rel="noopener noreferrer" aria-label={`Open ${panel.title} in Splunk`}>
-              <OpenInNew fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        )}
+        <Box sx={{ display: 'flex' }}>
+          {panel.link && (
+            <Tooltip title="Open this search in Splunk for the run window">
+              <IconButton size="small" component={Link} href={panel.link} target="_blank" rel="noopener noreferrer" aria-label={`Open ${panel.title} in Splunk`}>
+                <OpenInNew fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {panel.series.length > 0 && (
+            <Tooltip title="Open in Graphs, Compare or Trends">
+              <IconButton
+                size="small"
+                aria-label={`Actions for ${panel.title}`}
+                aria-haspopup="menu"
+                aria-expanded={Boolean(menuAnchor)}
+                onClick={(e) => setMenuAnchor(e.currentTarget)}
+              >
+                <MoreVert fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          <Menu
+            anchorEl={menuAnchor}
+            open={Boolean(menuAnchor)}
+            onClose={closeMenu}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            {/* No metric: the whole panel, every series it holds. */}
+            <OpenInCardMenuItems series={{ dashboardLabel: panel.dashboardLabel, panelId: panel.panelId }} onClose={closeMenu} />
+          </Menu>
+        </Box>
       </Box>
       {rows.length === 0 ? (
         <Typography variant="body2" color="text.secondary">No data for this run.</Typography>
