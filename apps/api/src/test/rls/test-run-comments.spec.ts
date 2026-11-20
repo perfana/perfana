@@ -72,6 +72,9 @@ describe('CommentsService against a real database', () => {
   });
 
   afterAll(async () => {
+    // A worker on the same database can register collection for this throwaway run mid-test; its
+    // rows hold a NO ACTION foreign key and would block the run's delete.
+    await ds.query(`DELETE FROM ds_metric_collection_status WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE id = $1)`, [runUuid]);
     await ds.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid]); // cascades comments and reads
     await ds.query(`DELETE FROM systems_under_test WHERE id = $1`, [sutA]);
     await ds.query(`DELETE FROM teams WHERE id = $1`, [teamA]);
@@ -219,5 +222,49 @@ describe('CommentsService against a real database', () => {
         [runUuid, orgA],
       ),
     ).rejects.toThrow(/ck_test_run_comments_marker/);
+  });
+
+  // Value: protects=marker numbering is distinct under concurrency and never reused after a delete;
+  // fails_when=the advisory lock goes, MAX() is read outside the transaction, or a marker is hard-deleted;
+  // why_new=only a real database can race two inserts; seam=none; no_claim=the web pin rendering
+  describe('graph markers', () => {
+    const ctx = {
+      series: [{ dashboardId: 'd1', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: 'used', source: 'grafana' }],
+      xRange: ['2026-11-20T10:00:00.000Z', '2026-11-20T11:00:00.000Z'] as [string, string],
+    };
+    const marker = (body: string) =>
+      ({ card: 'graphs', body, markerTime: '2026-11-20T10:37:10.000Z', chartContext: ctx }) as never;
+
+    it('numbers concurrent markers distinctly and keeps a deleted marker\'s number', async () => {
+      const placed = await Promise.all([1, 2, 3, 4].map((i) => service.create(runUuid, marker(`spike ${i}`), i % 2 ? anna : mark)));
+      const seqs = placed.map((c) => c.markerSeq!).sort((a, b) => a - b);
+      expect(new Set(seqs).size).toBe(4);
+      expect(seqs[3]! - seqs[0]!).toBe(3);
+      expect(placed[0]).toMatchObject({ markerTime: '2026-11-20T10:37:10.000Z', chartContext: { xRange: ctx.xRange } });
+
+      const top = placed.find((c) => c.markerSeq === seqs[3])!;
+      await service.remove(top.id, top.authorId === anna.userId ? anna : mark);
+      const after = await service.create(runUuid, marker('again'), anna);
+      expect(after.markerSeq).toBe(seqs[3]! + 1);
+      const { threads } = await service.listThreads(runUuid, 'graphs', anna);
+      expect(threads.find((t) => t.id === top.id)).toMatchObject({ deleted: true, markerSeq: seqs[3], chartContext: null });
+      // The stored view goes with the body, not only the response: retracting means gone from the row.
+      const [row] = await ds.query(`SELECT chart_context FROM test_run_comments WHERE id = $1`, [top.id]);
+      expect(row.chart_context).toBeNull();
+    });
+
+    it('refuses a marker off the Graphs card, on a reply, or with half its fields', async () => {
+      await expect(service.create(runUuid, { ...(marker('x') as object), card: 'slo' } as never, anna)).rejects.toBeInstanceOf(BadRequestException);
+      const root = await service.create(runUuid, { card: 'graphs', body: 'root' }, anna);
+      await expect(service.create(runUuid, { ...(marker('x') as object), parentId: root.id } as never, anna)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.create(runUuid, { card: 'graphs', body: 'x', markerTime: '2026-11-20T10:00:00Z' } as never, anna)).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    // A plain comment records its card's view too, without taking a marker number.
+    it('stores a Trends comment’s view with its kind and no marker number', async () => {
+      const view = { series: ctx.series, timeRange: 'Last week', evaluateType: 'p95' };
+      const c = await service.create(runUuid, { card: 'trends', body: 'p95 creeping up', chartContext: view } as never, anna);
+      expect(c).toMatchObject({ markerSeq: null, markerTime: null, chartContext: { kind: 'trends', timeRange: 'Last week', evaluateType: 'p95' } });
+    });
   });
 });

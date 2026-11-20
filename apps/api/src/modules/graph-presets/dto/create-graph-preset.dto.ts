@@ -5,7 +5,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export enum DataSource {
   GRAFANA = 'grafana',
   DYNATRACE = 'dynatrace',
-  PERFORMANCE_METRICS = 'performance-metrics'
+  PERFORMANCE_METRICS = 'performance-metrics',
+  SPLUNK = 'splunk',
 }
 
 export class SeriesConfigDto {
