@@ -145,6 +145,33 @@ export interface PerformanceRankingResult {
   totalTransactions: number;
 }
 
+/**
+ * The seconds an analysis-window rate divides by: `getTransactionStats` asks for the analysis
+ * window (excludeRampUp=true), whose rows cover [start + ramp_up, end - ramp_down). Mirrors
+ * `analysedSeconds` in packages/shared/src/database/run-window.ts, which this app cannot import:
+ * ramp-down counts only once the run has an end, and offsets that do not fit leave the whole run.
+ * Dividing by the whole run read a third too low on a run with a long ramp-down.
+ */
+export function analysisWindowSeconds(run: {
+  duration?: number | null;
+  duration_seconds?: number | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  analysis_start_offset?: number | null;
+  analysis_end_offset?: number | null;
+}): number {
+  const pos = (v: number | null | undefined) => (typeof v === 'number' && v > 0 ? v : 0);
+  const duration = pos(run.duration ?? run.duration_seconds);
+  const up = pos(run.analysis_start_offset);
+  const down = pos(run.analysis_end_offset);
+  if (run.start_time && run.end_time) {
+    const runSeconds = (Date.parse(run.end_time) - Date.parse(run.start_time)) / 1000;
+    if (!(runSeconds > up + down)) return duration;
+  }
+  const trimmed = up + (run.end_time ? down : 0);
+  return duration > trimmed ? duration - trimmed : duration;
+}
+
 export function buildPerformanceRanking(
   transactions: TransactionStats[],
   durationSeconds: number,

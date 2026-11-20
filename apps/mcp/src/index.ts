@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { PerfanaClient } from './perfana-client.js';
-import { diffConfigs, buildComparison, buildPerformanceRanking, buildErrorAnalysis, buildAdaptSummary } from './helpers.js';
+import { diffConfigs, buildComparison, buildPerformanceRanking, buildErrorAnalysis, buildAdaptSummary, analysisWindowSeconds } from './helpers.js';
 import type { RankingDimension } from './helpers.js';
 
 const PERFANA_API_URL = process.env.PERFANA_API_URL ?? 'http://localhost:3001/api';
@@ -203,7 +203,7 @@ server.tool(
       client.getTestRun(testRunId),
     ]);
 
-    const durationSeconds = run.duration ?? run.duration_seconds ?? 0;
+    const durationSeconds = analysisWindowSeconds(run);
     const result = buildPerformanceRanking(stats, durationSeconds, dimension as RankingDimension, limit);
     result.testRunId = testRunId;
 
