@@ -228,14 +228,16 @@ rather than a verdict. Four things about it are easy to get backwards:
    pre-existing errored or NO_DATA aggregated checks render — from FAIL to ERROR / N/A, matching the
    worker's own verdict. Consolidated results and the Slack/Teams message builders still read "SLOs
    Passed" for a run in which nothing was judged; that tri-state is the open TODOS.md item.
-3. **The column is nullable, and that is not a mistake to tighten.** `benchmarks` is a `core`
-   resource in SUT-transfer bundles, and `sut-import.service.ts` inserts every table via
-   `json_populate_recordset(null::t, $1::json)`, which yields NULL (not the column DEFAULT) for a
-   key the bundle lacks. `NOT NULL DEFAULT 50` would therefore have rejected every pre-1808 bundle
-   with 23502 and failed the whole import. So the migration adds `integer DEFAULT 50 CHECK (>= 1)`
+3. **The column is nullable for a reason that no longer holds.** `benchmarks` is a `core`
+   resource in SUT-transfer bundles, and until v0.2.97.90 `sut-import.service.ts` inserted every
+   table as `SELECT * FROM json_populate_recordset(null::t, $1::json)`, which yields NULL (not the
+   column DEFAULT) for a key the bundle lacks, so `NOT NULL DEFAULT 50` would have rejected every
+   pre-1808 bundle with 23502. The migration therefore added `integer DEFAULT 50 CHECK (>= 1)`
    nullable, and every reader COALESCEs (`BenchmarkMatcher`'s two queries, `?? 50` in
-   `BenchmarkMapper` and the API create/update paths). The same trap is armed for the next
-   `NOT NULL DEFAULT x` column on any exported table — see the SUT transfer entry in TODOS.md.
+   `BenchmarkMapper` and the API create/update paths). Since v0.2.97.90 the import names only the
+   columns a bundle carries, so a missing key takes the DEFAULT and a new column on an exported
+   table can be `NOT NULL DEFAULT x`. Tightening this one is now possible, but keep the COALESCEs:
+   a row stored NULL before then is still NULL.
 4. **Existing `check_results` keep their stored verdict.** The floor is applied when the check runs,
    so a run evaluated before the SLO gained its floor still shows the old FAIL until it is
    re-evaluated. `requirement.min_samples` in the stored result says which floor was in force.
