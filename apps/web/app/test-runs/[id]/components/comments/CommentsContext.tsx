@@ -3,6 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   COMMENT_CARD_BY_EXPANSION_KEY,
+  COMMENT_CARD_LABELS,
   type CommentCardKey,
 } from '@perfana/shared/constants/comment-cards';
 import { socketManager } from '@/lib/socket';
@@ -17,25 +18,7 @@ export type CommentEvent =
 /** Every card in page order (Results, then RCA, then Reporting), for the header's next-unread jump. */
 const PAGE_ORDER: (keyof ExpansionState)[] = Object.values(TAB_CARDS).flat();
 
-export const CARD_LABELS: Record<CommentCardKey, string> = {
-  details: 'Test run details',
-  config: 'Configuration',
-  dashboards: 'Dashboards',
-  anomaly: 'Anomaly detection',
-  performance: 'Performance analysis',
-  slo: 'Service level objectives',
-  'deep-links': 'Deep links',
-  events: 'Events',
-  dynatrace: 'Dynatrace',
-  'distributed-tracing': 'Distributed tracing',
-  pyroscope: 'Pyroscope',
-  splunk: 'Splunk',
-  awr: 'AWR report',
-  report: 'Reports',
-  trends: 'Trends',
-  compare: 'Compare',
-  graphs: 'Graphs',
-};
+export const CARD_LABELS: Readonly<Record<CommentCardKey, string>> = COMMENT_CARD_LABELS;
 
 export function cardKeyOf(expansionKey: keyof ExpansionState): CommentCardKey {
   return COMMENT_CARD_BY_EXPANSION_KEY[expansionKey];

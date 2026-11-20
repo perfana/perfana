@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
 import {
@@ -33,6 +33,7 @@ import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
+import { CommentsRenderer } from '../renderers/comments-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
 import { REPORT_DETAILS_CSS, REPORT_GROUP_FILTER_CSS } from '../renderers/report-style';
@@ -260,6 +261,8 @@ export class ReportHtmlCompilerService {
     private readonly testRunConfigRepo: Repository<TestRunConfiguration>,
     @InjectRepository(TestRun)
     private readonly testRunRepo: Repository<TestRun>,
+    // Optional and last for the same positional-construction reason as above.
+    @Optional() private readonly commentsRenderer?: CommentsRenderer,
   ) {}
 
   /**
@@ -585,6 +588,10 @@ export class ReportHtmlCompilerService {
         return await this.errorAnalysisRenderer.renderErrorAnalysisSection(section, testRun, userId, roles);
       case 'dynatrace_hosts':
         return await this.dynatraceHostsRenderer.renderDynatraceHostsSection(section, testRun);
+      case 'comments':
+        return this.commentsRenderer
+          ? await this.commentsRenderer.renderCommentsSection(section, testRun, userId, roles)
+          : this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
       case 'index':
         return this.indexRenderer.renderIndexSection(
           section,

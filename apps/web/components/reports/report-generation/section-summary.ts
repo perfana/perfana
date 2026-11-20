@@ -7,7 +7,9 @@ import type {
   ErrorAnalysisConfig,
   Top10ListsConfig,
   DynatraceHostsConfig,
+  CommentsConfig,
 } from './SectionConfigs';
+import { COMMENT_CARD_LABELS } from '@perfana/shared/constants/comment-cards';
 
 export const SUMMARY_MAX_LENGTH = 90;
 
@@ -91,6 +93,15 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
       const hosts = cfg.hostIds?.length ? `${cfg.hostIds.length} host${cfg.hostIds.length === 1 ? '' : 's'}` : 'All hosts';
       const cols = cfg.columns?.length ? cfg.columns : ['cpu', 'memory'];
       return [hosts, cols.join(', '), cfg.groupByLabel ? 'by label' : null, text].filter(Boolean).join(' · ');
+    }
+    case 'comments': {
+      const cfg = (section.config ?? {}) as CommentsConfig;
+      const cards = Array.isArray(cfg.cards)
+        ? cfg.cards.map((c) => (COMMENT_CARD_LABELS as Record<string, string>)[c]).filter(Boolean)
+        : [];
+      return [cards.length === 0 ? 'All cards' : cards.length <= 2 ? cards.join(', ') : `${cards.length} cards`, text]
+        .filter(Boolean)
+        .join(' · ');
     }
     default:
       // ponytail: no naming field in these configs — the text is the only distinguisher

@@ -25,6 +25,7 @@ export type ReportSectionType =
   | 'top_10_lists'
   | 'error_analysis'
   | 'dynatrace_hosts'
+  | 'comments'
   | 'index';
 
 /**

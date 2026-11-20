@@ -34,6 +34,7 @@ import { GraphsRenderer } from './renderers/graphs-renderer';
 import { Top10ListsRenderer } from './renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from './renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from './renderers/dynatrace-hosts-renderer';
+import { CommentsRenderer } from './renderers/comments-renderer';
 import { DynatraceModule } from '../dynatrace/dynatrace.module';
 import { PlaceholderRenderer } from './renderers/placeholder-renderer';
 import { IndexRenderer } from './renderers/index-renderer';
@@ -81,6 +82,7 @@ import { SeriesGroupResolver } from '../metrics/series-group-resolver';
     Top10ListsRenderer,
     ErrorAnalysisRenderer,
     DynatraceHostsRenderer,
+    CommentsRenderer,
     PlaceholderRenderer,
     IndexRenderer,
   ],

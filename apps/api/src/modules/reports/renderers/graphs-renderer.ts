@@ -261,6 +261,29 @@ export class GraphsRenderer {
   }
 
   /**
+   * The series a set of preset-shaped selectors draws for one run. A preset may mix stored
+   * metrics with the synthetic run-wide aggregate, which has no ds_metrics rows and is
+   * computed from the raw tables instead. Public for the Comments section, whose Graphs
+   * markers record the same series shape.
+   */
+  async fetchPresetSeries(
+    panels: MetricsPanelSelector[],
+    testRunId: string,
+    excludeRampUp: boolean,
+    userId: string,
+    roles: string[],
+  ): Promise<MetricsTimeSeriesPanel[]> {
+    const stored = panels.filter((p) => !p.aggregate);
+    const aggregated = panels.filter((p) => p.aggregate);
+    return [
+      ...(stored.length > 0
+        ? await this.dataFetcher.getMetricsTimeSeries(testRunId, stored, excludeRampUp, userId, roles)
+        : []),
+      ...(await this.buildPresetAggregatedPanels(testRunId, aggregated, excludeRampUp, userId, roles)),
+    ];
+  }
+
+  /**
    * One chart per preset, drawing every series the preset combines.
    *
    * A preset IS a chart — the Graphs card lets an author put series from
@@ -284,16 +307,7 @@ export class GraphsRenderer {
     let seriesCount = 0;
 
     for (const [idx, preset] of presets.entries()) {
-      // A preset may mix stored metrics with the synthetic run-wide aggregate, which has no
-      // ds_metrics rows and is computed from the raw tables instead.
-      const stored = preset.panels.filter((p) => !p.aggregate);
-      const aggregated = preset.panels.filter((p) => p.aggregate);
-      const series = [
-        ...(stored.length > 0
-          ? await this.dataFetcher.getMetricsTimeSeries(testRun.testRunId, stored, excludeRampUp, userId, roles)
-          : []),
-        ...(await this.buildPresetAggregatedPanels(testRun.testRunId, aggregated, excludeRampUp, userId, roles)),
-      ];
+      const series = await this.fetchPresetSeries(preset.panels, testRun.testRunId, excludeRampUp, userId, roles);
       if (series.length === 0) {
         charts.push(`
           <div style="margin: 16px 0;">
@@ -429,7 +443,7 @@ export class GraphsRenderer {
    * them to, neither end is marked, and offsets that do not fit the run mark nothing either,
    * because the whole run is what was analysed.
    */
-  private analysisWindow(testRun: TestRun, only = false): ChartWindow {
+  analysisWindow(testRun: TestRun, only = false): ChartWindow {
     const fits = analysisOffsetsFit({
       start_time: testRun.startTime,
       end_time: testRun.endTime,

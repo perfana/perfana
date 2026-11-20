@@ -602,6 +602,7 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
   dynatrace_hosts: 'Dynatrace Hosts',
+  comments: 'Comments',
 } as const;
 
 /**
@@ -640,6 +641,7 @@ export const SECTION_RENDER_TITLES: Record<ReportSectionType, string> = {
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
   dynatrace_hosts: 'Dynatrace Hosts',
+  comments: 'Comments',
 } as const;
 
 /**

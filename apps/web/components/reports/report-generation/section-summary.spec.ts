@@ -140,4 +140,12 @@ describe('sectionSummary', () => {
       })),
     ).toBe('Scenarios: Checkout · no chart');
   });
+
+  it('summarizes a comments section by its card filter, ignoring unknown keys', () => {
+    expect(sectionSummary(section({ type: 'comments', config: {} }))).toBe('All cards');
+    expect(sectionSummary(section({ type: 'comments', config: { cards: ['graphs', 'slo', 'bogus'] } }))).toBe(
+      'Graphs, Service level objectives',
+    );
+    expect(sectionSummary(section({ type: 'comments', config: { cards: ['graphs', 'slo', 'trends'] } }))).toBe('3 cards');
+  });
 });

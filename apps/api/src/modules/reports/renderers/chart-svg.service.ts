@@ -124,6 +124,11 @@ export interface ChartStyle {
    * `pointNoun` (runs) rather than data points.
    */
   categorical?: { pointNoun: string };
+  /**
+   * Numbered vertical callouts, one per comment marker: `time` is epoch ms, `label` the short
+   * text in the badge (the marker number). One outside the plotted x range is not drawn.
+   */
+  callouts?: ReadonlyArray<{ time: number; label: string }>;
 }
 
 @Injectable()
@@ -597,6 +602,22 @@ export class ChartSvgService {
         + `</text></g></g>`;
     }).join('');
 
+    // Marker callouts: a dashed rule across the plot and a numbered badge at its top. Drawn
+    // under the hover bands so the cursor readout still answers over them.
+    const callouts = (style.callouts ?? [])
+      .filter((c) => Number.isFinite(c.time) && c.time >= tMin && c.time <= tMax)
+      .map((c) => {
+        const x = px(scaleX(c.time));
+        const r = 9;
+        const cy = padding.top + r + 2;
+        return `<g class="chart-callout">`
+          + `<line x1="${x}" y1="${padding.top}" x2="${x}" y2="${padding.top + chartHeight}" stroke="${CHART_INK.text}" stroke-width="1.25" stroke-dasharray="3,3"/>`
+          + `<circle cx="${x}" cy="${cy}" r="${r}" fill="${CHART_INK.text}"/>`
+          + `<text x="${x}" y="${cy + 3.5}" text-anchor="middle" font-family="${CHART_MONO}" font-size="${CHART_SIZE.tickFont}" font-weight="700" fill="${CHART_INK.paper}">${esc(c.label)}</text>`
+          + `</g>`;
+      })
+      .join('');
+
     return `
       <div class="chart-hover" style="margin: 24px 0;">
         ${groupHeader(chartTitle)}
@@ -636,6 +657,9 @@ export class ChartSvgService {
 
             <!-- X-axis labels -->
             ${xLabels.join('')}
+
+            <!-- Comment marker callouts -->
+            ${callouts}
 
             <!-- Hover bands last: they have to sit above the lines to be the hover target -->
             ${hoverLayer}

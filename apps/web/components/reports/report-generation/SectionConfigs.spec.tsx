@@ -13,6 +13,7 @@ import {
   GraphsConfigForm,
   ErrorAnalysisConfigForm,
   AwrConfigForm,
+  CommentsConfigForm,
   TrendsConfigForm,
   ComparisonsConfigForm,
   Top10ListsConfigForm,
@@ -88,6 +89,7 @@ const FORMS: [string, AnyConfigForm, string, Record<string, unknown>][] = [
   ['RegressionsConfigForm', RegressionsConfigForm as unknown as AnyConfigForm, 'regressions', {}],
   ['GraphsConfigForm', GraphsConfigForm as unknown as AnyConfigForm, 'graphs', {}],
   ['AwrConfigForm', AwrConfigForm as unknown as AnyConfigForm, 'awr', {}],
+  ['CommentsConfigForm', CommentsConfigForm as unknown as AnyConfigForm, 'comments', {}],
   ['TrendsConfigForm', TrendsConfigForm as unknown as AnyConfigForm, 'trends', {}],
   [
     'ComparisonsConfigForm',
