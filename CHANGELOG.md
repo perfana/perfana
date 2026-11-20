@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.90] - 2026-11-20
+
+### Fixed
+- **Profile SLOs on performance-test scenarios now follow the scenarios the run actually has.** A profile SLO that targets the performance-test scenario dashboards used to be added for every scenario any earlier run of the system had used, because those dashboards are kept after the run that created them. It is now added only for scenarios the current run has data for. A scenario that starts reporting later in the run gets its SLO on the next sync, within a few minutes. SLOs already created for old scenarios are left in place.
+
 ## [0.2.97.89] - 2026-11-20
 
 ### Added

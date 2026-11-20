@@ -88,7 +88,7 @@ export class BenchmarkProcessorService {
       const isPerfTest = profileBenchmark.source === PERF_TEST_PROFILE_SOURCE;
       // A perf-test benchmark has no Grafana template: `dashboard_uid` is a regex over
       // the worker-written `performance-test-metrics-<scenario>` uids, so one profile row
-      // fans out to every scenario dashboard the SUT has, including ones added later.
+      // fans out to every scenario dashboard this run has written data to.
       const lookup = isPerfTest
         ? profileBenchmark.dashboard_uid || PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
         : profileBenchmark.dashboard_uid!;
@@ -108,6 +108,7 @@ export class BenchmarkProcessorService {
             systemUnderTestName,
             testRun.testEnvironment,
             testRun.organizationId,
+            testRun,
           )
         : await this.dashboardFinderService.findApplicationDashboardsByTemplateDashboardUid(
             lookup,
