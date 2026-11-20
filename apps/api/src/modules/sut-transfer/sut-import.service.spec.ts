@@ -418,7 +418,8 @@ describe('SutImportService (integration)', () => {
       const lines = [
         JSON.stringify({ __manifest__: { schemaVersion: 1, sourceSutId: c.sut, sutName: 'comments-sut' } }),
         JSON.stringify({ __table__: 'test_run_comments' }),
-        // A bundle from before migration 1828 carries no notified_at at all.
+        // A bundle from before migration 1828 carries no notified_at at all
+        // (packages/shared/src/database/migrations/1828000000000-CommentNotifications.ts).
         JSON.stringify({ id: c.reply, test_run_id: c.run, card_key: 'graphs', parent_id: c.root, body: 'reply', author_id: 'u', author_name: 'U', organization_id: srcOrg, created_at: '2026-11-01T10:00:00Z', updated_at: '2026-11-01T10:00:00Z' }),
         JSON.stringify({ id: c.root, test_run_id: c.run, card_key: 'graphs', parent_id: null, body: 'root', author_id: 'u', author_name: 'U', organization_id: srcOrg, created_at: '2026-11-01T10:00:00Z', updated_at: '2026-11-01T10:00:00Z' }),
       ];
