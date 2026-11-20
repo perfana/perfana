@@ -72,4 +72,8 @@ export class TestRunComment {
 
   @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt!: Date | null;
+
+  /** Set by the API's notification sweep when it claims the comment for a channel post (PR3). */
+  @Column({ name: 'notified_at', type: 'timestamptz', nullable: true })
+  notifiedAt!: Date | null;
 }
