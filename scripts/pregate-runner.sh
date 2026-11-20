@@ -12,8 +12,9 @@
 # the runners differ (jest in most workspaces, vitest in apps/worker) and both take
 # trailing file paths. apps/mcp's test script does NOT take paths: it is
 # `node --test dist/*.test.js`, every compiled test, so handing it a spec would run whatever
-# was last built. It is built first and then run whole instead (78 tests, a few seconds); the
-# glob, not a list, is what lets a NEW mcp spec run rather than pass unexecuted. Any other workspace that is not listed is refused
+# was last built. It is built first and then run whole instead (a few seconds). The build
+# empties dist/, so a deleted test cannot keep running, and the glob, not a list, lets a NEW
+# mcp spec run rather than pass unexecuted. Any other workspace that is not listed is refused
 # by name rather than silently mis-run.
 #
 # Paths come from gstack-pregate, which derives them from git. They are passed as a quoted
