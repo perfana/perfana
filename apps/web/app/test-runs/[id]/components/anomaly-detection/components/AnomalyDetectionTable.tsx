@@ -6,6 +6,7 @@ import { alpha } from '@mui/material/styles';
 
 // Internal imports
 import { AnomalyDetectionTableProps } from './types';
+import { useCommentItemCounts } from '../../comments/CommentsContext';
 import { isPerformanceTestMetricsDashboard } from './utils';
 import { useAnomalyTableHandlers } from './table-hooks';
 import {
@@ -51,6 +52,8 @@ export default function AnomalyDetectionTable({
   onSortChange,
   onDiffSortModeChange,
 }: AnomalyDetectionTableProps) {
+  // Rendered only while the card is expanded, so counts are fetched only then.
+  const commentCounts = useCommentItemCounts('anomaly', true);
   const handlers = useAnomalyTableHandlers({
     testRunId,
     testRun,
@@ -123,6 +126,7 @@ export default function AnomalyDetectionTable({
                 onToggleExpanded={() => toggleRowExpanded(rowKey)}
                 onOpenActionMenu={(e) => handlers.handleOpenActionMenu(e, row)}
                 onStaleChipClick={() => handlers.handleStaleChipClick(row)}
+                commentCounts={commentCounts}
                 hasActionMenu={hasActionMenu}
               />
 

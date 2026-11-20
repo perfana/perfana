@@ -21,6 +21,9 @@ import { TransactionStat, SamplerStat } from '../types/performance-analysis.type
 import { formatNumber, apdexRating } from '../utils/performance-formatters';
 import { SamplerTable } from './SamplerTable';
 
+import RowCommentButton from '../../comments/RowCommentButton';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+
 export interface TransactionRowProps {
   transaction: TransactionStat;
   index: number;
@@ -33,6 +36,10 @@ export interface TransactionRowProps {
   onOpenTransactionErrors: (transactionName: string) => void;
   onOpenSamplerActionMenu: (event: React.MouseEvent<HTMLElement>, transaction: string, sampler: SamplerStat) => void;
   onOpenSamplerErrors: (transactionName: string, samplerName: string) => void;
+  /** Comment anchor for this row; without it the row has no comment control. */
+  commentItemKey?: string;
+  commentItemLabel?: string;
+  commentCounts?: CommentItemCounts;
 }
 
 export function TransactionRow({
@@ -47,6 +54,9 @@ export function TransactionRow({
   onOpenTransactionErrors,
   onOpenSamplerActionMenu,
   onOpenSamplerErrors,
+  commentItemKey,
+  commentItemLabel,
+  commentCounts = {},
 }: TransactionRowProps) {
   const errorRate = transaction.total_count > 0
     ? (transaction.failed_count / transaction.total_count) * 100
@@ -64,8 +74,10 @@ export function TransactionRow({
           '&:hover': {
             backgroundColor: 'rgba(25, 118, 210, 0.08)',
           },
+          '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 },
         }}
         onClick={() => onRowClick(transaction.transaction_name)}
+        data-comment-item={commentItemKey}
       >
         <TableCell>
           <IconButton size="small">
@@ -167,7 +179,15 @@ export function TransactionRow({
             </Box>
           </Tooltip>
         </TableCell>
-        <TableCell align="center">
+        <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+          {commentItemKey && (
+            <RowCommentButton
+              card="performance"
+              itemKey={commentItemKey}
+              itemLabel={commentItemLabel ?? transaction.transaction_name}
+              counts={commentCounts}
+            />
+          )}
           <Tooltip title="Actions" arrow>
             <IconButton
               size="small"

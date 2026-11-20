@@ -7,6 +7,7 @@ import {
   Tabs,
   Tab,
   Tooltip,
+  Typography,
 } from '@mui/material';
 import {
   Timeline,
@@ -18,9 +19,43 @@ import { TracingService } from '@/lib/distributed-tracing';
 import { RequestFilteringSection } from './RequestFilteringSection';
 import { VisualiseTab } from './VisualiseTab';
 import TracesDiffTab from '../TracesDiffTab';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import ItemCommentHeader, { TabCommentMark } from '../../comments/ItemCommentHeader';
+
+export interface TracingFilters {
+  scenario: string | null;
+  transaction: string | null;
+  sampler: string | null;
+}
+
+/**
+ * Comment anchor: a traced service name plus the request filters it was written under, so
+ * opening the comment brings back the same scenario / transaction / sampler.
+ */
+export const tracingItemKey = (s: ServiceNameItem, f: TracingFilters) =>
+  JSON.stringify([s.tracingServiceId, s.serviceName, f.scenario, f.transaction, f.sampler]);
+
+export function parseTracingItemKey(key: string): { serviceId: string; serviceName: string } & TracingFilters | null {
+  try {
+    const [serviceId, serviceName, scenario, transaction, sampler] = JSON.parse(key) as (string | null)[];
+    if (typeof serviceId !== 'string' || typeof serviceName !== 'string') return null;
+    return { serviceId, serviceName, scenario: scenario ?? null, transaction: transaction ?? null, sampler: sampler ?? null };
+  } catch {
+    return null;
+  }
+}
+
+const tracingItemLabel = (s: ServiceNameItem, f: TracingFilters) =>
+  [s.serviceName, [f.scenario, f.transaction, f.sampler].filter(Boolean).join(' / ')].filter(Boolean).join(' · ').slice(0, 255);
+
+const isServiceKey = (s: ServiceNameItem) => (key: string) => {
+  const p = parseTracingItemKey(key);
+  return !!p && p.serviceId === s.tracingServiceId && p.serviceName === s.serviceName;
+};
 
 interface DistributedTracingExpandedContentProps {
   testRun: DistributedTracingCardProps['testRun'];
+  commentCounts: CommentItemCounts;
   // Service name tabs
   allServiceNames: ServiceNameItem[];
   activeServiceNameTab: number;
@@ -58,6 +93,7 @@ interface DistributedTracingExpandedContentProps {
 
 export function DistributedTracingExpandedContent({
   testRun,
+  commentCounts,
   allServiceNames,
   activeServiceNameTab,
   onServiceNameTabChange,
@@ -87,6 +123,7 @@ export function DistributedTracingExpandedContent({
   onIframeLoad,
   onIframeError,
 }: DistributedTracingExpandedContentProps) {
+  const filters: TracingFilters = { scenario: selectedScenario, transaction: selectedTransaction, sampler: selectedSampler };
   return (
     <Box>
       {/* Service name tabs (if multiple service names) */}
@@ -101,11 +138,28 @@ export function DistributedTracingExpandedContent({
           {allServiceNames.map((item) => (
             <Tab
               key={`${item.tracingServiceId}-${item.serviceName}`}
-              label={`${item.serviceName} (${item.tracingUi.toUpperCase()})`}
+              label={<span>{`${item.serviceName} (${item.tracingUi.toUpperCase()})`}<TabCommentMark counts={commentCounts} itemKey={isServiceKey(item)} /></span>}
               sx={{ fontSize: '0.875rem', minWidth: 140 }}
             />
           ))}
         </Tabs>
+      )}
+
+      {currentServiceNameItem && (
+        <ItemCommentHeader
+          card="distributed-tracing"
+          itemKey={tracingItemKey(currentServiceNameItem, filters)}
+          itemLabel={tracingItemLabel(currentServiceNameItem, filters)}
+          title={currentServiceNameItem.serviceName}
+          counts={commentCounts}
+        >
+          {(filters.scenario || filters.transaction) && (
+            <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
+              {[filters.scenario, filters.transaction, filters.sampler].filter(Boolean).join(' / ')}
+            </Typography>
+          )}
+          <TabCommentMark counts={commentCounts} itemKey={(k) => isServiceKey(currentServiceNameItem)(k) && k !== tracingItemKey(currentServiceNameItem, filters)} />
+        </ItemCommentHeader>
       )}
 
       {error && (

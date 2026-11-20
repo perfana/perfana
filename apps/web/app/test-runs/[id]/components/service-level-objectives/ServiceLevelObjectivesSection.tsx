@@ -14,6 +14,7 @@ import { ServiceLevelObjectivesSectionProps } from './types';
 
 // Hooks
 import { useSLOSection } from './hooks';
+import { useCommentItemFocus } from '../comments/CommentsContext';
 
 // Components
 import { SLOCollapsedView, SLOExpandedView, SLODialogs, SLOCollapsedHeader, SLOExpandedHeader } from './components';
@@ -35,6 +36,9 @@ export default function ServiceLevelObjectivesSection({
     sloExpanded,
     setSloExpanded,
   });
+
+  // A comment anchored to an SLO row expands that row when opened (design: row anchors).
+  useCommentItemFocus('slo', sloSection.focusSloRow);
 
   const {
     checkResults,

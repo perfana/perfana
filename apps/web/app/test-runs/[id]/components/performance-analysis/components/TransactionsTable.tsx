@@ -39,7 +39,8 @@ import { TransactionsTableHeader } from './TransactionsTableHeader';
 import { ScopePercentiles } from '../hooks/useScopePercentiles';
 import { ScenarioMetricsRow } from './ScenarioMetricsRow';
 import { TransactionRow } from './TransactionRow';
-import { scenarioFilterKey } from '../utils/scenario-filter';
+import { scenarioFilterKey, transactionItemKey } from '../utils/scenario-filter';
+import { useCommentItemCounts } from '../../comments/CommentsContext';
 
 export interface TransactionsTableProps {
   // Data
@@ -73,6 +74,8 @@ export interface TransactionsTableProps {
 
   /** Drill-down target: seeds that scenario's transaction filter with the transaction name. */
   initialTransactionFilters?: DrillDownFilters;
+  /** Comment focus: clear this scenario group's text filter (seq makes repeats count). */
+  clearTransactionFilter?: { scenario: string; seq: number } | null;
 }
 
 export function TransactionsTable({
@@ -95,6 +98,7 @@ export function TransactionsTable({
   onOpenSamplerActionMenu,
   onOpenSamplerErrors,
   initialTransactionFilters,
+  clearTransactionFilter,
 }: TransactionsTableProps) {
   // 8px instead of MUI's 16px per side. Across eleven columns that is 176px of the width
   // this table needs back. A styleOverride is ordered below `sx`, so a cell that states its
@@ -110,6 +114,13 @@ export function TransactionsTable({
   );
 
   const [transactionFilters, setTransactionFilters] = useState<Record<string, string>>({});
+  // Rendered only while the card is expanded, so counts are fetched only then.
+  const commentCounts = useCommentItemCounts('performance', true);
+  // Comment focus: a scenario's own text filter must not hide the transaction being shown.
+  useEffect(() => {
+    if (!clearTransactionFilter) return;
+    setTransactionFilters((prev) => (prev[clearTransactionFilter.scenario] ? { ...prev, [clearTransactionFilter.scenario]: '' } : prev));
+  }, [clearTransactionFilter]);
   useEffect(() => {
     if (!initialTransactionFilters?.transaction) return;
     const key = scenarioFilterKey(initialTransactionFilters.scenario);
@@ -275,6 +286,9 @@ export function TransactionsTable({
                             onOpenTransactionErrors={onOpenTransactionErrors}
                             onOpenSamplerActionMenu={onOpenSamplerActionMenu}
                             onOpenSamplerErrors={onOpenSamplerErrors}
+                            commentItemKey={transactionItemKey(scenarioName, transaction.transaction_name)}
+                            commentItemLabel={`${scenarioName} · ${transaction.transaction_name}`.slice(0, 255)}
+                            commentCounts={commentCounts}
                           />
                         ))}
                     </>

@@ -15,6 +15,9 @@ import { DistributedTracingCardProps } from './types';
 
 // Hooks
 import { useDistributedTracingData } from './hooks';
+import { useCommentItemCounts, useCommentItemFocus } from '../comments/CommentsContext';
+import { NO_EVENT } from '../comments/ItemCommentHeader';
+import { parseTracingItemKey } from './components/DistributedTracingExpandedContent';
 
 // Components
 import {
@@ -42,6 +45,21 @@ export default function DistributedTracingCard({
     expanded,
     initialFilters,
     onConfigurationStatus,
+  });
+
+  // Comments per service name and the request filters they were written under.
+  const commentCounts = useCommentItemCounts('distributed-tracing', expanded);
+  useCommentItemFocus('distributed-tracing', (key) => {
+    const target = parseTracingItemKey(key);
+    if (!target) return false;
+    const idx = data.allServiceNames.findIndex((s) => s.tracingServiceId === target.serviceId && s.serviceName === target.serviceName);
+    if (idx < 0) return false;
+    // The tab change clears the filters; the setters below run after it in the same batch.
+    if (idx !== data.activeServiceNameTab) data.handleServiceNameTabChange(NO_EVENT, idx);
+    data.setSelectedScenario(target.scenario);
+    data.setSelectedTransaction(target.transaction);
+    data.setSelectedSampler(target.sampler);
+    return true;
   });
 
   // Handle expand/collapse with auto-focus
@@ -156,6 +174,7 @@ export default function DistributedTracingCard({
             ) : (
               <DistributedTracingExpandedContent
                 testRun={testRun}
+                commentCounts={commentCounts}
                 allServiceNames={data.allServiceNames}
                 activeServiceNameTab={data.activeServiceNameTab}
                 onServiceNameTabChange={data.handleServiceNameTabChange}

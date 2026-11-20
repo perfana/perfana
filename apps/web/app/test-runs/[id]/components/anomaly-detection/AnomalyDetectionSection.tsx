@@ -4,6 +4,7 @@ import { TestRun } from '@/types/test-runs';
 import AnomalyDetectionCollapsedCard from './components/AnomalyDetectionCollapsedCard';
 import AnomalyDetectionExpandedCard from './components/AnomalyDetectionExpandedCard';
 import { useAnomalyDetection } from './hooks';
+import { useCommentItemFocus } from '../comments/CommentsContext';
 
 interface DrillDownFilters {
   scenario?: string;
@@ -118,6 +119,7 @@ export default function AnomalyDetectionSection({
     handleDashboardFilterChange,
     handlePanelFilterChange,
     handleClearAllFilters,
+    focusAnomalyRow,
   } = useAnomalyDetection({
     testRun,
     testRunId,
@@ -131,6 +133,8 @@ export default function AnomalyDetectionSection({
     onTestRunUpdate,
     cardRef,
   });
+  // A comment anchored to a metric row expands that row when opened.
+  useCommentItemFocus('anomaly', focusAnomalyRow);
 
   if (!anomalyExpanded) {
     return (

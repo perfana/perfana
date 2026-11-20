@@ -56,7 +56,10 @@
     ],
     "packages/shared/src/services/grafana/index.ts": [],
     "scripts/pregate-runner.sh": [],
-    "tsconfig*.json": []
+    "tsconfig*.json": [],
+    "packages/shared/src/database/migrations/1827000000000-TestRunComments.ts": [
+      "apps/api/src/test/rls/test-run-comments.spec.ts"
+    ]
   },
   "strays": {
     "allow": [

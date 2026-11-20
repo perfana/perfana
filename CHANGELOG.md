@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.87] - 2026-11-20
+
+### Added
+- **Comment on any card of a test run, and reply in threads.** Every card on the test-run page has a comment panel that opens beside the card when it is expanded. Comments can be replied to, edited by their author, and deleted by their author or an organization admin; a comment with replies keeps its thread when deleted. Other people's new comments arrive live while the page is open.
+- **See unread comments at a glance.** A card with comments shows a badge, also when collapsed: red with the number of comments you have not read yet, grey with the total once you have. The test-run list shows the same badge per run, and clicking it opens the run on the first card with unread comments. A button beside the tabs jumps to the next card with unread comments.
+- **Comment on a specific row or section of a card.** SLO rows, anomaly-detection rows and Performance Analysis transactions, Dynatrace hosts and services, distributed-tracing services, Pyroscope profilers and Splunk panels take comments of their own. Opening such a comment switches to the right tab, page or host, expands the row and scrolls to it. A distributed-tracing comment also restores the scenario, transaction and sampler it was written under, and a Pyroscope comment the single or diff view.
+- **Link straight to a comment.** A link to a comment opens the run on that card with the comment highlighted.
+
+### Changed
+- **Live test-run updates are limited to the people who can open the run.** The live channel for one test run now refuses organization members who are not in a team that restricts its resources, the same rule that already applied to opening the run.
+
 ## [0.2.97.86] - 2026-11-20
 
 ### Added

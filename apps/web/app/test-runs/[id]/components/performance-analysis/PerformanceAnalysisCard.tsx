@@ -40,10 +40,12 @@ import {
   deriveAvailableScenarios,
   matchesSelectedScenarios,
   scenarioFilterKey,
+  parseTransactionItemKey,
   filterThroughputStats,
   filterVirtualUserStats,
 } from './utils/scenario-filter';
 import { LiveWindowSelector, type RefreshState } from './components/LiveWindowSelector';
+import { useCommentItemFocus } from '../comments/CommentsContext';
 import Top10ListsTable from './Top10ListsTable';
 import Top10ListsRequests from './Top10ListsRequests';
 import Top10ListsUrls from './Top10ListsUrls';
@@ -236,6 +238,28 @@ export default function PerformanceAnalysisCard({
     setSelectedScenarios([scenario]);
     expandScenario(scenario);
   }, [initialFilters, setActiveTab, expandScenario]);
+
+  // Comment focus: a comment anchored to a transaction opens Overview, makes sure its scenario
+  // is selected and expanded, clears that scenario's text filter and expands the row. False
+  // until the transactions have loaded or when the run has no such transaction.
+  const [clearTransactionFilter, setClearTransactionFilter] = useState<{ scenario: string; seq: number } | null>(null);
+  const focusTransactionRow = useCallback((itemKey: string): boolean => {
+    const parsed = parseTransactionItemKey(itemKey);
+    if (!parsed) return false;
+    const { scenario, transaction } = parsed;
+    const found = transactions.some(
+      (t) => (t.scenario_name || 'No Scenario') === scenario && t.transaction_name === transaction,
+    );
+    if (!found) return false;
+    setActiveTab(0);
+    const filterKey = scenarioFilterKey(scenario);
+    setSelectedScenarios((prev) => (prev.length === 0 || prev.includes(filterKey) ? prev : [...prev, filterKey]));
+    expandScenario(scenario);
+    setClearTransactionFilter((prev) => ({ scenario, seq: (prev?.seq ?? 0) + 1 }));
+    if (!expandedRows.has(transaction)) handleRowClick(transaction);
+    return true;
+  }, [transactions, setActiveTab, expandScenario, expandedRows, handleRowClick]);
+  useCommentItemFocus('performance', focusTransactionRow);
 
   const handleExpand = () => {
     const wasCollapsed = !expanded;
@@ -607,6 +631,7 @@ export default function PerformanceAnalysisCard({
                 ) : (
                   <TransactionsTable
                     initialTransactionFilters={initialFilters}
+                    clearTransactionFilter={clearTransactionFilter}
                     scenarioGroups={filteredScenarioGroups}
                     transactions={filteredTransactions}
                     throughputStats={filteredThroughputStats}

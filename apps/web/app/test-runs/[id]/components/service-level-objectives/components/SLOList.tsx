@@ -36,6 +36,14 @@ import {
   formatAggregatedMetricLabel,
 } from '../utils/slo-formatters';
 import { defaultTrendTarget } from '../utils/metric-series-table-utils';
+import RowCommentButton from '../../comments/RowCommentButton';
+import { useCommentItemCounts } from '../../comments/CommentsContext';
+
+/** What a comment anchored to this SLO row is shown as in the drawer. */
+function sloItemLabel(result: CheckResult): string {
+  if (isApdexResult(result)) return result.panel_title && result.panel_title !== 'Workload Apdex' ? `Apdex SLO · ${result.panel_title}` : 'Apdex SLO';
+  return [result.dashboard_label, result.panel_title, result.metric_name].filter(Boolean).join(' · ').slice(0, 255) || 'SLO';
+}
 
 interface SLOListProps {
   testRun: TestRun | null;
@@ -101,6 +109,8 @@ export function SLOList({
   getCheckResultKey,
 }: SLOListProps) {
   const theme = useTheme();
+  // SLOList only renders while the card is expanded, so counts are fetched only then.
+  const commentCounts = useCommentItemCounts('slo', true);
 
   // Filter results based on search and status filter
   const getFilteredResults = () => {
@@ -261,7 +271,7 @@ export function SLOList({
       {/* Table Header */}
       <Box sx={(thm) => ({
         display: 'grid',
-        gridTemplateColumns: '40px 2fr 1.5fr 2fr 1fr 40px',
+        gridTemplateColumns: '40px 2fr 1.5fr 2fr 1fr 80px',
         gap: 2,
         p: 2,
         backgroundColor: thm.palette.mode === 'dark'
@@ -300,9 +310,11 @@ export function SLOList({
           <React.Fragment key={resultKey}>
             <Box
               onClick={() => toggleSloRow(resultKey)}
+              data-comment-item={resultKey}
               sx={{
                 display: 'grid',
-                gridTemplateColumns: '40px 2fr 1.5fr 2fr 1fr 40px',
+                gridTemplateColumns: '40px 2fr 1.5fr 2fr 1fr 80px',
+                '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 },
                 gap: 2,
                 p: 2,
                 mt: 0.75,
@@ -475,8 +487,14 @@ export function SLOList({
                 />
               </Box>
 
-              {/* Edit SLO Cogs Icon */}
+              {/* Comment on this SLO, and Edit SLO cog */}
               <Box display="flex" alignItems="center" justifyContent="center">
+                <RowCommentButton
+                  card="slo"
+                  itemKey={resultKey}
+                  itemLabel={sloItemLabel(result)}
+                  counts={commentCounts}
+                />
                 <Tooltip title={isApdexResult(result) ? "Configure Apdex Thresholds" : "Edit SLO Configuration"} arrow>
                   <IconButton
                     onClick={(e) => {

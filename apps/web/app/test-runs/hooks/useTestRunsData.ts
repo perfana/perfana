@@ -67,7 +67,10 @@ export function useTestRunsData({ onSnackbar, organizationId, serverFilters }: U
         }
 
         const newRuns = [...prevRuns];
-        newRuns[index] = normalizedTestRun;
+        // The gateway payload carries no comment counts (only the list endpoint adds them), so keep
+        // the row's own until the next fetch; replacing them would drop the list's comment badge.
+        const { comment_count, unread_comments } = prevRuns[index];
+        newRuns[index] = { ...normalizedTestRun, comment_count, unread_comments };
         return newRuns;
       });
     }, []),

@@ -22,6 +22,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import { HostOverviewRow } from '@/lib/dynatrace';
 import HostLabelChips from '@/components/HostLabelChips';
 import HostCardLinksMenu from './HostCardLinksMenu';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import RowCommentButton from '../comments/RowCommentButton';
 
 interface HostEntity {
   id: string;
@@ -36,6 +38,7 @@ interface HostsOverviewTableProps {
   rows: HostOverviewRow[];
   loading: boolean;
   onSelectHost: (hostId: string) => void;
+  commentCounts?: CommentItemCounts;
 }
 
 const SEVERITY_COLOR: Record<string, 'error' | 'warning' | 'info' | 'default'> = {
@@ -54,7 +57,7 @@ function fmtPct(value: number | null | undefined): string {
   return value === null || value === undefined ? '—' : `${value.toFixed(1)}%`;
 }
 
-export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost }: HostsOverviewTableProps) {
+export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost, commentCounts = {} }: HostsOverviewTableProps) {
   // Default order: problems first, then CPU avg descending — the two things you scan for.
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -200,7 +203,8 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
                 <TableRow
                   key={host.id}
                   hover
-                  sx={{ cursor: 'pointer' }}
+                  data-comment-item={`host:${host.entityId}`}
+                  sx={{ cursor: 'pointer', '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 } }}
                   onClick={() => onSelectHost(host.entityId)}
                 >
                   <TableCell>{host.entityDisplayName}</TableCell>
@@ -224,7 +228,13 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
                       </Typography>
                     )}
                   </TableCell>
-                  <TableCell padding="checkbox">
+                  <TableCell padding="checkbox" sx={{ whiteSpace: 'nowrap' }}>
+                    <RowCommentButton
+                      card="dynatrace"
+                      itemKey={`host:${host.entityId}`}
+                      itemLabel={host.entityDisplayName}
+                      counts={commentCounts}
+                    />
                     <HostCardLinksMenu hostDisplayName={host.entityDisplayName} />
                   </TableCell>
                 </TableRow>

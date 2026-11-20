@@ -288,6 +288,50 @@ Deferred while shipping. Each was reviewed and judged not to affect a dashboard 
 
 **Priority:** P3
 
+## Test-run comments
+
+Filed from the v0.2.97.87 review (threads, PR1 of `docs/designs/test-run-comments.md`). Graph
+markers (PR2) and notifications, the report section and SUT export (PR3) are planned there and not
+repeated here.
+
+### Decide whether a deleted comment's text stays in the audit log (P2)
+
+`TestRunComment.auditableFields` includes `body`, and `remove()` audits before it wipes or deletes
+the row, so the full text of every deleted comment lands in `audit_logs.changes.before.body` for
+`AUDIT_RETENTION_MONTHS` (default 24) and org admins can read it. An edit is audit-skipped, so
+editing out a pasted secret removes it while deleting the comment keeps it. Decide which is wanted;
+to drop it, remove `body` (and possibly `authorName`) from the list and regenerate the
+auditable-fields snapshot. Also move `logDelete` after the transaction commits, so a failed delete
+leaves no audit row.
+
+### The test-run list's comment badges do not update live (P3)
+
+`comment:badge` is emitted to the organization and team rooms on every comment, but nothing in
+`apps/web` listens, so list badges refresh only when the list loads. The event also reaches org
+members a team-restricted system hides from (run uuid and card key, no text). Either have
+`useTestRunsData` listen and refetch counts for the runs on the page (debounced) and send the badge
+only to the team room when the system's team restricts, or drop the emit.
+
+### A failing comment-count query still fails the whole test-run list (P3)
+
+`findAllPaginated` probes for the table with `to_regclass`, which covers a deploy that runs before
+migration 1827, but a timeout, lock wait or RLS error on the count query still answers 500 and,
+under RLS, aborts the request transaction. Wrap it in a SAVEPOINT plus try/catch, log WARN and fall
+back to zero counts.
+
+### Small comment edges (P4)
+
+- `itemCounts` counts a soft-deleted root as a thread; a root whose replies were all hard-deleted
+  stays as an empty "deleted" thread forever. Count only roots with a live comment, or remove the
+  orphaned tombstone when its last reply goes.
+- `PUT /seen` stamps the server's `now()`, so a comment committed between the drawer's fetch and the
+  mark reads as already seen. Pass the fetch time or the newest `createdAt` seen instead.
+- A whitespace-only body passes `@Length(1, …)` and the CHECK; there is no rate limit on posting.
+- The run-header jump button does not flash the card title after jumping (design DR8).
+- Panel component tests do not cover focus return, the delete confirmation or the reconnecting
+  strip; the decorator spec lacks the "existing fields unchanged" row and the delete spec a
+  global-admin row.
+
 ## Splunk integration
 
 Filed from the PR #742 review (v0.2.97.72). The review's real bugs were fixed on the branch; these
