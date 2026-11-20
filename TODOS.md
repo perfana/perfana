@@ -4421,24 +4421,6 @@ timer. (3) and (4) are hardening.
 
 ## SUT transfer
 
-### The import writes NULL for every column a bundle predates, so NOT NULL columns reject old bundles
-
-**Priority:** P2
-**Origin:** /ship data-migration lane on `feat/apdex-min-samples` (v0.2.95.34, 2026-09-17).
-`apdex_min_samples` was made nullable to dodge it; the trap itself is still armed.
-**Why:** `sut-import.service.ts` inserts every table as
-`INSERT INTO t SELECT * FROM json_populate_recordset(null::t, $1::json)`. A key absent from the JSON
-comes out as NULL, not the column DEFAULT, so any `NOT NULL DEFAULT x` column added after a bundle
-was exported makes that bundle fail with 23502 on import. Verified locally. `benchmarks` is a
-`core` resource, so the whole import fails; `dynatrace_entity_mappings.labels` (1802) and the
-`use_proxy` columns already have this shape on `optional` tables, where the failure is partial. The
-manifest still accepts `schemaVersion: 1`, so nothing refuses the old bundle up front.
-**What to do:** build the column list from the intersection of the catalog columns and the keys
-present in the bundle rows (the `SERIAL_ID_TABLES` branch already reads the catalog), so an absent
-key falls to the column DEFAULT; then new columns can be NOT NULL again. Add a fixture bundle from
-a previous schema to the import tests.
-**Where:** `apps/api/src/modules/sut-transfer/sut-import.service.ts`.
-
 ### The SUT export has no completion signal, and leaves an empty file behind on cancel
 
 **Priority:** P4
@@ -5349,6 +5331,14 @@ an import into an environment without that profile. Raised by the /ship data-mig
 **Effort:** XS **Priority:** P3 **Depends on:** a new migration.
 
 ## Completed
+
+- **The SUT import writes NULL for every column a bundle predates** — **Completed:** v0.2.97.90 (2026-11-20).
+  The import now names only the catalog columns present in the bundle rows, so a column an older
+  bundle lacks takes its DEFAULT; a NOT NULL column with a DEFAULT no longer rejects it. It bit as
+  `notify_on_comment` (0.2.97.89) on every older bundle with a notification channel. New columns on
+  exported tables can be NOT NULL again. A row missing a key that other rows in the SAME batch carry
+  still gets NULL, which a normal export never produces. No fixture bundle from an older schema was
+  added; the live-database test in `sut-import.service.spec.ts` imports rows without the newer columns.
 
 - **Implement `defaultValueIfControlGroupMissing` in ADAPT, the anomaly card and the template dialog** — **Completed:** v0.2.97.66 (2026-11-10).
   A series with no baseline row is judged against the configured value instead of reading `incomparable`,

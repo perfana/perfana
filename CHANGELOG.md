@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.90] - 2026-11-20
+
+### Fixed
+- **Systems exported by an older Perfana import again.** Importing a bundle exported before a column was added failed with "null value in column … violates not-null constraint" and imported nothing. Since 0.2.97.89 that was every older bundle that contained a notification channel. A column the bundle does not have now takes its default value.
+- **Top 10 throughput matches the throughput graph.** With the analysis time range on, the Top 10 transactions, requests and URLs lists divided the window's executions by the length of the whole run, so a run with a long ramp-down read about a third too low (133/s for a transaction the graph shows at 199/s). The report's Top 10 Lists section and the MCP performance rankings had the same problem, and the report's URL and transaction throughput columns left the ramp-down in the divisor. All of them now divide by the analysis window. A report generated earlier keeps its old numbers until it is regenerated.
+
 ## [0.2.97.89] - 2026-11-20
 
 ### Added
