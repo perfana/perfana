@@ -22,8 +22,9 @@ Perfana can post a message to a chat channel when a test run has finished and it
 5. Enter a **Channel Name**, for example `#performance-alerts`. The name is only a label in Perfana.
 6. Paste the **Webhook URL**.
 7. Optional: turn on **Only notify for failed test runs** to skip runs that passed.
-8. If your organization reaches the chat service through a proxy, turn on **Use proxy**.
-9. Save the channel, then click **Send test notification** on its row.
+8. Optional: turn on **Notify when test run comments are added** to also post when someone [comments on a run](../test-runs/comments.md) of this system. See [Notify on comments](#notify-on-comments).
+9. If your organization reaches the chat service through a proxy, turn on **Use proxy**.
+10. Save the channel, then click **Send test notification** on its row.
    A test message appears in the chat channel, or Perfana says why it could not send it.
 
 **Result**
@@ -36,6 +37,22 @@ Perfana encrypts the URL with the `ENCRYPTION_KEY` set on the Perfana API, so tw
 
 - **Saving a channel fails with "ENCRYPTION_KEY is missing or invalid on the API".** The key is not set, or is not a 64-character hex string. Every save needs it, renaming a channel or switching it on or off included. Ask the administrator of your Perfana installation to set it and restart the API.
 - **Sending fails with "Webhook URL could not be decrypted".** The key changed since the URL was saved, or the system was imported from another Perfana installation that uses a different key. Restore the original key, or paste the webhook URL into the channel again and save it.
+
+## Notify on comments
+
+With **Notify when test run comments are added** on, the channel also gets a message when people [comment on a test run](../test-runs/comments.md) of this system. The setting is off for every channel until you turn it on, and it is set per channel, so you can send comments to one channel and run results to another.
+
+Perfana waits for a discussion to settle before it posts. The first new comment on a run starts a two-minute wait, and everything written on that run in the meantime goes into the same message, which arrives about 2 to 2.5 minutes after that first comment. Comments written after the message was sent start a new wait.
+
+The message says how many comments were added, on which system and run, who wrote the latest one and on which card, with a link that opens the run at that comment. It does not quote the comments: a chat channel is often wider than the group of people who can see the run, so readers follow the link and sign in to read them.
+
+A few things to know:
+
+- **Only notify for failed test runs** does not apply to comments. Comments on a run that passed are posted too.
+- A comment deleted before the message was sent is not counted or mentioned. Edits do not cause a new message.
+- Comments written before you turned the setting on for a channel are not announced to it afterwards. Comments that existed when Perfana was upgraded to a version with this setting are never announced.
+- Comments that arrive with a system imported from another Perfana installation are never announced.
+- If no channel of the system could be reached because a chat service was temporarily unavailable, Perfana tries again 30 seconds later. Once at least one channel has the message, or when a channel refuses it for good (for example a deleted webhook), it is not sent again; the Perfana administrator finds the reason in the API log.
 
 ## Mattermost on an internal address
 

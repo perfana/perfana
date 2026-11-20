@@ -15,8 +15,9 @@ This lets you turn a test run into a shareable HTML report and send it to people
 2. **Confirm the report options** in the dialog and generate it.
    Perfana builds the report and opens it as an HTML report in a modal.
 
-3. **Share the report** using its share link. The link points to `/reports/share/[shareId]`.
-   Anyone with the link can open the report without signing in to Perfana.
+3. **Share the report.** A new report is private: turn sharing on from the share menu on the
+   Reports card. Its link points to `/reports/share/[shareId]`, and anyone with the link can open
+   the report without signing in to Perfana until you turn sharing off again.
 
 **Result**
 You have an HTML report for the run and a link you can send to others.
@@ -28,9 +29,9 @@ You have an HTML report for the run and a link you can send to others.
 - Share links can **expire** — if a recipient reports a dead link, generate and share a fresh one.
 
 **Troubleshooting**
-- *Recipient gets "link expired" or "not found"* — the share link has expired. Generate the report again and send the new link.
+- *Recipient gets "link expired" or "not found"* — the share link has expired, or sharing is off for that report. Turn sharing on from the Reports card, or generate the report again and send the new link.
 
 **Related**
-- [Customize report content](../configuration/reporting-templates.md)
+- [Customize report content](../configuration/reporting-templates.md), including the [Comments section](../configuration/reporting-templates.md#the-comments-section)
 - [Compare test runs](compare-runs.md)
 - [Investigate root cause](root-cause-analysis.md)

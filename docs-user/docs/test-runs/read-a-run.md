@@ -44,6 +44,7 @@ Expand **Performance Analysis** to see its live controls, in a row under the car
 When the test finishes, the card fetches its final figures once and the live controls disappear.
 
 **Related**
+- [Comment on a test run](comments.md)
 - [Check SLO results](slo-check-results.md)
 - [Understand ADAPT verdicts](understand-adapt.md)
 - [Concepts](../concepts.md)

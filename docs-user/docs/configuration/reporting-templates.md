@@ -24,6 +24,19 @@ A reporting template defines what a generated report contains and how it is laid
 **Result**
 The system has one or more reporting templates. When you generate a report for a run, you can apply a template so the output follows the structure you defined — see [Generate a report](../test-runs/generate-report.md).
 
+## The Comments section
+
+Add a **Comments** section to a template to put the team's [discussion of a run](../test-runs/comments.md) in its report.
+
+- **Which comments**: by default the section lists the comments on every card. To narrow it, pick one or more cards in the section's settings; only threads on those cards are included.
+- **How they are laid out**: threads are grouped by card. Each thread shows its first comment and its replies in the order they were written, each with the author and the time in UTC, and **(edited)** where a comment was changed.
+- **Graph markers**: a thread started with a [marker](../test-runs/comments.md#pin-a-marker-on-a-graphs-chart) on the Graphs card is headed by the chart it was placed on, drawn from the series and time range recorded with it, with the marker's number called out at its moment. Series that no longer have data are left out of that chart and counted in a note under it.
+- **Deleted comments** appear as **Comment deleted** where a thread still has replies, so the replies keep their context. A deleted marker gets no chart.
+- **Text stays text**: comment text is shown exactly as written. Formatting characters and HTML in a comment are not interpreted.
+
+A report is a snapshot: comments added after you generate it appear only in a report generated again.
+
 **Related**
+- [Comment on a test run](../test-runs/comments.md)
 - [Generate a report](../test-runs/generate-report.md)
 - [Create a system under test](create-system-under-test.md)
