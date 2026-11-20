@@ -27,6 +27,7 @@ import {
 /** A marker chart's size: the Custom Graphs section's `standard` quality. */
 const CHART_WIDTH = 1000;
 const CHART_HEIGHT = 320;
+const MARKER_CHART_INDEX_OFFSET = 1000;
 
 /** One root and its replies, oldest first. */
 interface Thread {
@@ -252,7 +253,9 @@ export class CommentsRenderer {
     const chart = this.chartSvg.renderTimeSeriesChart(
       title,
       drawn,
-      chartIdx,
+      // Offset past any Custom Graphs index: ChartSvgService derives the clipPath id from this
+      // index and the title, and a marker view often carries its preset's title.
+      MARKER_CHART_INDEX_OFFSET + chartIdx,
       CHART_WIDTH,
       CHART_HEIGHT,
       this.graphsRenderer.analysisWindow(testRun),

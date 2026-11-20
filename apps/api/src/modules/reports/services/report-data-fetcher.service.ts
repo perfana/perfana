@@ -3578,8 +3578,9 @@ export class ReportDataFetcherService {
    * The report run's comments, oldest first, optionally limited to some cards.
    *
    * Scoped twice: to the run (by its uuid, which the caller already resolved and authorized)
-   * and to that run's own organization: a comment row carries the organization copied from
-   * the run at create, and a row whose copy disagrees is not this run's to print. The usual
+   * and to its system's organization: a comment row carries the organization the comments
+   * service copied from the SYSTEM at create (not `test_runs.organization_id`, which can
+   * drift), and a row whose copy disagrees is not this run's to print. The usual
    * org filter applies on top (empty for the background job, which runs with no user).
    */
   async getTestRunComments(
@@ -3605,8 +3606,9 @@ export class ReportDataFetcherService {
               c.marker_seq, c.marker_time, c.chart_context, c.created_at, c.edited_at, c.deleted_at
          FROM test_run_comments c
          JOIN test_runs tr ON tr.id = c.test_run_id
+         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
         WHERE c.test_run_id = $1
-          AND c.organization_id = tr.organization_id
+          AND c.organization_id = sut.organization_id
           ${cardClause}
           ${orgFilter.clause}
         ORDER BY c.created_at, c.id`,

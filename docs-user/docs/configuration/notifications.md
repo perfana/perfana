@@ -52,7 +52,7 @@ A few things to know:
 - A comment deleted before the message was sent is not counted or mentioned. Edits do not cause a new message.
 - Comments written before you turned the setting on for a channel are not announced to it afterwards. Comments that existed when Perfana was upgraded to a version with this setting are never announced.
 - Comments that arrive with a system imported from another Perfana installation are never announced.
-- If no channel of the system could be reached because a chat service was temporarily unavailable, Perfana tries again 30 seconds later. Once at least one channel has the message, or when a channel refuses it for good (for example a deleted webhook), it is not sent again; the Perfana administrator finds the reason in the API log.
+- If no channel of the system could be reached because a chat service was temporarily unavailable, Perfana tries again every 5 minutes, for up to an hour after the first of those comments. After that it gives up. Once at least one channel has the message, or when a channel refuses it for good (for example a deleted webhook), it is not sent again; the Perfana administrator finds the reason in the API log.
 
 ## Mattermost on an internal address
 

@@ -7,6 +7,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * - `test_run_comments.notified_at`: the per-comment claim the API's notification sweep sets
  *   before posting. Existing comments are stamped announced, so the first sweep after this
  *   deploy does not post a backlog of old discussion.
+ * - `test_run_comments.notify_after`: set when a batch is released after a transient delivery
+ *   failure; the sweep skips the comment until then, so a dead webhook cannot keep its run at
+ *   the front of the oldest-first queue.
  * - Partial index serving the sweep's "unannounced, not deleted" scan.
  *
  * **Numbered above 1791** (root CLAUDE.md #64): no SAVEPOINT, every statement safe to repeat.
@@ -37,6 +40,9 @@ export class CommentNotifications1828000000000 implements MigrationInterface {
       $comment_notifications$;
     `);
     await queryRunner.query(`
+      ALTER TABLE public.test_run_comments ADD COLUMN IF NOT EXISTS notify_after timestamp with time zone;
+    `);
+    await queryRunner.query(`
       CREATE INDEX IF NOT EXISTS idx_test_run_comments_unnotified
         ON public.test_run_comments (test_run_id)
         WHERE notified_at IS NULL AND deleted_at IS NULL;
@@ -46,6 +52,7 @@ export class CommentNotifications1828000000000 implements MigrationInterface {
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       DROP INDEX IF EXISTS public.idx_test_run_comments_unnotified;
+      ALTER TABLE public.test_run_comments DROP COLUMN IF EXISTS notify_after;
       ALTER TABLE public.test_run_comments DROP COLUMN IF EXISTS notified_at;
       ALTER TABLE public.notification_channels DROP COLUMN IF EXISTS notify_on_comment;
     `);

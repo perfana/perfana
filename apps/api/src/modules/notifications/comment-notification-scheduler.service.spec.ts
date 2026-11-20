@@ -1,5 +1,9 @@
 import { NotificationChannel } from '@perfana/shared';
-import { CommentNotificationScheduler } from './comment-notification-scheduler.service';
+import {
+  COMMENT_NOTIFY_GIVE_UP_SECONDS,
+  COMMENT_NOTIFY_RETRY_SECONDS,
+  CommentNotificationScheduler,
+} from './comment-notification-scheduler.service';
 import { NotificationsService } from './notifications.service';
 import {
   MattermostMessageBuilder,
@@ -19,15 +23,16 @@ describe('CommentNotificationScheduler', () => {
   let send: jest.Mock;
   let scheduler: CommentNotificationScheduler;
   let lockAcquired: boolean;
-  let claimRows: Array<{ id: string; author_name: string; card_key: string }>;
+  let claimRows: Array<{ id: string; author_name: string; card_key: string; created_at: Date }>;
   let events: string[];
 
   beforeEach(() => {
     lockAcquired = true;
     events = [];
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000);
     claimRows = [
-      { id: 'c1', author_name: 'Ann', card_key: 'slo' },
-      { id: 'c2', author_name: 'Bob', card_key: 'graphs' },
+      { id: 'c1', author_name: 'Ann', card_key: 'slo', created_at: fiveMinutesAgo },
+      { id: 'c2', author_name: 'Bob', card_key: 'graphs', created_at: fiveMinutesAgo },
     ];
     txQuery = jest.fn(async (sql: string) => {
       if (sql.includes('pg_try_advisory_xact_lock')) return [{ ok: lockAcquired }];
@@ -95,6 +100,16 @@ describe('CommentNotificationScheduler', () => {
     expect(events).not.toContain('release');
   });
 
+  it('keeps the claim and posts nothing when the run was deleted after the claim', async () => {
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('notified_at = NULL')) events.push('release');
+      return []; // the run lookup finds nothing
+    });
+    expect(await scheduler.announceRun(RUN)).toBe(2);
+    expect(send).not.toHaveBeenCalled();
+    expect(events).not.toContain('release');
+  });
+
   it('does nothing when the claim is empty', async () => {
     claimRows = [];
     expect(await scheduler.announceRun(RUN)).toBe(0);
@@ -110,7 +125,32 @@ describe('CommentNotificationScheduler', () => {
     expect(await scheduler.announceRun(RUN)).toBe(0);
     expect(events).toContain('release');
     const release = query.mock.calls.find((c) => String(c[0]).includes('notified_at = NULL'))!;
-    expect(release[1]).toEqual([['c1', 'c2']]);
+    expect(release[1]).toEqual([['c1', 'c2'], COMMENT_NOTIFY_RETRY_SECONDS]);
+  });
+
+  it('releases with a backoff, so a retried batch cannot hold the front of the queue', async () => {
+    send.mockRejectedValue(new Error('Webhook request failed with status 503: down'));
+    jest.spyOn((scheduler as never as { logger: { warn: () => void } }).logger, 'warn').mockImplementation();
+    expect(await scheduler.announceRun(RUN)).toBe(0);
+    const release = query.mock.calls.find((c) => String(c[0]).includes('notified_at = NULL'))!;
+    expect(release[0]).toContain('notify_after = now() + make_interval(secs => $2)');
+    expect(release[1]).toEqual([['c1', 'c2'], COMMENT_NOTIFY_RETRY_SECONDS]);
+  });
+
+  it('gives up and keeps the claim once the burst is older than the give-up window', async () => {
+    const old = new Date(Date.now() - (COMMENT_NOTIFY_GIVE_UP_SECONDS + 60) * 1000);
+    claimRows = claimRows.map((r) => ({ ...r, created_at: old }));
+    send.mockRejectedValue(new Error('Webhook request failed with status 503: down'));
+    const error = jest.spyOn((scheduler as never as { logger: { error: () => void } }).logger, 'error').mockImplementation();
+    expect(await scheduler.announceRun(RUN)).toBe(2);
+    expect(events).not.toContain('release');
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('Giving up'));
+  });
+
+  it('never claims or finds a comment whose retry backoff has not elapsed', async () => {
+    await scheduler.announceRun(RUN);
+    const claimSql = txQuery.mock.calls.find((c) => String(c[0]).includes('SKIP LOCKED'))![0];
+    expect(claimSql).toContain('notify_after IS NULL OR notify_after <= now()');
   });
 
   it('keeps the claim when the only failure is terminal, and logs at ERROR', async () => {

@@ -76,4 +76,8 @@ export class TestRunComment {
   /** Set by the API's notification sweep when it claims the comment for a channel post (PR3). */
   @Column({ name: 'notified_at', type: 'timestamptz', nullable: true })
   notifiedAt!: Date | null;
+
+  /** Set when the sweep released this comment after a transient failure; skipped until then. */
+  @Column({ name: 'notify_after', type: 'timestamptz', nullable: true })
+  notifyAfter!: Date | null;
 }

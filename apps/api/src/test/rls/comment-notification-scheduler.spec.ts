@@ -53,7 +53,7 @@ describe('CommentNotificationScheduler against a real database', () => {
   };
   const resetUnannounced = (createdAt = '2000-01-01T00:00:00Z'): Promise<unknown> =>
     ds.query(
-      `UPDATE test_run_comments SET notified_at = NULL,
+      `UPDATE test_run_comments SET notified_at = NULL, notify_after = NULL,
               created_at = CASE WHEN id = $3 THEN $2::timestamptz + interval '1 minute' ELSE $2::timestamptz END
         WHERE test_run_id = $1`,
       [runUuid, createdAt, newer],
@@ -130,10 +130,29 @@ describe('CommentNotificationScheduler against a real database', () => {
     send.mockRejectedValue(new Error('Webhook request failed with status 503: down'));
     jest.spyOn((scheduler as never as { logger: { warn: () => void } }).logger, 'warn').mockImplementation();
 
+    // A burst from ten minutes ago: inside the give-up window, so it is released, with a backoff.
+    await resetUnannounced(new Date(Date.now() - 10 * 60_000).toISOString());
     expect(await scheduler.announceRun(runUuid)).toBe(0);
     const stamps = await notifiedAt();
     expect(stamps[live]).toBeNull();
     expect(stamps[newer]).toBeNull();
+    const [{ waits }] = await ds.query(
+      `SELECT bool_and(notify_after > now()) AS waits FROM test_run_comments WHERE id = ANY($1::uuid[])`,
+      [[live, newer]],
+    );
+    expect(waits).toBe(true);
+
+    // Until the backoff elapses the sweep neither finds the run nor claims its comments.
+    const announce = jest.spyOn(scheduler, 'announceRun');
+    try {
+      await scheduler.sweep();
+      expect(announce.mock.calls.map((c) => c[0])).not.toContain(runUuid);
+    } finally {
+      announce.mockRestore();
+    }
+    send.mockClear();
+    expect(await scheduler.announceRun(runUuid)).toBe(0);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('skips a run whose advisory lock another session holds, claiming nothing', async () => {

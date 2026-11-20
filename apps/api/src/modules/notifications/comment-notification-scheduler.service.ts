@@ -9,11 +9,16 @@ import { NotificationsService } from './notifications.service';
 export const COMMENT_NOTIFY_DELAY_SECONDS = 120;
 /** Bound on runs handled per sweep; the rest wait for the next tick. */
 export const COMMENT_NOTIFY_MAX_RUNS_PER_TICK = 50;
+/** A batch released after a transient failure is skipped this long, so it cannot hog the queue. */
+export const COMMENT_NOTIFY_RETRY_SECONDS = 300;
+/** Once a batch's oldest comment is this old, a failure is final: the claim stands, ERROR logged. */
+export const COMMENT_NOTIFY_GIVE_UP_SECONDS = 3600;
 
 interface ClaimedComment {
   id: string;
   author_name: string;
   card_key: string;
+  created_at: Date;
 }
 
 /**
@@ -50,6 +55,7 @@ export class CommentNotificationScheduler {
         `SELECT test_run_id
            FROM test_run_comments
           WHERE notified_at IS NULL AND deleted_at IS NULL
+            AND (notify_after IS NULL OR notify_after <= now())
           GROUP BY test_run_id
          HAVING MIN(created_at) <= now() - make_interval(secs => $1)
           ORDER BY MIN(created_at)
@@ -130,12 +136,23 @@ export class CommentNotificationScheduler {
     }
 
     if (delivered === 0 && retryableFailures > 0) {
-      await this.dataSource.query(
-        `UPDATE test_run_comments SET notified_at = NULL WHERE id = ANY($1::uuid[])`,
-        [ids],
+      // Retry later, never at once: a released batch keeps its old created_at, so without the
+      // backoff it would be first in the sweep's oldest-first queue on every tick and a few
+      // dead webhooks could take every slot from every other organization's runs.
+      const oldest = Math.min(...claimed.map((c) => new Date(c.created_at).getTime()));
+      if (Date.now() - oldest < COMMENT_NOTIFY_GIVE_UP_SECONDS * 1000) {
+        await this.dataSource.query(
+          `UPDATE test_run_comments
+              SET notified_at = NULL, notify_after = now() + make_interval(secs => $2)
+            WHERE id = ANY($1::uuid[])`,
+          [ids, COMMENT_NOTIFY_RETRY_SECONDS],
+        );
+        this.logger.warn(`Released ${ids.length} comment(s) of run ${run.test_run_id} for a retry in ${COMMENT_NOTIFY_RETRY_SECONDS} s`);
+        return 0;
+      }
+      this.logger.error(
+        `Giving up on announcing ${ids.length} comment(s) of run ${run.test_run_id}: every channel has failed for over ${COMMENT_NOTIFY_GIVE_UP_SECONDS / 60} minutes`,
       );
-      this.logger.warn(`Released ${ids.length} comment(s) of run ${run.test_run_id} for retry`);
-      return 0;
     }
     return claimed.length;
   }
@@ -152,9 +169,10 @@ export class CommentNotificationScheduler {
       );
       if (!ok) return null;
       const rows: ClaimedComment[] = await em.query(
-        `SELECT id, author_name, card_key
+        `SELECT id, author_name, card_key, created_at
            FROM test_run_comments
           WHERE test_run_id = $1 AND notified_at IS NULL AND deleted_at IS NULL
+            AND (notify_after IS NULL OR notify_after <= now())
           ORDER BY created_at, id
             FOR UPDATE SKIP LOCKED`,
         [testRunUuid],

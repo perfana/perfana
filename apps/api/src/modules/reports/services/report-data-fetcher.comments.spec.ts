@@ -31,7 +31,7 @@ describe('ReportDataFetcherService.getTestRunComments', () => {
     const rows = await service.getTestRunComments(testRun, null);
     const [sql, params] = query.mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/c\.test_run_id = \$1/);
-    expect(sql).toMatch(/c\.organization_id = tr\.organization_id/);
+    expect(sql).toMatch(/c\.organization_id = sut\.organization_id/);
     expect(sql).not.toMatch(/tr\.organization_id IN/);
     expect(params).toEqual(['run-uuid']);
     expect(rows[0]).toMatchObject({ id: 'c1', cardKey: 'slo', authorName: 'Ada', createdAt: new Date('2026-11-20T10:00:00Z') });
