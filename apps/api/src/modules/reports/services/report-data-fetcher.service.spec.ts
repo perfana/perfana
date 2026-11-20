@@ -1443,6 +1443,36 @@ describe('ReportDataFetcherService', () => {
       expect(sql).not.toContain('organization_id IS NULL');
     });
   });
+
+  // Value: protects=a report's Top 10 lists divide analysis-window counts by the analysis window
+  // (duration - ramp-up - ramp-down) when excludeRampUp, and by the whole run when not, so the report
+  // matches the page; fails_when=either method goes back to testRun.duration; why_new=the renderer spec
+  // mocks both methods and no test reached their divisor; seam=none; no_claim=the SQL is mocked.
+  describe('Top 10 rows throughput divisor', () => {
+    // A 1000 s run with 100 s ramp-up and 300 s ramp-down: a 600 s analysis window.
+    const run = makeTestRun({
+      startTime: new Date('2026-01-01T10:00:00Z'),
+      endTime: new Date('2026-01-01T10:16:40Z'),
+      duration: 1000,
+      analysisStartOffset: 100,
+      analysisEndOffset: 300,
+    });
+    const rows = [{ label: 'tx-a', secondary_label: null, scenario_name: 'scenario-a', avg_response_time: '50', total_count: '6000', failed_count: '0' }];
+
+    it.each([
+      ['getTop10TransactionRows', true, 10],
+      ['getTop10TransactionRows', false, 6],
+      ['getTop10SamplerRows', true, 10],
+      ['getTop10SamplerRows', false, 6],
+    ] as const)('%s with excludeRampUp=%s reads %s/s', async (method, excludeRampUp, expected) => {
+      testRunRepo.query.mockResolvedValueOnce(rows);
+      const call = method === 'getTop10TransactionRows'
+        ? service.getTop10TransactionRows(run, [], excludeRampUp)
+        : service.getTop10SamplerRows(run, [], excludeRampUp, true);
+      const [row] = await call;
+      expect(row!.throughput).toBe(expected);
+    });
+  });
 });
 
 describe('ReportDataFetcherService getAwrData id resolution', () => {

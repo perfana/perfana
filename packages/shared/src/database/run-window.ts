@@ -77,20 +77,38 @@ export function analysisOffsetsFit(row: TestRunTimesRow | null | undefined): boo
 }
 
 /**
- * The seconds a per-second rate over `ramp_up_excluded = true` rollup rows divides by, for a
- * query aliasing `test_runs` as `tr`. When the offsets do not fit, those rows hold the whole
- * run, so the whole run is the divisor. It has only ever subtracted the ramp-up.
+ * The seconds a per-second rate over `ramp_up_excluded = true` rows divides by: the length of
+ * the window `analysisBoundsFromRow(row, true)` reads, `[start + ramp_up, end - ramp_down)`.
+ * Ramp-down counts only once the run has an end, as it does there. When the offsets do not
+ * fit, those rows hold the whole run, so the whole run is the divisor.
+ *
+ * Until v0.2.97.91 this subtracted the ramp-up alone, so on a run with a long ramp-down the
+ * rates read low against the stored throughput series (199/s shown as 138/s on a run with a
+ * 2718 s ramp-down). `ANALYSED_SECONDS_SQL` is the same rule for a query aliasing `test_runs`
+ * as `tr`.
  *
  * The fit is measured from the timestamps, as `analysisOffsetsFit` and `RAMP_UP_EXPR` measure
  * it: `duration` is client-supplied and can disagree with them, and then the divisor and the
  * rows it divides would describe different windows. The divisor itself keeps `duration`.
  */
-export const ANALYSED_SECONDS_SQL = `GREATEST(tr.duration - CASE
+export function analysedSeconds(
+  row: (TestRunTimesRow & { duration?: string | number | null }) | null | undefined,
+): number {
+  const duration = seconds(row?.duration);
+  if (!analysisOffsetsFit(row)) return duration;
+  const trimmed = seconds(row?.ramp_up) + (row?.end_time ? seconds(row?.ramp_down) : 0);
+  // `duration` is client-supplied and can be shorter than the offsets even when the timestamps
+  // say they fit. Nothing left then means the window is unknown, not zero: use the whole run.
+  return duration > trimmed ? duration - trimmed : duration;
+}
+
+export const ANALYSED_SECONDS_SQL = `COALESCE(NULLIF(GREATEST(tr.duration - CASE
     WHEN tr.start_time IS NULL OR tr.end_time IS NULL
       OR EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) > COALESCE(tr.ramp_up, 0) + COALESCE(tr.ramp_down, 0)
     THEN COALESCE(tr.ramp_up, 0)
+       + CASE WHEN tr.end_time IS NOT NULL THEN COALESCE(tr.ramp_down, 0) ELSE 0 END
     ELSE 0
-  END, 0)`;
+  END, 0), 0), tr.duration)`;
 
 /**
  * Resolve the `time` bounds for a run from its `test_runs` row.
@@ -147,6 +165,27 @@ export function analysisBoundsFromEntity(
     },
     excludeRampUp,
   );
+}
+
+/**
+ * The seconds a rate divides by, for a caller holding the entity: `analysedSeconds` when the
+ * counts are the analysis window's (`ramp_up_excluded = true`), the whole run otherwise. Never
+ * 0, so the result can be divided by directly.
+ */
+export function rateSecondsFromEntity(
+  run: (TestRunTimesEntity & { duration?: string | number | null }) | null | undefined,
+  excludeRampUp: boolean,
+): number {
+  const secs = excludeRampUp
+    ? analysedSeconds({
+        duration: run?.duration,
+        start_time: run?.startTime ?? null,
+        end_time: run?.endTime ?? null,
+        ramp_up: run?.analysisStartOffset ?? null,
+        ramp_down: run?.analysisEndOffset ?? null,
+      })
+    : seconds(run?.duration);
+  return secs > 0 ? secs : 1;
 }
 
 /**

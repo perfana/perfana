@@ -4,6 +4,7 @@ import {
   diffConfigs,
   buildComparison,
   buildPerformanceRanking,
+  analysisWindowSeconds,
   buildErrorAnalysis,
   pctChange,
   regression,
@@ -240,6 +241,42 @@ describe('buildComparison', () => {
     const result = buildComparison(current, baseline);
 
     assert.equal(result[0].errors!.changePct, 100); // doubled
+  });
+});
+
+// ─── analysisWindowSeconds ───────────────────────────────────────────────────
+
+// Value: protects=get_performance_rankings divides analysis-window counts by the analysis window,
+// not the whole run; fails_when=the tool goes back to run.duration or drops the ramp-down;
+// why_new=no test covered the divisor; seam=none; no_claim=the API's own window is not exercised.
+describe('analysisWindowSeconds', () => {
+  // A 1000 s run with 100 s ramp-up and 300 s ramp-down.
+  const run = {
+    duration: 1000,
+    start_time: '2026-01-01T10:00:00.000Z',
+    end_time: '2026-01-01T10:16:40.000Z',
+    analysis_start_offset: 100,
+    analysis_end_offset: 300,
+  };
+
+  it('leaves both offsets out of a completed run', () => {
+    assert.equal(analysisWindowSeconds(run), 600);
+  });
+
+  it('keeps the whole run when the offsets do not fit it', () => {
+    assert.equal(analysisWindowSeconds({ ...run, analysis_end_offset: 950 }), 1000);
+  });
+
+  it('leaves the ramp-down in for a run with no end yet', () => {
+    assert.equal(analysisWindowSeconds({ ...run, end_time: null }), 900);
+  });
+
+  it('reads the whole run when duration leaves nothing after the offsets', () => {
+    assert.equal(analysisWindowSeconds({ ...run, duration: 350 }), 350);
+  });
+
+  it('falls back to duration_seconds and reads missing offsets as none', () => {
+    assert.equal(analysisWindowSeconds({ duration: null, duration_seconds: 500, start_time: run.start_time, end_time: null }), 500);
   });
 });
 

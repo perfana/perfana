@@ -2,6 +2,8 @@ import {
   ANALYSED_SECONDS_SQL,
   CHUNK_CACHE_TTL_MS,
   RUN_WINDOW_PAD_MS,
+  analysedSeconds,
+  rateSecondsFromEntity,
   analysisBoundsFromEntity,
   analysisBoundsFromRow,
   analysisOffsetsFit,
@@ -54,14 +56,57 @@ describe('run-window', () => {
     });
   });
 
+  /**
+   * The divisor must be the length of the window the `ramp_up_excluded` rows were counted over,
+   * `[start + ramp_up, end - ramp_down)`. Subtracting the ramp-up alone read 138/s for a
+   * transaction the throughput series showed at 199/s (a 2718 s ramp-down).
+   */
+  describe('analysedSeconds', () => {
+    const hourLong = { start_time: START, end_time: END, duration: 3600 };
+
+    it.each([
+      ['subtracts both offsets from a completed run', { ramp_up: 120, ramp_down: 60 }, 3420],
+      ['reads them as strings, the way pg returns them', { ramp_up: '120', ramp_down: '60', duration: '3600' }, 3420],
+      ['keeps the whole run when the offsets do not fit it', { ramp_up: 2000, ramp_down: 2000 }, 3600],
+      ['subtracts nothing when there are no offsets', { ramp_up: null, ramp_down: null }, 3600],
+    ])('%s', (_name, over, expected) => {
+      expect(analysedSeconds({ ...hourLong, ...over })).toBe(expected);
+    });
+
+    it('leaves the ramp-down in for a run with no end yet, as analysisBoundsFromRow does', () => {
+      expect(analysedSeconds({ start_time: START, end_time: null, duration: 600, ramp_up: 120, ramp_down: 60 })).toBe(480);
+    });
+
+    it('reads the whole run when duration leaves nothing after the offsets, never 0 or less', () => {
+      // A live run whose duration is still shorter than its ramp-up.
+      expect(analysedSeconds({ start_time: START, end_time: null, duration: 100, ramp_up: 120 })).toBe(100);
+      // The timestamps say the offsets fit, the client-supplied duration says they do not.
+      expect(analysedSeconds({ ...hourLong, duration: 150, ramp_up: 120, ramp_down: 60 })).toBe(150);
+    });
+  });
+
+  describe('rateSecondsFromEntity', () => {
+    const entity = { startTime: START, endTime: END, duration: 3600, analysisStartOffset: 120, analysisEndOffset: 60 };
+
+    it('is the analysis window for analysis-window counts, the whole run otherwise', () => {
+      expect(rateSecondsFromEntity(entity, true)).toBe(3420);
+      expect(rateSecondsFromEntity(entity, false)).toBe(3600);
+    });
+
+    it('never returns 0, so a caller can divide by it', () => {
+      expect(rateSecondsFromEntity({}, true)).toBe(1);
+      expect(rateSecondsFromEntity(null, false)).toBe(1);
+    });
+  });
+
   describe('ANALYSED_SECONDS_SQL', () => {
-    it('only subtracts the ramp-up when both offsets fit the run, measured from its timestamps', () => {
+    it('subtracts both offsets when they fit the run, measured from its timestamps', () => {
       expect(ANALYSED_SECONDS_SQL).toMatch(
-        /EXTRACT\(EPOCH FROM \(tr\.end_time - tr\.start_time\)\) > COALESCE\(tr\.ramp_up, 0\) \+ COALESCE\(tr\.ramp_down, 0\)\s+THEN COALESCE\(tr\.ramp_up, 0\)\s+ELSE 0/,
+        /EXTRACT\(EPOCH FROM \(tr\.end_time - tr\.start_time\)\) > COALESCE\(tr\.ramp_up, 0\) \+ COALESCE\(tr\.ramp_down, 0\)\s+THEN COALESCE\(tr\.ramp_up, 0\)\s+\+ CASE WHEN tr\.end_time IS NOT NULL THEN COALESCE\(tr\.ramp_down, 0\) ELSE 0 END\s+ELSE 0/,
       );
     });
 
-    it('keeps subtracting it for a run with no end yet, as analysisOffsetsFit does', () => {
+    it('keeps subtracting the ramp-up for a run with no end yet, as analysisOffsetsFit does', () => {
       expect(ANALYSED_SECONDS_SQL).toMatch(/WHEN tr\.start_time IS NULL OR tr\.end_time IS NULL\s+OR /);
     });
   });

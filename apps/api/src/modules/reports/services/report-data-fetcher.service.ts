@@ -19,6 +19,7 @@ import {
   analysisBoundsFromEntity,
   ANALYSED_SECONDS_SQL,
   analysisBoundsFromRow,
+  rateSecondsFromEntity,
   spanBounds,
   timeBoundsSql,
 } from '@perfana/shared/database/run-window';
@@ -764,7 +765,8 @@ export class ReportDataFetcherService {
         ${orgFilter.clause}
     `;
     const rows: RawTop10Row[] = await withRequestEm(this.testRunRepo).query(query, params);
-    return mapRawToTop10Rows(rows, testRun.duration ?? 1);
+    // The rows are the analysis window's when excludeRampUp, so the rate is per second of it.
+    return mapRawToTop10Rows(rows, rateSecondsFromEntity(testRun, excludeRampUp));
   }
 
   /**
@@ -833,7 +835,8 @@ export class ReportDataFetcherService {
           ${orgFilter.clause}
       `;
     const rows: RawTop10Row[] = await withRequestEm(this.testRunRepo).query(query, params);
-    return mapRawToTop10Rows(rows, testRun.duration ?? 1);
+    // The rows are the analysis window's when excludeRampUp, so the rate is per second of it.
+    return mapRawToTop10Rows(rows, rateSecondsFromEntity(testRun, excludeRampUp));
   }
 
   /**

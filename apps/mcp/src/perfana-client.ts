@@ -283,6 +283,9 @@ export interface TestRun {
   completed: boolean;
   duration: number | null;
   duration_seconds: number | null;
+  /** Ramp-up / ramp-down seconds the analysis window leaves out (`ramp_up` / `ramp_down`). */
+  analysis_start_offset?: number | null;
+  analysis_end_offset?: number | null;
   annotations: string[] | null;
   tags: string[];
   application_release: string | null;
