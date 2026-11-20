@@ -10,6 +10,7 @@
  */
 
 import {
+  nearestBucketIndex,
   createEventShapes,
   createEventAnnotations,
   mergeEventShapesIntoLayout,
@@ -632,5 +633,21 @@ describe('event-lines Utility Functions', () => {
         expect(result.shapes).toHaveLength(1);
       });
     });
+  });
+});
+
+describe('nearestBucketIndex (graph marker placement, design R14)', () => {
+  const ts = ['2026-11-20T10:00:00Z', '2026-11-20T10:01:00Z', '2026-11-20T10:02:00Z'];
+
+  it('snaps a time between buckets to the nearer one', () => {
+    expect(nearestBucketIndex('2026-11-20T10:00:20Z', ts)).toBe(0);
+    expect(nearestBucketIndex('2026-11-20T10:00:40Z', ts)).toBe(1);
+    expect(nearestBucketIndex('2026-11-20T10:02:00Z', ts)).toBe(2);
+  });
+
+  it('hides a marker outside the plotted range instead of pinning it to the edge', () => {
+    expect(nearestBucketIndex('2026-11-20T09:59:59Z', ts)).toBeNull();
+    expect(nearestBucketIndex('2026-11-20T10:02:01Z', ts)).toBeNull();
+    expect(nearestBucketIndex('not a time', ts)).toBeNull();
   });
 });

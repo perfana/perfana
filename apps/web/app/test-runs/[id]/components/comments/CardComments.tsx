@@ -61,9 +61,17 @@ export default function CardComments({
         '&:hover .card-comments-badge-wrap, &:focus-within .card-comments-badge-wrap': { opacity: 1 },
       }}
     >
-      {panelOpen ? (
-        <Box sx={{ display: 'flex', flexDirection: wide ? 'row' : 'column', gap: 2, alignItems: wide ? 'flex-start' : 'stretch' }}>
-          <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+      {/* One tree shape whether or not the panel is open: moving `children` into a new wrapper
+          remounts the card and drops its state (the Graphs card lost its whole chart). */}
+      <Box
+        sx={
+          panelOpen
+            ? { display: 'flex', flexDirection: wide ? 'row' : 'column', gap: 2, alignItems: wide ? 'flex-start' : 'stretch' }
+            : { display: 'contents' }
+        }
+      >
+        <Box sx={panelOpen ? { flex: 1, minWidth: 0 } : { display: 'contents' }}>{children}</Box>
+        {panelOpen && (
           <Box
             sx={{
               width: wide ? COMMENTS_PANEL_WIDTH : '100%',
@@ -86,10 +94,8 @@ export default function CardComments({
           >
             <CommentsPanel />
           </Box>
-        </Box>
-      ) : (
-        children
-      )}
+        )}
+      </Box>
       {comments && (
         // Outside the card's corner, in the 24px grid gap, so it never covers a card's own header
         // controls (expand chevron, settings). Always visible once the card has comments.

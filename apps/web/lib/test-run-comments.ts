@@ -1,5 +1,64 @@
 import { authenticatedFetch } from '@/lib/api';
 import type { CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import type { SeriesConfig as PresetSeries } from '@/lib/graph-presets';
+
+/**
+ * The Graphs view a marker was placed on. `series` is the graph-preset series shape, so
+ * replaying it is the preset load path; `xRange` absent means the whole run.
+ */
+export interface MarkerChartContext {
+  /** Stamped by the server from the card; absent on a view the client is about to post. */
+  kind?: 'graphs';
+  series: PresetSeries[];
+  xRange?: [string, string];
+  axisMode?: 'overlay' | 'split';
+  title?: string;
+}
+
+/** A series as the Trends and Compare presets store it; each card maps it back to its own shape. */
+export interface ViewSeries {
+  dashboardId: string;
+  dashboardLabel?: string;
+  panelId: number;
+  panelTitle?: string;
+  metricName: string;
+  source: string;
+  yAxisFormat?: string;
+  yAxesFormat?: string;
+  metricsSourceId?: string;
+  isAggregated?: boolean;
+  colorSlot?: number;
+  hidden?: boolean;
+}
+
+/** The Trends view a comment was written on. `timeRange` is the option's label ('Last week', 'Custom'). */
+export interface TrendsView {
+  kind: 'trends';
+  series: ViewSeries[];
+  timeRange: string;
+  customRange?: [string, string];
+  evaluateType: string;
+}
+
+/** The Compare view a comment was written on; `baselineTestRunId` may be the control-group sentinel. */
+export interface CompareView {
+  kind: 'compare';
+  series: ViewSeries[];
+  baselineTestRunId?: string;
+}
+
+/** What a Graphs, Trends or Compare comment records about its card's view (design: PR2). */
+export type CommentView = MarkerChartContext | TrendsView | CompareView;
+
+/** The comment's view if it was recorded on `card`; Graphs views from before `kind` existed count as Graphs. */
+export function viewOf<C extends 'graphs' | 'trends' | 'compare'>(
+  comment: Pick<RunComment, 'chartContext'>,
+  card: C,
+): Extract<CommentView, { kind?: C }> | null {
+  const v = comment.chartContext;
+  if (!v || (v.kind ?? 'graphs') !== card) return null;
+  return v as Extract<CommentView, { kind?: C }>;
+}
 
 export interface RunComment {
   id: string;
@@ -16,6 +75,8 @@ export interface RunComment {
   authorName: string;
   markerSeq: number | null;
   markerTime: string | null;
+  /** The card's view when the root was written (Graphs, Trends, Compare); null once deleted and elsewhere. */
+  chartContext: CommentView | null;
   createdAt: string;
   editedAt: string | null;
 }
@@ -59,8 +120,25 @@ export interface CommentAnchor {
   itemLabel: string;
 }
 
-export const postComment = async (runId: string, card: CommentCardKey, body: string, parentId?: string, anchor?: CommentAnchor) =>
-  json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card, body, parentId, ...anchor })), 'Posting comment');
+export const postComment = async (
+  runId: string,
+  card: CommentCardKey,
+  body: string,
+  parentId?: string,
+  anchor?: CommentAnchor,
+  chartContext?: CommentView,
+) => json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card, body, parentId, ...anchor, chartContext })), 'Posting comment');
+
+/** Post a numbered marker on the Graphs card; the server assigns its number. */
+export async function postMarker(runId: string, body: string, markerTime: string, chartContext: MarkerChartContext) {
+  const c = await json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card: 'graphs', body, markerTime, chartContext })), 'Posting marker');
+  // An API older than this client strips the marker fields (whitelist validation) and saves a plain
+  // comment with a 201. Say so instead of letting the marker vanish without a word.
+  if (c.markerSeq == null) {
+    throw Object.assign(new Error('Saved as a plain comment: this server does not support markers yet'), { saved: c });
+  }
+  return c;
+}
 
 export type CommentItemCounts = Record<string, { threads: number; unread: number }>;
 
@@ -75,6 +153,20 @@ export const editComment = async (id: string, body: string) =>
 
 export const deleteComment = async (id: string) =>
   json<void>(await authenticatedFetch(`/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }), 'Deleting comment');
+
+/** "10:37:10 (+37:10)": wall clock plus time into the run (design DR14). */
+export function formatMarkerTime(iso: string, runStart?: string | null): string {
+  const clock = new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const start = runStart ? Date.parse(runStart) : NaN;
+  if (!Number.isFinite(start)) return clock;
+  const secs = Math.round((Date.parse(iso) - start) / 1000);
+  const abs = Math.abs(secs);
+  const h = Math.floor(abs / 3600);
+  const m = Math.floor((abs % 3600) / 60);
+  const s = String(abs % 60).padStart(2, '0');
+  const elapsed = h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+  return `${clock} (${secs < 0 ? '-' : '+'}${elapsed})`;
+}
 
 /** "12 min ago" under 24 h, "18 Nov, 09:12" after (design DR14). */
 export function formatCommentTime(iso: string, now = Date.now()): string {

@@ -16,6 +16,8 @@ import {
 import { alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { COMMENT_BODY_MAX_LENGTH, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -23,12 +25,16 @@ import {
   editComment,
   fetchCommentThreads,
   formatCommentTime,
+  formatMarkerTime,
   markCommentsSeen,
   postComment,
+  postMarker,
+  type CommentView,
   type RunComment,
   type RunCommentThread,
 } from '@/lib/test-run-comments';
-import { CARD_LABELS, useComments } from './CommentsContext';
+import { CONTROL_GROUP_BASELINE } from '@/lib/control-group-baseline';
+import { CARD_LABELS, useComments, type MarkerDraft } from './CommentsContext';
 
 /** Cards whose single thread opens (and focuses its item) as soon as the comments open. */
 const AUTO_OPEN_SINGLE_THREAD = new Set<CommentCardKey>(['distributed-tracing']);
@@ -39,6 +45,24 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Something w
 
 /** Latest activity in a thread: its newest reply, or the root. */
 const lastActivity = (t: RunCommentThread) => t.replies.reduce((max, r) => (r.createdAt > max ? r.createdAt : max), t.createdAt);
+
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
+/** One line saying what view a comment recorded, shown beside its "Restore view". */
+export function describeView(view: CommentView, marker: boolean): string {
+  const n = `${view.series.length} series`;
+  if (view.kind === 'trends') {
+    const dates = view.customRange ? `${day(view.customRange[0])}–${day(view.customRange[1])}` : null;
+    const range = !dates ? view.timeRange : view.timeRange === 'Custom' ? dates : `${view.timeRange} (${dates})`;
+    return `${n} · ${range} · ${view.evaluateType}`;
+  }
+  if (view.kind === 'compare') {
+    const base = !view.baselineTestRunId ? 'no baseline' : view.baselineTestRunId === CONTROL_GROUP_BASELINE ? 'vs control group' : `vs ${view.baselineTestRunId}`;
+    return `${n} · ${base}`;
+  }
+  const range = view.xRange ? `${formatMarkerTime(view.xRange[0])}–${formatMarkerTime(view.xRange[1])}` : 'whole run';
+  return `${marker ? 'Placed on' : 'Written on'} ${n} · ${range}`;
+}
 
 function Composer({
   placeholder,
@@ -198,6 +222,45 @@ function CommentItem({
   );
 }
 
+/**
+ * The new-marker box (design DR5/DR12): which bucket the pending pin sits on, with step buttons
+ * so a marker can be placed without a mouse, then the text. Esc or Cancel drops the pin.
+ */
+function MarkerComposer({
+  draft,
+  runStart,
+  onMove,
+  onCancel,
+  onSubmit,
+}: {
+  draft: MarkerDraft;
+  runStart?: string | null;
+  onMove: (time: string) => void;
+  onCancel: () => void;
+  onSubmit: (body: string) => Promise<void>;
+}) {
+  const i = draft.steps.indexOf(draft.time);
+  const at = formatMarkerTime(draft.time, runStart);
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.75 }}>
+        <Typography variant="caption" color="text.secondary">New marker at</Typography>
+        <IconButton size="small" aria-label="Move marker one bucket earlier" disabled={i <= 0} onClick={() => onMove(draft.steps[i - 1]!)}>
+          <ChevronLeftIcon fontSize="small" />
+        </IconButton>
+        <Typography variant="caption" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }} aria-live="polite">{at}</Typography>
+        <IconButton size="small" aria-label="Move marker one bucket later" disabled={i < 0 || i >= draft.steps.length - 1} onClick={() => onMove(draft.steps[i + 1]!)}>
+          <ChevronRightIcon fontSize="small" />
+        </IconButton>
+      </Box>
+      <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
+        Click the chart to move it.
+      </Typography>
+      <Composer placeholder={`Describe what happens at ${at}…`} submitLabel="Place marker" autoFocus onSubmit={onSubmit} onCancel={onCancel} />
+    </Box>
+  );
+}
+
 const visuallyHidden = {
   position: 'absolute',
   width: 1,
@@ -245,6 +308,16 @@ export default function CommentsDrawer() {
   // Read at load time without reloading the threads whenever the composer's anchor changes.
   const anchorRef = useRef(anchor);
   anchorRef.current = anchor;
+  const replayRef = useRef(ctx?.focusReplay ?? false);
+  replayRef.current = ctx?.focusReplay ?? false;
+  // One replay per deep link: `load` re-runs (e.g. once `me` resolves) while the focus is still set,
+  // and a second replay would make Undo return to the marker's view instead of the user's.
+  const replayedFor = useRef<string | null>(null);
+  if (!replayRef.current) replayedFor.current = null;
+  const restoreViewRef = useRef(ctx?.restoreView);
+  restoreViewRef.current = ctx?.restoreView;
+  const draft = card === 'graphs' ? ctx?.markerDraft ?? null : null;
+  const runStart = ctx?.runStart;
 
   const load = useCallback(async () => {
     if (!card) return;
@@ -268,6 +341,10 @@ export default function CommentsDrawer() {
       const onlyThread =
         res.threads.length === 1 && AUTO_OPEN_SINGLE_THREAD.has(card) && !anchorRef.current ? res.threads[0] : undefined;
       setExpanded(focusThread?.id ?? firstUnread?.id ?? onlyThread?.id ?? null);
+      if (focusThread?.chartContext && replayRef.current && replayedFor.current !== focusThread.id) {
+        replayedFor.current = focusThread.id;
+        restoreViewRef.current?.(focusThread);
+      }
       if (focusThread) {
         setHighlight(focusThread.id);
         setTimeout(() => setHighlight(null), 2000);
@@ -322,6 +399,11 @@ export default function CommentsDrawer() {
     }
     focusItem(card, expandedItem);
   }, [card, expanded, expandedItem, focusItem]);
+
+  const setActiveThreadId = ctx?.setActiveThreadId;
+  useEffect(() => {
+    setActiveThreadId?.(expanded);
+  }, [expanded, setActiveThreadId]);
 
   const close = useCallback(() => {
     ctx?.closeDrawer();
@@ -388,19 +470,55 @@ export default function CommentsDrawer() {
             </IconButton>
           </Box>
         )}
+        {draft ? (
+          <MarkerComposer
+            draft={draft}
+            runStart={runStart}
+            onMove={ctx.moveMarker}
+            onCancel={ctx.cancelMarker}
+            onSubmit={async (body) => {
+              let c: RunComment;
+              try {
+                c = await postMarker(runId, body, draft.time, draft.capture());
+              } catch (e) {
+                // An older API saved it as a plain comment: list it, so a retry is not mistaken for a lost post.
+                const saved = (e as { saved?: RunComment }).saved;
+                if (saved) upsert(saved);
+                throw e;
+              }
+              upsert(c);
+              setExpanded(c.id);
+              ctx.cancelMarker(); // the mode switches off after one marker (DR5)
+            }}
+          />
+        ) : (
         <Composer
           key={composerIdentity}
           placeholder={anchor ? `Comment on ${anchor.itemLabel}…` : 'New comment on this card…'}
           submitLabel="Comment"
           autoFocus={Boolean(anchor) || threads?.length === 0}
           onSubmit={async (body) => {
-            const c = await postComment(runId, card, body, undefined, anchor ? { itemKey: anchor.itemKey, itemLabel: anchor.itemLabel } : undefined);
+            // The card's view goes with a new root (Graphs, Trends, Compare), so it can be restored.
+            // The view is an extra: one that cannot be read, or that the server refuses, never
+            // stops the comment itself from posting.
+            let view: CommentView | undefined;
+            try {
+              view = ctx.captureView(card) ?? undefined;
+            } catch {
+              view = undefined;
+            }
+            const where = anchor ? { itemKey: anchor.itemKey, itemLabel: anchor.itemLabel } : undefined;
+            const c = await postComment(runId, card, body, undefined, where, view).catch((e: unknown) => {
+              if (view && e instanceof Error && e.message.includes('chartContext')) return postComment(runId, card, body, undefined, where);
+              throw e;
+            });
             upsert(c);
             skipFocusFor.current = c.id; // the user is already at that row
             setExpanded(c.id);
             ctx.clearComposeAnchor();
           }}
         />
+        )}
       </Box>
       <Divider />
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 2, py: 1 }}>
@@ -433,32 +551,59 @@ export default function CommentsDrawer() {
               <ButtonBase
                 onClick={() => setExpanded(open ? null : t.id)}
                 aria-expanded={open}
-                sx={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left', gap: 1, px: 1, py: 1, minHeight: 44, borderRadius: 1 }}
+                sx={{ width: '100%', justifyContent: 'flex-start', alignItems: 'flex-start', textAlign: 'left', gap: 1, px: 1, py: 1, minHeight: 44, borderRadius: 1 }}
               >
                 {t.markerSeq !== null ? (
-                  <Box sx={{ width: 20, height: 20, borderRadius: '50%', border: 1.5, borderColor: 'primary.main', fontSize: 11, fontWeight: 700, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                  <Box sx={{ width: 20, height: 20, mt: 0.25, borderRadius: '50%', border: 1.5, borderColor: 'primary.main', fontSize: 11, fontWeight: 700, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                     {t.markerSeq}
                   </Box>
                 ) : (
-                  <ChatBubbleOutlineIcon sx={{ fontSize: 16, color: 'text.secondary', flexShrink: 0 }} />
+                  <ChatBubbleOutlineIcon sx={{ fontSize: 16, mt: 0.5, color: 'text.secondary', flexShrink: 0 }} />
                 )}
-                <Typography variant="body2" sx={{ fontWeight: unreadThread ? 600 : 500, flexShrink: 0 }}>{t.authorName}</Typography>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
+                {/* One fact per line: who and when, what it's on, then the text itself. Squeezing
+                    author, anchor, body, count and time onto one line left room for a few words. */}
+                <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                    <Typography variant="body2" noWrap sx={{ fontWeight: unreadThread ? 600 : 500, flex: 1, minWidth: 0 }}>{t.authorName}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{formatCommentTime(lastActivity(t))}</Typography>
+                    {unreadThread && <Box aria-label="unread" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0 }} />}
+                  </Box>
+                  {t.markerTime && (
+                    <Typography variant="caption" color="primary" component="div" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                      {formatMarkerTime(t.markerTime, runStart)}
+                    </Typography>
+                  )}
                   {t.itemLabel && (
-                    <Typography variant="caption" color="primary" noWrap component="div" sx={{ fontWeight: 600 }}>
+                    <Typography variant="caption" color="primary" component="div" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
                       {t.itemLabel}
                     </Typography>
                   )}
-                  <Typography variant="body2" color="text.secondary" noWrap>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere', whiteSpace: 'pre-line' }}
+                  >
                     {t.deleted ? 'Comment deleted' : t.body}
                   </Typography>
+                  {t.replies.length > 0 && (
+                    <Typography variant="caption" color="text.secondary">
+                      {t.replies.length} {t.replies.length === 1 ? 'reply' : 'replies'}
+                    </Typography>
+                  )}
                 </Box>
-                {t.replies.length > 0 && <Typography variant="caption" color="text.secondary">{t.replies.length}</Typography>}
-                <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{formatCommentTime(lastActivity(t))}</Typography>
-                {unreadThread && <Box aria-label="unread" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0 }} />}
               </ButtonBase>
               {open && (
                 <Box sx={{ px: 1, pb: 1.5 }}>
+                  {t.chartContext && !t.deleted && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0 }}>
+                        {describeView(t.chartContext, t.markerSeq != null)}
+                      </Typography>
+                      <Button size="small" onClick={() => ctx.restoreView(t)} sx={{ flexShrink: 0 }}>
+                        Restore view
+                      </Button>
+                    </Box>
+                  )}
                   <CommentItem
                     comment={t}
                     isNew={isNew(t)}

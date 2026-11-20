@@ -33,7 +33,7 @@ export default function CommentDeepLink() {
     if (!key) return;
     done.current = comment;
     ctx.reveal(key);
-    ctx.openDrawer(cardKeyOf(key), comment);
+    ctx.openDrawer(cardKeyOf(key), comment, true); // a marker's view is replayed (premise 6)
   }, [ctx, card, comment]);
   return null;
 }

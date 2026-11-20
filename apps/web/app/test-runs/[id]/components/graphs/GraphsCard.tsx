@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Box, Card, CardContent, Collapse } from '@mui/material';
 
 // Types
@@ -14,6 +14,12 @@ import { GraphsCollapsedView, GraphsExpandedContent } from './components';
 import SaveGraphPresetModal from './SaveGraphPresetModal';
 import ExpandableCardHeader, { kickPlotlyResize } from '../shared/ExpandableCardHeader';
 import type { SeriesPick } from '../shared/metric-options';
+import { useComments, useGraphMarkers } from '../comments/CommentsContext';
+import { convertFromAPISeriesConfig, convertToSeriesConfigDto } from './utils/graph-formatters';
+import { viewOf, type MarkerChartContext } from '@/lib/test-run-comments';
+
+/** Most series a marker records (the API's MARKER_MAX_SERIES, the card links' wildcard cap). */
+const MARKER_MAX_SERIES = 50;
 
 export default function GraphsCard({
   testRun,
@@ -77,6 +83,75 @@ export default function GraphsCard({
   const handleClearAllSeries = () => {
     graphsData.handleClearAllSeries(showToast);
   };
+
+  // ── Comment markers (design: docs/designs/test-run-comments.md, PR2) ──
+  const comments = useComments();
+  const markers = useGraphMarkers(graphsExpanded);
+  const latest = useRef(graphsData);
+  latest.current = graphsData;
+
+  /** The view a marker records: the chart as it is when the marker is posted. */
+  const captureView = useCallback((): MarkerChartContext => {
+    const g = latest.current;
+    if (g.addedSeries.length > MARKER_MAX_SERIES) {
+      showToast(`Only the first ${MARKER_MAX_SERIES} of ${g.addedSeries.length} series are recorded with this comment`);
+    }
+    return {
+      // The API's series shape requires both strings; a missing one would refuse the whole view.
+      series: g.addedSeries.slice(0, MARKER_MAX_SERIES).map((s) => {
+        const dto = convertToSeriesConfigDto(s);
+        return { ...dto, panelTitle: dto.panelTitle ?? '', dashboardLabel: dto.dashboardLabel ?? '' };
+      }),
+      ...(g.zoomRange ? { xRange: [g.zoomRange.from, g.zoomRange.to] as [string, string] } : {}),
+      axisMode: g.axisMode,
+      ...(g.customChartName ? { title: g.customChartName.slice(0, 255) } : {}),
+    };
+  }, [showToast]);
+
+  // A plain Graphs comment records the same view a marker does (design PR2).
+  const registerViewCapture = comments?.registerViewCapture;
+  // An empty chart records nothing: the API refuses a view with no series.
+  useEffect(
+    () => registerViewCapture?.('graphs', () => (latest.current.addedSeries.length > 0 ? captureView() : null)),
+    [registerViewCapture, captureView],
+  );
+
+  const startMarker = comments?.startMarker;
+  const onStartMarker = useCallback(
+    (steps: string[], initial: string) => startMarker?.({ time: initial, steps, capture: captureView }),
+    [startMarker, captureView],
+  );
+
+  // "Restore view" and the ?comment= deep link: REPLACE the chart with the comment's view, once
+  // per request key, with an Undo. Card links ("Open in Graphs") add series and never reach here.
+  const consumedViews = useRef(new Set<string>());
+  const viewRequest = comments?.viewRequest?.card === 'graphs' ? comments.viewRequest : null;
+  useEffect(() => {
+    const ctx = viewRequest ? viewOf(viewRequest.comment, 'graphs') : null;
+    if (!viewRequest || !ctx || consumedViews.current.has(viewRequest.key)) return;
+    consumedViews.current.add(viewRequest.key);
+    const g = latest.current;
+    const previous = {
+      series: g.addedSeries,
+      range: g.zoomRange,
+      axisMode: g.axisMode,
+      title: g.customChartName,
+    };
+    const seq = viewRequest.comment.markerSeq;
+    const undo = { label: 'Undo', onClick: () => void latest.current.loadView(previous) };
+    g.loadView({
+      series: ctx.series.map(convertFromAPISeriesConfig),
+      range: ctx.xRange ? { from: ctx.xRange[0], to: ctx.xRange[1] } : null,
+      axisMode: ctx.axisMode === 'split' ? 'split' : 'overlay',
+      title: ctx.title ?? null,
+    })
+      .then((missing) => {
+        const lost = missing > 0 ? ` · ${missing} of ${ctx.series.length} series have no data in this window` : '';
+        showToast(`Showing ${seq != null ? `marker ${seq}'s` : "the comment's"} view${lost}`, undo);
+      })
+      // loadView already replaced the chart before the fetch failed, so the way back matters most here.
+      .catch(() => showToast('That view could not be loaded', undo));
+  }, [viewRequest, showToast]);
 
   return (
     <Box sx={{
@@ -170,6 +245,12 @@ export default function GraphsCard({
               showToast={showToast}
               onZoomRange={graphsData.applyZoomRange}
               zoomed={graphsData.zoomRange !== null}
+              markers={markers}
+              selectedMarkerId={comments?.openCard === 'graphs' ? comments.activeThreadId : null}
+              markerDraftTime={comments?.markerDraft?.time ?? null}
+              onStartMarker={comments ? onStartMarker : undefined}
+              onPlaceMarker={comments?.moveMarker}
+              onMarkerClick={comments ? (id) => comments.openDrawer('graphs', id) : undefined}
             />
           </Collapse>
 

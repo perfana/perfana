@@ -15,7 +15,8 @@ import {
   zoomRangeFromRelayout,
 } from './utils';
 import { ChartLoadingState, ChartEmptyState } from './components';
-import { mergeEventShapesIntoIndexedLayout } from '../shared/event-lines';
+import { mergeEventShapesIntoIndexedLayout, nearestBucketIndex } from '../shared/event-lines';
+import type { RunComment } from '@/lib/test-run-comments';
 import { seriesRowName } from '@/lib/aggregated-perf-series';
 
 import Plot from '@/components/ResponsivePlot';
@@ -65,6 +66,12 @@ export default function GraphsChart({
   onToggleSeriesVisibility,
   onZoomRange,
   zoomed = false,
+  markers,
+  selectedMarkerId = null,
+  markerDraftTime = null,
+  onStartMarker,
+  onPlaceMarker,
+  onMarkerClick,
 }: GraphsChartProps) {
   const muiTheme = useTheme();
   const mode = muiTheme.palette.mode === 'dark' ? 'dark' : 'light';
@@ -214,6 +221,8 @@ export default function GraphsChart({
       startIndex,
       endIndex,
       traceIndexOf,
+      // The x indices on screen, so a marker outside the analysis-range clip is hidden too.
+      visibleRange: clip ? ([clip.lo, clip.hi] as const) : ([0, sortedTimestamps.length - 1] as const),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, seriesConfig, seriesData, testRun, mode, axisMode, chartName, events, rangeOnly, hasWindow, zoomed]);
@@ -285,6 +294,37 @@ export default function GraphsChart({
     [plot],
   );
 
+  const markerMode = markerDraftTime !== null;
+  // Only marker mode follows the cursor; depending on cursorIndex otherwise re-ran Plotly.react on
+  // every hover of any chart that had a marker.
+  const previewIndex = markerMode ? cursorIndex : null;
+  const primary = theme.primary;
+  const primaryText = theme.paper; // text on a filled (selected) pin
+  // Kept out of `plot`'s memo, so a new marker or a moving draft re-lays-out the shapes only.
+  const layout = useMemo(() => {
+    if (!plot) return null;
+    const overlay = markerOverlay({
+      markers: markers ?? [],
+      sortedTimestamps: plot.sortedTimestamps,
+      visibleRange: plot.visibleRange,
+      selectedId: selectedMarkerId,
+      draftTime: markerDraftTime,
+      previewIndex,
+      primary,
+      primaryText,
+      paper: theme.plotBg,
+    });
+    if (overlay.shapes.length === 0) return plot.layout;
+    const margin = (plot.layout.margin ?? {}) as Record<string, number>;
+    return {
+      ...plot.layout,
+      // Pins sit above the plot area; the default 20px top margin clipped their top edge.
+      margin: { ...margin, t: Math.max(margin.t ?? 0, overlay.headroom) },
+      shapes: [...((plot.layout.shapes as unknown[]) ?? []), ...overlay.shapes],
+      annotations: [...((plot.layout.annotations as unknown[]) ?? []), ...overlay.annotations],
+    };
+  }, [plot, markers, selectedMarkerId, markerDraftTime, previewIndex, primary, primaryText, theme.plotBg]);
+
   const note = plot ? lanesNote(plot.groups, plot.axisLayoutMode) : undefined;
 
   const sources = new Set(seriesConfig.map((s) => s.dashboardLabel));
@@ -299,12 +339,12 @@ export default function GraphsChart({
     <ChartLoadingState />
   ) : seriesConfig.length === 0 ? (
     <ChartEmptyState variant="no-series" />
-  ) : !plot ? (
+  ) : !plot || !layout ? (
     <ChartEmptyState variant="no-data" />
   ) : (
     <Plot
       data={plot.traces as unknown as Data[]}
-      layout={plot.layout as unknown as Partial<Layout>}
+      layout={layout as unknown as Partial<Layout>}
       config={plot.config as unknown as Partial<Config>}
       style={{ width: '100%', height: `${(plot.layout.height as number) ?? SIZE.overlayHeight}px` }}
       onInitialized={(_fig, gd) => {
@@ -317,6 +357,16 @@ export default function GraphsChart({
       onHover={(e) => setCursorIndex(Number(e.points?.[0]?.x ?? NaN))}
       onUnhover={() => setCursorIndex(null)}
       onRelayout={onRelayout}
+      // Marker mode: a click snaps the pending pin to the clicked bucket (design R14).
+      onClick={(e) => {
+        const i = Number(e.points?.[0]?.x ?? NaN);
+        const time = Number.isInteger(i) ? plot.sortedTimestamps[i] : undefined;
+        if (markerMode && time) onPlaceMarker?.(time);
+      }}
+      onClickAnnotation={(e) => {
+        const id = (e.annotation as { name?: string } | undefined)?.name;
+        if (id?.startsWith(MARKER_NAME)) onMarkerClick?.(id.slice(MARKER_NAME.length));
+      }}
     />
   );
 
@@ -346,6 +396,20 @@ export default function GraphsChart({
       actions={
         <>
           {actions}
+          {onStartMarker && plot && (
+            <PillButton
+              theme={theme}
+              onClick={() => {
+                if (markerMode) return;
+                const steps = plot.sortedTimestamps.slice(plot.visibleRange[0], plot.visibleRange[1] + 1);
+                onStartMarker(steps, plot.sortedTimestamps[plot.startIndex ?? plot.visibleRange[0]] ?? steps[0]!);
+              }}
+              title="Pin a numbered comment to a moment on this chart, with the view you are looking at"
+              standalone
+            >
+              {markerMode ? 'placing marker…' : '+ add marker'}
+            </PillButton>
+          )}
           {loading && plot && (
             // NOT a dim on the plot: `faint` and `muted` paint 9-11px text inside it, and
             // `lib/charts/tokens.ts` measures 0.45 at 3.36:1 — below the floor — which is
@@ -401,9 +465,78 @@ export default function GraphsChart({
         />
       }
     >
-      <Box sx={{ width: '100%' }} aria-busy={loading || undefined}>
+      <Box
+        sx={{ width: '100%', ...(markerMode ? { '& .nsewdrag': { cursor: 'crosshair !important' } } : {}) }}
+        aria-busy={loading || undefined}
+      >
         {body}
       </Box>
     </AnalystChartCard>
   );
+}
+
+const MARKER_NAME = 'comment-marker:';
+
+/**
+ * Numbered marker pins for the indexed x-axis (design DR10): a dashed `primary` line, distinct
+ * from events' dotted orange and alerts' solid red, and a numbered pin above the plot. Selected
+ * pins are filled, deleted ones kept at 40% opacity with their number, the pending one is
+ * unnumbered. Markers on the same bucket stack upwards. A marker outside the plotted range is
+ * not drawn (R14).
+ */
+export function markerOverlay(opts: {
+  markers: RunComment[];
+  sortedTimestamps: string[];
+  visibleRange: readonly [number, number];
+  selectedId: string | null;
+  draftTime: string | null;
+  previewIndex: number | null;
+  primary: string;
+  primaryText: string;
+  paper: string;
+}): { shapes: Record<string, unknown>[]; annotations: Record<string, unknown>[]; headroom: number } {
+  const shapes: Record<string, unknown>[] = [];
+  const annotations: Record<string, unknown>[] = [];
+  const [lo, hi] = opts.visibleRange;
+  const stack = new Map<number, number>();
+  const line = (x: number, opacity: number, width = 1.5) =>
+    shapes.push({ type: 'line', xref: 'x', yref: 'paper', x0: x, x1: x, y0: 0, y1: 1, opacity, line: { color: opts.primary, width, dash: 'dash' } });
+  const pin = (x: number, text: string, extra: Record<string, unknown>) => {
+    const level = stack.get(x) ?? 0;
+    stack.set(x, level + 1);
+    annotations.push({
+      x, y: 1, xref: 'x', yref: 'paper', yanchor: 'bottom', yshift: 4 + level * 22, showarrow: false,
+      text, font: { size: 11, color: opts.primary, family: 'inherit' }, align: 'center',
+      bgcolor: opts.paper, bordercolor: opts.primary, borderwidth: 1.5, borderpad: 3, width: 14,
+      ...extra,
+    });
+  };
+  const ordered = [...opts.markers].sort((a, b) => (a.markerSeq ?? 0) - (b.markerSeq ?? 0));
+  for (const m of ordered) {
+    const x = m.markerTime ? nearestBucketIndex(m.markerTime, opts.sortedTimestamps) : null;
+    if (x === null || x < lo || x > hi) continue;
+    const selected = m.id === opts.selectedId;
+    const opacity = m.deleted ? 0.4 : 1;
+    line(x, opacity);
+    pin(x, `<b>${m.markerSeq}</b>`, {
+      opacity,
+      captureevents: true,
+      name: MARKER_NAME + m.id,
+      hovertext: `Marker ${m.markerSeq}${m.deleted ? ' (deleted)' : ''}`,
+      ...(selected ? { bgcolor: opts.primary, font: { size: 11, color: opts.primaryText, family: 'inherit' } } : {}),
+    });
+  }
+  const draft = opts.draftTime ? nearestBucketIndex(opts.draftTime, opts.sortedTimestamps) : null;
+  if (draft !== null && draft >= lo && draft <= hi) {
+    line(draft, 0.9);
+    pin(draft, '+', { hovertext: 'New marker' });
+  }
+  if (opts.previewIndex !== null && opts.previewIndex !== draft && opts.previewIndex >= lo && opts.previewIndex <= hi) {
+    line(opts.previewIndex, 0.35, 1);
+  }
+  // Top margin the pins need: yshift (4 + 22 per stacked level) plus one pin (~20px: 11px text,
+  // 3px padding and a 1.5px border each side) and a little air. 0 when no pin is drawn.
+  const levels = Math.max(0, ...stack.values());
+  const headroom = levels ? 4 + (levels - 1) * 22 + 24 : 0;
+  return { shapes, annotations, headroom };
 }

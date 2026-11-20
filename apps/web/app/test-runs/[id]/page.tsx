@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
+import { Box, Button, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 
 // Hooks
@@ -61,7 +61,7 @@ import { CommentsProvider } from './components/comments/CommentsContext';
 import CardComments from './components/comments/CardComments';
 import RunCommentsButton from './components/comments/RunCommentsButton';
 import CommentDeepLink from './components/comments/CommentDeepLink';
-import type { ExpansionState } from './types';
+import type { ExpansionState, ToastAction } from './types';
 
 const TAB_PANEL_IDS: Record<TabIndex, string> = {
   [TAB.results]: 'tabpanel-results',
@@ -109,6 +109,7 @@ export default function TestRunDetailsPage() {
   // Toast notification state
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarAction, setSnackbarAction] = useState<ToastAction | null>(null);
 
   // Report generation dialog state
   const [generateReportDialogOpen, setGenerateReportDialogOpen] = useState(false);
@@ -172,8 +173,9 @@ export default function TestRunDetailsPage() {
     return query ? `/test-runs?${query}` : '/test-runs';
   })();
 
-  const showToast = useCallback((message: string) => {
+  const showToast = useCallback((message: string, action?: ToastAction) => {
     setSnackbarMessage(message);
+    setSnackbarAction(action ?? null);
     setSnackbarOpen(true);
   }, []);
 
@@ -301,7 +303,7 @@ export default function TestRunDetailsPage() {
     <PerformanceAnalysisDrillDownContext.Provider value={onDrillDownToPerformanceAnalysis}>
     <OpenCardLinkContext.Provider value={openCardLink}>
     <CardLinkRequestContext.Provider value={cardLinkContext}>
-    <CommentsProvider runId={testRun.id} reveal={revealForComments}>
+    <CommentsProvider runId={testRun.id} runStart={testRun.start_time} reveal={revealForComments}>
     <CommentDeepLink />
     <Box sx={{ backgroundColor: 'background.default', pb: 4 }}>
       {/* Deletion status banner */}
@@ -484,7 +486,19 @@ export default function TestRunDetailsPage() {
       <PendingReports ids={pendingReportIds} onReady={handleReportReady} onSettled={handleReportSettled} showToast={showToast} />
 
       {/* Snackbar */}
-      <Snackbar open={snackbarOpen} autoHideDuration={4000} onClose={handleCloseSnackbar} message={snackbarMessage} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={snackbarAction ? 8000 : 4000}
+        // A toast with an action (marker Undo) must survive the click that inspects the replayed chart.
+        onClose={(_e, reason) => { if (!(snackbarAction && reason === 'clickaway')) handleCloseSnackbar(); }}
+        message={snackbarMessage}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        action={snackbarAction && (
+          <Button color="inherit" size="small" onClick={() => { snackbarAction.onClick(); setSnackbarOpen(false); }}>
+            {snackbarAction.label}
+          </Button>
+        )}
+      />
 
       {/* Generate Report Dialog */}
       {testRun && (

@@ -7,7 +7,7 @@ import { Box, Card, CardContent, Collapse } from '@mui/material';
 import { CompareCardProps } from './types';
 
 // Hooks
-import { useCompareData, useCompareHandlers, useComparePresets } from './hooks';
+import { useCompareData, useCompareHandlers, useComparePresets, useCompareCommentView } from './hooks';
 
 // Components
 import { CompareCollapsedView, CompareExpandedContent } from './components';
@@ -30,6 +30,7 @@ export default function CompareCard({
     testRunId,
     compareExpanded,
   });
+  useCompareCommentView(compareData, showToast);
 
   // Handlers hook
   const compareHandlers = useCompareHandlers({
