@@ -10,10 +10,11 @@
 #
 # It delegates to `npm run test --workspace=<dir> --` rather than naming a runner, because
 # the runners differ (jest in most workspaces, vitest in apps/worker) and both take
-# trailing file paths. A workspace whose test script does NOT take paths is refused by
-# name rather than silently mis-run: apps/mcp's is `node --test dist/*.test.js`, a fixed
-# list that ignores its arguments, so routing a spec there would run two stale compiled
-# tests and report an unrelated result.
+# trailing file paths. apps/mcp's test script does NOT take paths: it is
+# `node --test dist/*.test.js`, every compiled test, so handing it a spec would run whatever
+# was last built. It is built first and then run whole instead (78 tests, a few seconds); the
+# glob, not a list, is what lets a NEW mcp spec run rather than pass unexecuted. Any other workspace that is not listed is refused
+# by name rather than silently mis-run.
 #
 # Paths come from gstack-pregate, which derives them from git. They are passed as a quoted
 # array behind `--`, so a filename containing whitespace cannot split into an extra token
@@ -24,8 +25,8 @@ set -uo pipefail
 [ "$#" -gt 0 ] || exit 0
 exit_code=0
 
-# Workspaces whose test script accepts trailing spec paths. apps/mcp is deliberately
-# absent; add a workspace here only after checking its `test` script takes arguments.
+# Workspaces whose test script accepts trailing spec paths. apps/mcp is handled separately
+# below; add a workspace here only after checking its `test` script takes arguments.
 PATH_TAKING_WORKSPACES="apps/api apps/grafana-sync apps/web apps/worker apps/perfana-report packages/shared"
 
 owns() {
@@ -42,6 +43,13 @@ while IFS= read -r ws; do
   for f in "$@"; do
     case "$f" in "$ws"/*) group+=("${f#"$ws"/}") ;; esac
   done
+
+  # Build, then the whole suite: see the header for why it cannot take the paths.
+  if [ "$ws" = "apps/mcp" ]; then
+    echo "pregate-runner: apps/mcp -> build + full suite (its test script takes no paths)"
+    { npm run --silent build --workspace="$ws" && npm run --silent test --workspace="$ws"; } || exit_code=1
+    continue
+  fi
 
   if ! owns "$ws"; then
     echo "pregate-runner: $ws has no path-taking test script; refusing ${#group[@]} file(s)" >&2
