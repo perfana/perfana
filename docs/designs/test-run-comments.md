@@ -122,6 +122,19 @@ Both tables (and PR3's `notified_at` column and partial index) need migrations n
 
 - A new "Comments" report section type (eng review R8) (registered in both web and API registries), listing threads grouped by card, each marker thread headed by a server-rendered SVG chart from its `chart_context` with the numbered callout. All text HTML-escaped. See Open Question 2.
 
+### PR2 as built (2026-11-20)
+
+Four deliberate departures from the text above, each simpler and equivalent in effect:
+
+- **`chart_context.series` is the graph-preset series shape** (`SeriesConfigDto`), not `MetricSeriesRef[]`. Replay is then the preset load path (`useGraphsData.loadView`), with no cascade walk. It still carries `dashboardLabel`/`panelId`/`metricName`, so R17's cross-run lookup keeps its key.
+- **`title` and `axisMode` are captured instead of `presetId`.** The design used the preset for exactly those two display settings, and capturing them cannot drift when the preset is edited or deleted.
+- **The `chart_context` byte cap is 64 KB, checked in `validateChartContext`, not 32 KB in the DTO** (R3-15). A view holds up to 50 series and a Trends series name may be 1024 characters, so 32 KB refused legitimate views; and since the request DTO types the view loosely (see below), the per-card check in the service is the only place that sees it whole.
+- **`marker_seq` is serialized with `pg_advisory_xact_lock` per run, not retried on 23505.** A failed INSERT aborts the request's RLS transaction, so a retry would need a SAVEPOINT; the lock needs none. The unique index stays as the backstop.
+
+One addition, asked for during review: **every root comment on Graphs, Trends and Compare records its card's view**, not only markers. `chart_context` carries a server-stamped `kind` and is validated per card in `validateChartContext` (the request DTO types it loosely, because one nested class would have the global whitelist strip the other cards' fields). Trends records its series, the time range option and the absolute window it resolved to (so "Last week" replays the week the author saw, as a custom range), and the aggregation; Compare records its series and baseline (a run id or `control-group`; a baseline no longer offered leaves the picker alone, as a preset does). An empty card records nothing, since the API refuses a view with no series. "Restore view" and the `?comment=` deep link replay any comment that has a view, through a card-tagged `viewRequest` each card consumes once per key, with an Undo.
+
+Also fixed on the way: `CardComments` remounted its card when the panel opened, which dropped every card's local state (the Graphs chart emptied). Deferred items are in TODOS.md under "Test-run comments".
+
 ## Open Questions
 
 1. **Card keys for "any card".** Resolved by eng review D1 + R11: a frozen map in packages/shared from each `expansionState` key to a permanent card key, used as the API DTO enum and by the page-level `<CardComments>` wrapper. Only reveal-and-open-drawer is made generic; series card links are unchanged.
