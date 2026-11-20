@@ -515,12 +515,13 @@ export class TestRunsGateway
       // access, so a statement timeout here has to deny rather than degrade.
       const isUuid =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(testRunId);
-      // The system's team rides along: this room carries user-written comment text, so it takes
-      // the same team rule as a test-run read (TestRunsCrudQueryService.denialReason).
+      // The system's organization and team, never the run's own column: this room carries
+      // user-written comment text, so it takes exactly the rule a test-run read and the comments
+      // API apply (TestRunsCrudQueryService.denialReason, CommentsService.resolveRun).
       const rows = await this.dataSource.query<{ organization_id: string | null; team_id?: string | null }[]>(
         isUuid
-          ? `SELECT tr.organization_id, sut.team_id FROM test_runs tr LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id WHERE tr.id = $1::uuid LIMIT 1`
-          : `SELECT tr.organization_id, sut.team_id FROM test_runs tr LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id WHERE tr.test_run_id = $1 LIMIT 1`,
+          ? `SELECT sut.organization_id, sut.team_id FROM test_runs tr JOIN systems_under_test sut ON sut.id = tr.system_under_test_id WHERE tr.id = $1::uuid LIMIT 1`
+          : `SELECT sut.organization_id, sut.team_id FROM test_runs tr JOIN systems_under_test sut ON sut.id = tr.system_under_test_id WHERE tr.test_run_id = $1 LIMIT 1`,
         [testRunId],
       );
       organizationId = rows[0]?.organization_id;

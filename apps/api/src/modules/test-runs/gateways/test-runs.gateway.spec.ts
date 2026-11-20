@@ -187,6 +187,11 @@ describe('TestRunsGateway tenant isolation', () => {
       });
       expect(query.mock.calls[0]![0]).toContain('WHERE tr.id = $1::uuid');
       expect(query.mock.calls[0]![0]).not.toContain('::text');
+      // The room carries comment text, so it decides on the SYSTEM's organization and team, like
+      // a test-run read and the comments API do, never on the run's own (possibly stale) column.
+      expect(query.mock.calls[0]![0]).toContain('SELECT sut.organization_id, sut.team_id');
+      expect(query.mock.calls[0]![0]).toMatch(/ JOIN systems_under_test sut/);
+      expect(query.mock.calls[0]![0]).not.toMatch(/LEFT JOIN systems_under_test/);
 
       query.mockClear();
       await gateway.handleSubscribeToTestRun(socket(), { testRunId: 'MyRun-2026-01' });
