@@ -147,12 +147,15 @@ function CommentItem({
   comment,
   isNew,
   mine,
+  canDelete,
   onEdit,
   onDelete,
 }: {
   comment: RunComment;
   isNew: boolean;
   mine: boolean;
+  /** Author, or an organization admin moderating someone else's comment. */
+  canDelete: boolean;
   onEdit: (body: string) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -199,7 +202,7 @@ function CommentItem({
           {comment.body}
         </Typography>
       )}
-      {mine && !editing && (
+      {canDelete && !editing && (
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mt: 0.25 }}>
           {confirming ? (
             <>
@@ -211,7 +214,7 @@ function CommentItem({
             </>
           ) : (
             <>
-              <Button size="small" sx={{ minWidth: 0, px: 0.75 }} onClick={() => setEditing(true)}>Edit</Button>
+              {mine && <Button size="small" sx={{ minWidth: 0, px: 0.75 }} onClick={() => setEditing(true)}>Edit</Button>}
               <Button size="small" sx={{ minWidth: 0, px: 0.75 }} onClick={() => setConfirming(true)}>Delete</Button>
             </>
           )}
@@ -287,6 +290,7 @@ export default function CommentsDrawer() {
 
   const [threads, setThreads] = useState<RunCommentThread[] | null>(null);
   const [lastSeenAt, setLastSeenAt] = useState<string | null>(null);
+  const [canModerate, setCanModerate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
@@ -327,6 +331,7 @@ export default function CommentsDrawer() {
       const res = await fetchCommentThreads(runId, card);
       setThreads(res.threads);
       setLastSeenAt(res.lastSeenAt);
+      setCanModerate(res.canModerate === true);
       markCommentsSeen(runId, card).catch(() => undefined);
       const focus = ctx?.focusCommentId;
       const focusThread = focus ? res.threads.find((t) => t.id === focus || t.replies.some((r) => r.id === focus)) : undefined;
@@ -608,6 +613,7 @@ export default function CommentsDrawer() {
                     comment={t}
                     isNew={isNew(t)}
                     mine={t.authorId === me}
+                    canDelete={canModerate || t.authorId === me}
                     onEdit={async (body) => upsert(await editComment(t.id, body))}
                     onDelete={() => remove(t)}
                   />
@@ -618,6 +624,7 @@ export default function CommentsDrawer() {
                         comment={r}
                         isNew={isNew(r)}
                         mine={r.authorId === me}
+                        canDelete={canModerate || r.authorId === me}
                         onEdit={async (body) => upsert(await editComment(r.id, body))}
                         onDelete={() => remove(r)}
                       />

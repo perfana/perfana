@@ -107,3 +107,26 @@ describe('CommentsService marker validation', () => {
     expect(repo.save).not.toHaveBeenCalled();
   });
 });
+
+describe('CommentsService canModerate', () => {
+  const ORG = '11111111-1111-4111-8111-111111111111';
+  const RUN = '22222222-2222-4222-8222-222222222222';
+  const setup = (isOrgAdmin: boolean) => {
+    const repo = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
+    const em = { query: jest.fn().mockResolvedValue([{ id: RUN, organization_id: ORG, team_id: null }]), getRepository: () => repo };
+    const dataSource = { transaction: (fn: (e: typeof em) => unknown) => fn(em), manager: em };
+    const authz = { isOrganizationAdmin: jest.fn().mockResolvedValue(isOrgAdmin) };
+    return { service: new CommentsService(dataSource as never, authz as never, {} as never, {} as never), authz };
+  };
+
+  it.each([
+    ['an org admin', 'sub-1', [ORG], true, true],
+    ['a member', 'sub-1', [ORG], false, false],
+    ['a global admin', 'sub-1', null, false, true],
+    ['an API key, even in an org it administers', 'api-key:1', [ORG], true, false],
+  ])('is %s → %s', async (_who, userId, orgIds, isOrgAdmin, expected) => {
+    const { service } = setup(isOrgAdmin as boolean);
+    const res = await service.listThreads(RUN, 'graphs', { userId: userId as string, orgIds: orgIds as string[] | null });
+    expect(res.canModerate).toBe(expected);
+  });
+});

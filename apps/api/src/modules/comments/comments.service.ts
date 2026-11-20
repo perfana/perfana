@@ -118,12 +118,14 @@ export class CommentsService {
   /**
    * Threads for a run (optionally one card), plus the caller's previous look at that card so the
    * drawer can keep "new" marks while open (design DR4). Read before the drawer marks it seen.
+   * `canModerate`: the caller may delete other people's comments on this run (the same rule as
+   * `remove`), so the drawer can offer Delete on them. API keys never may: they cannot write.
    */
   async listThreads(
     runIdOrTestRunId: string,
     card: string | undefined,
     caller: CommentCaller,
-  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null }> {
+  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; canModerate: boolean }> {
     const run = await this.resolveRun(runIdOrTestRunId, caller);
     const where: Record<string, unknown> = { testRunId: run.id };
     if (card) where.cardKey = card;
@@ -138,7 +140,10 @@ export class CommentsService {
     const read = card
       ? await em.getRepository(TestRunCommentRead).findOne({ where: { userId: caller.userId, testRunId: run.id, cardKey: card } })
       : null;
-    return { threads: [...threads.values()], lastSeenAt: read ? new Date(read.lastSeenAt).toISOString() : null };
+    const canModerate =
+      !caller.userId.startsWith('api-key:') &&
+      (caller.orgIds === null || (await this.authzService.isOrganizationAdmin(caller.userId, run.organizationId)));
+    return { threads: [...threads.values()], lastSeenAt: read ? new Date(read.lastSeenAt).toISOString() : null, canModerate };
   }
 
   // audit-skip: user discussion, not configuration; the row records its author and time itself

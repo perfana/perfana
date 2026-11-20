@@ -120,6 +120,33 @@ it('lists unread threads first, expands the oldest unread one, and marks seen on
   expect(mocked.fetchCommentThreads.mock.invocationCallOrder[0]).toBeLessThan(mocked.markCommentsSeen.mock.invocationCallOrder[0]);
 });
 
+it("offers Delete, but not Edit, on someone else's comment only when the API says the caller may moderate", async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 1, unread: 0 } });
+  const thread = { ...comment({ id: 'theirs', body: 'by someone else' }), replies: [] };
+  mocked.fetchCommentThreads.mockResolvedValue({ threads: [thread], lastSeenAt: '2999-01-01T00:00:00Z', canModerate: true });
+  const { unmount } = renderPage();
+  fireEvent.click(await screen.findByTestId('card-comments-graphs'));
+  let drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
+  await within(drawer).findAllByText('by someone else');
+  const expand = (d: HTMLElement) => {
+    const row = d.querySelector('[aria-expanded]');
+    if (row?.getAttribute('aria-expanded') === 'false') fireEvent.click(row);
+  };
+  expand(drawer);
+  expect(await within(drawer).findByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  expect(within(drawer).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  unmount();
+
+  mocked.fetchCommentThreads.mockResolvedValue({ threads: [thread], lastSeenAt: '2999-01-01T00:00:00Z', canModerate: false });
+  renderPage();
+  fireEvent.click(await screen.findByTestId('card-comments-graphs'));
+  drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
+  await within(drawer).findAllByText('by someone else');
+  expand(drawer);
+  await within(drawer).findAllByText('by someone else');
+  expect(within(drawer).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+});
+
 it('keeps the text in the box when posting fails', async () => {
   mocked.fetchCommentCounts.mockResolvedValue({});
   mocked.fetchCommentThreads.mockResolvedValue({ threads: [], lastSeenAt: null });
