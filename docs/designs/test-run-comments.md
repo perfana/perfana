@@ -135,6 +135,15 @@ One addition, asked for during review: **every root comment on Graphs, Trends an
 
 Also fixed on the way: `CardComments` remounted its card when the panel opened, which dropped every card's local state (the Graphs chart emptied). Deferred items are in TODOS.md under "Test-run comments".
 
+### PR3 as built (2026-11-20)
+
+Four departures from "Notifications (PR3)" above (`CommentNotificationScheduler`, migration 1828):
+
+- **A released batch backs off, and gives up after an hour.** Releasing sets `notify_after = now() + 5 min` beside clearing `notified_at`, and the sweep skips the comment until then. Without it a released batch keeps its old `created_at`, sits first in the oldest-first queue on every tick, and a few dead webhooks could take every slot. Once the batch's oldest comment is an hour old, a failure is final: the claim stands and an ERROR names the run. Added in review.
+- **The post never contains comment text.** It carries the count, the system and run, the newest comment's author and card, and the deep link only, because a chat channel is often wider than the people who can see the run.
+- **A run whose system has no opted-in channel is still claimed**, so it is not rescanned every 30 s; a channel enabled later does not announce older comments.
+- **Comments that existed before migration 1828 are stamped announced** by the migration, so the first sweep after the upgrade posts no backlog.
+
 ## Open Questions
 
 1. **Card keys for "any card".** Resolved by eng review D1 + R11: a frozen map in packages/shared from each `expansionState` key to a permanent card key, used as the API DTO enum and by the page-level `<CardComments>` wrapper. Only reveal-and-open-drawer is made generic; series card links are unchanged.

@@ -79,7 +79,7 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 | `ProfileGrafanaDashboard` | Dashboard linked to profile |
 | `ProfileBenchmark` | Benchmark linked to profile |
 | `ProfileSeriesGroupingRule` | Series grouping rule on a profile dashboard (`profile_series_grouping_rules`, migration 1826); grafana-sync provisions it into `series_grouping_rules` |
-| `TestRunComment` | Comment or reply on a test-run card, optionally anchored to one row or section of it (`test_run_comments`, migration 1827); cascades with the run. A root on the Graphs card can be a numbered marker (`marker_seq`, `marker_time`), and a root on Graphs, Trends or Compare records the card's view in `chart_context` (validated per card by `validateChartContext`) |
+| `TestRunComment` | Comment or reply on a test-run card, optionally anchored to one row or section of it (`test_run_comments`, migration 1827); cascades with the run. A root on the Graphs card can be a numbered marker (`marker_seq`, `marker_time`), and a root on Graphs, Trends or Compare records the card's view in `chart_context` (validated per card by `validateChartContext`). `notified_at` and `notify_after` (migration 1828) are the comment-notification sweep's claim and retry backoff, served by the partial index `idx_test_run_comments_unnotified` |
 | `TestRunCommentRead` | Per-user, per-card "last seen" mark behind the unread badges (`test_run_comment_reads`, migration 1827); a missing row means unread |
 
 ### Data Science
@@ -135,7 +135,7 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 | `CompareFilterPreset` | Saved comparison filter configs |
 | `TrendsFilterPreset` | Saved trend analysis presets |
 | `Event` | System events |
-| `NotificationChannel` | Alert channels |
+| `NotificationChannel` | Alert channels; `notify_on_comment` (migration 1828, default off) also posts test-run comment digests |
 
 ## Key Indexes
 
