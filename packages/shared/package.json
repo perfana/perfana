@@ -61,6 +61,11 @@
       "development": "./src/constants/index.ts",
       "default": "./dist/constants/index.js"
     },
+    "./constants/comment-cards": {
+      "types": "./dist/constants/comment-cards.d.ts",
+      "development": "./src/constants/comment-cards.ts",
+      "default": "./dist/constants/comment-cards.js"
+    },
     "./services/grafana": {
       "types": "./dist/services/grafana/index.d.ts",
       "development": "./src/services/grafana/index.ts",

@@ -59,6 +59,8 @@ export * from './system-under-test-workload.entity';
 export * from './team.entity';
 export * from './test-run-configuration.entity';
 export * from './test-run-view.entity';
+export * from './test-run-comment.entity';
+export * from './test-run-comment-read.entity';
 export * from './test-run.entity';
 export * from './tracing-instance.entity';
 export * from './tracing-service.entity';
