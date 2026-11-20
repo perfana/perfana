@@ -1,4 +1,5 @@
 import { TestRun } from '@perfana/shared';
+import { CommentDigest, commentDetail, commentHeadline } from './comment-digest';
 
 /**
  * Slack Block Kit message format
@@ -126,6 +127,19 @@ export class SlackMessageBuilder {
   /**
    * Build a test notification message
    */
+  /** One post per comment burst: count, latest author, card and a link; no comment text. */
+  buildCommentMessage(digest: CommentDigest): SlackMessage {
+    const headline = commentHeadline(digest);
+    return {
+      text: headline,
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: `:speech_balloon: *${headline}*` } },
+        { type: 'context', elements: [{ type: 'mrkdwn', text: commentDetail(digest) }] },
+        { type: 'section', text: { type: 'mrkdwn', text: `<${digest.link}|View comments in Perfana>` } },
+      ],
+    };
+  }
+
   buildTestMessage(systemName: string): SlackMessage {
     return {
       text: 'Perfana Test Notification',
