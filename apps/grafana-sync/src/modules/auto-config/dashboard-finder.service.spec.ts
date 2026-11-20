@@ -5,6 +5,8 @@
  * SUT names are unique per organization only, so without an organization it fails closed
  * rather than letting a name vouch for another org's SUT. The regex is evaluated by
  * Postgres, so a rejected one must surface as a thrown error rather than an empty result.
+ * Scenario dashboards outlive the runs that created them, so it also keeps only those the
+ * run has `ds_metrics` for, or a profile SLO lands on scenarios of earlier runs.
  */
 import { DashboardFinderService } from './dashboard-finder.service';
 
@@ -30,6 +32,8 @@ function build(rows: unknown[] = []) {
   return { service, qb, applicationDashboardRepo };
 }
 
+const RUN = { testRunId: 'SHOP-00011', startTime: new Date('2026-11-20T03:00:00Z') };
+
 describe('DashboardFinderService.findApplicationDashboardsByUidPattern', () => {
   it('matches the uid by regex, scoped to SUT, environment and organization', async () => {
     const rows = [{ id: 'ad-1' }, { id: 'ad-2' }];
@@ -40,6 +44,7 @@ describe('DashboardFinderService.findApplicationDashboardsByUidPattern', () => {
       'WERKNL',
       'acceptatie',
       'org-1',
+      RUN,
     );
 
     expect(result).toBe(rows);
@@ -57,6 +62,28 @@ describe('DashboardFinderService.findApplicationDashboardsByUidPattern', () => {
     expect(qb.andWhere).toHaveBeenCalledWith('ad.organization_id = :organizationId', {
       organizationId: 'org-1',
     });
+    // Only scenarios this run wrote data to, bounded by its start minus the pad.
+    const exists = qb.andWhere.mock.calls.find(([sql]: [string]) => sql.includes('ds_metrics'));
+    expect(exists[0]).toMatch(/m\.test_run_id = :testRunId/);
+    expect(exists[0]).toMatch(/m\.application_dashboard_id = ad\.id/);
+    expect(exists[0]).toMatch(/m\.time >= :fromTime/);
+    expect(exists[1]).toEqual({
+      testRunId: 'SHOP-00011',
+      fromTime: new Date('2026-11-20T02:00:00Z'),
+    });
+  });
+
+  it('returns [] with no query for a run without a start time', async () => {
+    const { service, applicationDashboardRepo } = build([{ id: 'stale-scenario' }]);
+    const result = await service.findApplicationDashboardsByUidPattern(
+      '^performance-test-metrics-',
+      'SHOP',
+      'acc',
+      'org-1',
+      { testRunId: 'SHOP-00011', startTime: null },
+    );
+    expect(result).toEqual([]);
+    expect(applicationDashboardRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 
   it.each([undefined, ''])(
@@ -69,6 +96,7 @@ describe('DashboardFinderService.findApplicationDashboardsByUidPattern', () => {
         'WERKNL',
         'acceptatie',
         orgId as string | undefined,
+        RUN,
       );
 
       expect(result).toEqual([]);
@@ -88,6 +116,7 @@ describe('DashboardFinderService.findApplicationDashboardsByUidPattern', () => {
         'WERKNL',
         'acceptatie',
         'org-1',
+        RUN,
       ),
     ).rejects.toThrow('invalid regular expression');
   });

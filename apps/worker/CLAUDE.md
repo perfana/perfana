@@ -229,12 +229,12 @@ rather than a verdict. Four things about it are easy to get backwards:
    worker's own verdict. Consolidated results and the Slack/Teams message builders still read "SLOs
    Passed" for a run in which nothing was judged; that tri-state is the open TODOS.md item.
 3. **The column is nullable for a reason that no longer holds.** `benchmarks` is a `core`
-   resource in SUT-transfer bundles, and until v0.2.97.90 `sut-import.service.ts` inserted every
+   resource in SUT-transfer bundles, and until v0.2.97.91 `sut-import.service.ts` inserted every
    table as `SELECT * FROM json_populate_recordset(null::t, $1::json)`, which yields NULL (not the
    column DEFAULT) for a key the bundle lacks, so `NOT NULL DEFAULT 50` would have rejected every
    pre-1808 bundle with 23502. The migration therefore added `integer DEFAULT 50 CHECK (>= 1)`
    nullable, and every reader COALESCEs (`BenchmarkMatcher`'s two queries, `?? 50` in
-   `BenchmarkMapper` and the API create/update paths). Since v0.2.97.90 the import names only the
+   `BenchmarkMapper` and the API create/update paths). Since v0.2.97.91 the import names only the
    columns a bundle carries, so a missing key takes the DEFAULT and a new column on an exported
    table can be `NOT NULL DEFAULT x`. Tightening this one is now possible, but keep the COALESCEs:
    a row stored NULL before then is still NULL.
@@ -360,8 +360,10 @@ per-scenario SLO was clicked in by hand (22 on WERKNL). A profile benchmark with
 `source = 'performance-metrics'` (`PERF_TEST_PROFILE_SOURCE`, `packages/shared/src/constants/perf-test-profile.ts`)
 has `profile_dashboard_id` NULL (migration 1810 dropped the NOT NULL) and its `dashboard_uid` is a
 **regex** over the app-dashboard uid; `BenchmarkProcessorService` fans it out over every matching
-scenario dashboard of the SUT/env/org through `findApplicationDashboardsByUidPattern`. Six things hold
-it together:
+scenario dashboard of the SUT/env/org through `findApplicationDashboardsByUidPattern`, **limited to the
+dashboards the run has `ds_metrics` for**. Scenario dashboards are never removed, so without that
+`EXISTS` a run was given SLOs for every scenario any earlier run of the SUT had. A scenario with no
+rows yet is picked up by a later 2-minute pass. Six things hold it together:
 
 1. **The regex is validated twice and pinned once.** `ProfilesService.resolveDashboardColumns` and
    `ProvisioningService` reject it with `validateRegexPattern` on write; the processor re-checks it

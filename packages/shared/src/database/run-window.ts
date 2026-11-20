@@ -82,7 +82,7 @@ export function analysisOffsetsFit(row: TestRunTimesRow | null | undefined): boo
  * Ramp-down counts only once the run has an end, as it does there. When the offsets do not
  * fit, those rows hold the whole run, so the whole run is the divisor.
  *
- * Until v0.2.97.90 this subtracted the ramp-up alone, so on a run with a long ramp-down the
+ * Until v0.2.97.91 this subtracted the ramp-up alone, so on a run with a long ramp-down the
  * rates read low against the stored throughput series (199/s shown as 138/s on a run with a
  * 2718 s ramp-down). `ANALYSED_SECONDS_SQL` is the same rule for a query aliasing `test_runs`
  * as `tr`.

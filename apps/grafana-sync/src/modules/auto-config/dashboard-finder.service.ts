@@ -8,6 +8,7 @@ import {
   ApplicationDashboard,
   TestRun,
 } from '@perfana/shared/entities';
+import { RUN_WINDOW_PAD_MS } from '@perfana/shared/database/run-window';
 import { DashboardUid } from './dashboard-uid.util';
 import { DashboardVariable } from './types';
 import { resolveGrafanaInstanceByLabel } from './grafana-instance-resolver';
@@ -262,10 +263,13 @@ export class DashboardFinderService {
     application: string,
     testEnvironment: string,
     organizationId: string | undefined,
+    run: { testRunId: string; startTime?: Date | null },
   ): Promise<ApplicationDashboard[]> {
     // SUT names are unique per organization only; without the org the name could vouch
     // for another org's SUT. No legacy NULL-org rows exist, so fail closed.
     if (!organizationId) return [];
+    // ponytail: no start_time means no ds_metrics bound; the next 2-minute pass retries.
+    if (!run.startTime) return [];
     return (
       this.applicationDashboardRepo
         .createQueryBuilder('ad')
@@ -277,6 +281,20 @@ export class DashboardFinderService {
         .andWhere('sut.name = :application', { application })
         .andWhere('ad.testEnvironment = :testEnvironment', { testEnvironment })
         .andWhere('ad.organization_id = :organizationId', { organizationId })
+        // Scenario dashboards outlive the runs that created them, so the SUT/env scope
+        // alone returns every scenario any earlier run had. Keep only those this run has
+        // written data to. The `time` bound is a bind parameter so chunk exclusion
+        // happens at plan time (root CLAUDE.md, Common Issues #56).
+        .andWhere(
+          `EXISTS (SELECT 1 FROM ds_metrics m
+                    WHERE m.test_run_id = :testRunId
+                      AND m.application_dashboard_id = ad.id
+                      AND m.time >= :fromTime)`,
+          {
+            testRunId: run.testRunId,
+            fromTime: new Date(new Date(run.startTime).getTime() - RUN_WINDOW_PAD_MS),
+          },
+        )
         .getMany()
     );
   }

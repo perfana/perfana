@@ -5332,7 +5332,7 @@ an import into an environment without that profile. Raised by the /ship data-mig
 
 ## Completed
 
-- **The SUT import writes NULL for every column a bundle predates** — **Completed:** v0.2.97.90 (2026-11-20).
+- **The SUT import writes NULL for every column a bundle predates** — **Completed:** v0.2.97.91 (2026-11-20).
   The import now names only the catalog columns present in the bundle rows, so a column an older
   bundle lacks takes its DEFAULT; a NOT NULL column with a DEFAULT no longer rejects it. It bit as
   `notify_on_comment` (0.2.97.89) on every older bundle with a notification channel. New columns on
