@@ -94,3 +94,19 @@ export function filterVirtualUserStats(
     by_scenario: filteredBy,
   };
 }
+
+/**
+ * A comment anchor for a transaction row: the scenario group it is listed under plus its
+ * name (two scenarios can share a transaction name). JSON so either part may contain any text.
+ */
+export const transactionItemKey = (scenarioGroup: string, transactionName: string): string =>
+  JSON.stringify([scenarioGroup, transactionName]);
+
+export function parseTransactionItemKey(key: string): { scenario: string; transaction: string } | null {
+  try {
+    const v = JSON.parse(key);
+    return Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === 'string') ? { scenario: v[0], transaction: v[1] } : null;
+  } catch {
+    return null;
+  }
+}

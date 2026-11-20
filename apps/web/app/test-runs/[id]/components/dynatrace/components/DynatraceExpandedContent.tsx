@@ -22,6 +22,8 @@ import {
 import { getEntityTypeColor, MULTIDIMENSIONAL_ANALYSIS_ITEMS, DEEP_LINK_ITEMS } from '../utils/dynatrace-config';
 import { getTestRunDisplayText, getTestRunSecondaryInfo } from '../utils/dynatrace-formatters';
 import HostsTabContent from '../HostsTabContent';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import ItemCommentHeader, { TabCommentMark } from '../../comments/ItemCommentHeader';
 
 function TabPanel(props: TabPanelProps) {
   const { children, value, index, ...other } = props;
@@ -87,6 +89,10 @@ interface DynatraceExpandedContentProps {
   onDeepLinkClick: (entity: { entityId: string; displayName: string; type: string; dynatraceConfigId?: string }, linkType: string) => void;
   onMultiDimensionalAnalysis: (entity: { entityId: string; displayName: string; type: string; dynatraceConfigId?: string }, analysisType: string) => void;
   onComparisonClick: (mapping: DynatraceEntityMapping, comparisonTestRun: RelatedTestRun) => void;
+
+  commentCounts: CommentItemCounts;
+  /** A comment asked to show this host; a new object each time. */
+  focusHost: { id: string } | null;
 }
 
 export function DynatraceExpandedContent({
@@ -120,6 +126,8 @@ export function DynatraceExpandedContent({
   onDeepLinkClick,
   onMultiDimensionalAnalysis,
   onComparisonClick,
+  commentCounts,
+  focusHost,
 }: DynatraceExpandedContentProps) {
   return (
     <Box>
@@ -155,7 +163,7 @@ export function DynatraceExpandedContent({
             {serviceEntities.map((mapping, index) => (
               <Tab
                 key={mapping.id}
-                label={mapping.entityDisplayName}
+                label={<span>{mapping.entityDisplayName}<TabCommentMark counts={commentCounts} itemKey={`service:${mapping.entityId}`} /></span>}
                 {...a11yProps(index)}
                 sx={{
                   color: getEntityTypeColor(mapping.entityType),
@@ -172,6 +180,12 @@ export function DynatraceExpandedContent({
         {serviceEntities.map((mapping, index) => (
           <TabPanel key={mapping.id} value={tabValue} index={index}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <ItemCommentHeader
+                card="dynatrace"
+                itemKey={`service:${mapping.entityId}`}
+                itemLabel={mapping.entityDisplayName}
+                counts={commentCounts}
+              />
               {/* Request Filtering Section */}
               <RequestFilteringSection
                 scenarios={scenarios}
@@ -241,6 +255,8 @@ export function DynatraceExpandedContent({
           hostEntities={hostEntities}
           testRun={testRun}
           configs={configs}
+          commentCounts={commentCounts}
+          focusHost={focusHost}
         />
       </TabPanel>
     </Box>

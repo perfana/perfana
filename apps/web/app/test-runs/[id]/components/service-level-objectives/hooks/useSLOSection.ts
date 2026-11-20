@@ -111,6 +111,9 @@ export interface UseSLOSectionReturn {
 
   // Utilities
   getCheckResultKey: (result: CheckResult) => string;
+
+  /** Comment focus: show and expand one row; false until it exists. */
+  focusSloRow: (key: string) => boolean;
 }
 
 export function useSLOSection({
@@ -601,6 +604,20 @@ export function useSLOSection({
     prevStatusRef.current = { ...currentStatus };
   }, [testRun?.status, testRunId, loadCheckResults]);
 
+  /**
+   * Comment focus: make one SLO row visible and expanded. Clears the search and shows all
+   * results, marked as the user's choice so the auto "Failed only" switch leaves it alone.
+   * False until check results have loaded or when the run has no such row.
+   */
+  const focusSloRow = useCallback((key: string): boolean => {
+    if (!checkResults.some((r) => getCheckResultKey(r) === key)) return false;
+    setSearchText('');
+    setSloFilter('all');
+    setIsFilterManuallySet(true);
+    setExpandedSloRows((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+    return true;
+  }, [checkResults, getCheckResultKey]);
+
   // Auto-set filter effect
   useEffect(() => {
     if (checkResults.length > 0 && !isFilterManuallySet) {
@@ -617,6 +634,7 @@ export function useSLOSection({
   }, [checkResults, sloFilter, isFilterManuallySet]);
 
   return {
+    focusSloRow,
     // Core data
     checkResults,
     checkResultsLoading,

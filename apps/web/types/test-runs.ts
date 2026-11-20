@@ -142,4 +142,8 @@ export interface TestRun {
   tracing_services?: TracingService[];
   is_changepoint?: boolean;
   is_control_group?: boolean;
+  /** Comments on the run that are not deleted, summed over cards (list endpoint only). */
+  comment_count?: number;
+  /** Of those, by others and not yet seen by the caller (list endpoint only). */
+  unread_comments?: number;
 }

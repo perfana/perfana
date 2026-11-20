@@ -8,7 +8,7 @@ import { generateConfigHash } from '@/lib/config-hash';
 import { deleteAnomalyData, DeleteAnomalyRequest } from '@/lib/anomaly-api';
 import { AnomalyData, AnomalySummary, MetricTrendData, ConfigFormData, AdaptConclusion, DrawerData, ConfigScope } from '../types';
 import { useUpdateAdaptConfig } from './useUpdateAdaptConfig';
-import { collectPanelTargets } from '../utils';
+import { anomalyItemKey, collectPanelTargets } from '../utils';
 
 // Known classification values - anything not in this list shows as "Unclassified"
 const KNOWN_CLASSIFICATIONS = new Set([
@@ -178,6 +178,8 @@ interface UseAnomalyDetectionReturn {
   handleDashboardFilterChange: (e: { target: { value: string } }) => void;
   handlePanelFilterChange: (e: { target: { value: string } }) => void;
   handleClearAllFilters: () => void;
+  /** Comment focus: show and expand one row by its anchor key; false until it exists. */
+  focusAnomalyRow: (itemKey: string) => boolean;
 }
 
 export function useAnomalyDetection({
@@ -740,6 +742,43 @@ export function useAnomalyDetection({
     setPage(0);
   }, [setConclusionFilter]);
 
+  /**
+   * Comment focus: show one metric row and expand it, keeping the user's sort. Switches to the
+   * Anomaly Detection tab and clears every filter, then an effect pages to the row once the
+   * filtered list contains it and expands it. False until the data has loaded or when the run
+   * has no such row.
+   */
+  const pendingFocusRef = useRef<string | null>(null);
+  const [focusSeq, setFocusSeq] = useState(0);
+  const focusAnomalyRow = useCallback((itemKey: string): boolean => {
+    if (!anomalyData.some((r) => anomalyItemKey(r) === itemKey)) return false;
+    setActiveTab(0);
+    handleClearAllFilters();
+    // Row keys carry their page position, so expanded keys from another page are stale.
+    setExpandedRows(new Set());
+    pendingFocusRef.current = itemKey;
+    setFocusSeq((n) => n + 1);
+    return true;
+  }, [anomalyData, setActiveTab, handleClearAllFilters]);
+
+  useEffect(() => {
+    const itemKey = pendingFocusRef.current;
+    if (!itemKey) return;
+    const idx = sortedData.findIndex((r) => anomalyItemKey(r) === itemKey);
+    if (idx < 0) return; // filters not cleared yet
+    const targetPage = Math.floor(idx / rowsPerPage);
+    if (targetPage !== page) {
+      setPage(targetPage);
+      return;
+    }
+    const pos = idx % rowsPerPage;
+    const row = paginatedData[pos];
+    if (!row) return;
+    pendingFocusRef.current = null;
+    const rowKey = `${row.dashboard_label}-${row.panel_title}-${row.metric_name}_${pos}`;
+    if (!expandedRows.has(rowKey)) handleRowToggle(rowKey);
+  }, [focusSeq, sortedData, paginatedData, page, rowsPerPage, expandedRows, handleRowToggle]);
+
   const handleConclusionFilterChange = useCallback((newFilter: string) => {
     if (!anomalyExpanded) {
       pendingConclusionRef.current = newFilter;
@@ -882,5 +921,6 @@ export function useAnomalyDetection({
     handleDashboardFilterChange,
     handlePanelFilterChange,
     handleClearAllFilters,
+    focusAnomalyRow,
   };
 }

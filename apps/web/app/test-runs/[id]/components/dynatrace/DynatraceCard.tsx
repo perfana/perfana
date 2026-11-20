@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import {
   Box,
   Card,
@@ -25,6 +25,9 @@ import { useDynatraceData, useDynatraceHandlers } from './hooks';
 
 // Components
 import { DynatraceCollapsedView, DynatraceExpandedContent } from './components';
+
+import { useCommentItemCounts, useCommentItemFocus } from '../comments/CommentsContext';
+import { NO_EVENT } from '../comments/ItemCommentHeader';
 
 // Utils
 import { getAccentColor } from './utils/dynatrace-config';
@@ -55,6 +58,27 @@ export default function DynatraceCard({
     selectedMetric: dynatraceData.filterOptions.selectedMetric,
     minDuration: dynatraceData.minDuration,
     maxDuration: dynatraceData.maxDuration,
+  });
+
+  // Comments per host (`host:<entityId>`) and per service (`service:<entityId>`).
+  const commentCounts = useCommentItemCounts('dynatrace', expanded);
+  const [focusHost, setFocusHost] = useState<{ id: string } | null>(null);
+  useCommentItemFocus('dynatrace', (key) => {
+    if (dynatraceData.loading) return false;
+    const [kind, entityId] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    if (kind === 'service') {
+      const idx = dynatraceData.serviceEntities.findIndex((m) => m.entityId === entityId);
+      if (idx < 0) return false;
+      dynatraceData.handlePrimaryTabChange(NO_EVENT, 1);
+      dynatraceData.handleTabChange(NO_EVENT, idx);
+      return true;
+    }
+    if (kind === 'host' && dynatraceData.hostEntities.some((m) => m.entityId === entityId)) {
+      dynatraceData.handlePrimaryTabChange(NO_EVENT, 0);
+      setFocusHost({ id: entityId }); // fresh object: re-opens the host even if it was open before
+      return true;
+    }
+    return false;
   });
 
   // Handle expand/collapse with auto-focus
@@ -306,6 +330,8 @@ export default function DynatraceCard({
                 onDeepLinkClick={handlers.handleDeepLinkClick}
                 onMultiDimensionalAnalysis={handlers.handleMultiDimensionalAnalysis}
                 onComparisonClick={handlers.handleComparisonClick}
+                commentCounts={commentCounts}
+                focusHost={focusHost}
               />
             )}
           </Collapse>

@@ -61,7 +61,7 @@ export default function FilterControls({
   return (
     <Box sx={{
       display: 'grid',
-      gridTemplateColumns: '40px minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 1fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.6fr) minmax(100px, 0.6fr) minmax(120px, 0.7fr) 50px',
+      gridTemplateColumns: '40px minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 1fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.6fr) minmax(100px, 0.6fr) minmax(120px, 0.7fr) 80px',
       gap: 1,
       alignItems: 'center',
       width: '100%',

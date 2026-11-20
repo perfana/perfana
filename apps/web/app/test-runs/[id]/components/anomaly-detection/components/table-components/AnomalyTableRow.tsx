@@ -22,6 +22,9 @@ import { formatValueWithUnit } from '@/lib/units';
 import { getConclusionColor, getClassificationDisplayInfo } from '../../helpers';
 import { formatDifference } from '../utils';
 import StaleTooltipContent from '../StaleTooltipContent';
+import { anomalyItemKey, anomalyItemLabel } from '../../utils';
+import RowCommentButton from '../../../comments/RowCommentButton';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
 
 function TextCell({ value, mono = false }: { value: string | null | undefined; mono?: boolean }) {
   const display = value || '-';
@@ -52,6 +55,8 @@ interface AnomalyTableRowProps {
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>) => void;
   onStaleChipClick: () => void;
   hasActionMenu: boolean;
+  /** Comment thread counts per anchored item on this card. */
+  commentCounts?: CommentItemCounts;
 }
 
 export function AnomalyTableRow({
@@ -66,6 +71,7 @@ export function AnomalyTableRow({
   onOpenActionMenu,
   onStaleChipClick,
   hasActionMenu,
+  commentCounts = {},
 }: AnomalyTableRowProps) {
   const classification = row.classification || 'unclassified';
   const displayInfo = getClassificationDisplayInfo(classification);
@@ -74,7 +80,7 @@ export function AnomalyTableRow({
     <Box
       sx={(theme) => ({
         display: 'grid',
-        gridTemplateColumns: '40px minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 1fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.6fr) minmax(100px, 0.6fr) minmax(120px, 0.7fr) 50px',
+        gridTemplateColumns: '40px minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 1fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.6fr) minmax(100px, 0.6fr) minmax(120px, 0.7fr) 80px',
         gap: 1,
         px: 2,
         py: 2,
@@ -101,6 +107,7 @@ export function AnomalyTableRow({
         minWidth: '1000px',
         cursor: 'pointer',
         transition: 'background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
+        '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 },
         '&:hover': {
           background: isExpanded
             ? `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.12)} 0%, ${alpha(theme.palette.primary.main, 0.08)} 100%)`
@@ -112,6 +119,7 @@ export function AnomalyTableRow({
         }
       })}
       onClick={onToggleExpanded}
+      data-comment-item={anomalyItemKey(row)}
     >
       {/* Expand/Collapse Button */}
       <Box sx={{
@@ -255,8 +263,9 @@ export function AnomalyTableRow({
         {formatDifference(row.test_value, row.control_group_value, row.difference ?? '', row.unit ?? undefined)}
       </Typography>
 
-      {/* Action Menu */}
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      {/* Comment on this metric, and the action menu */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
+        <RowCommentButton card="anomaly" itemKey={anomalyItemKey(row)} itemLabel={anomalyItemLabel(row)} counts={commentCounts} />
         {hasActionMenu && (
           <IconButton
             onClick={(e) => {

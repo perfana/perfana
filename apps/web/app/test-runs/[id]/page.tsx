@@ -57,6 +57,11 @@ import {
 import { TabActiveContext } from './context/TabActiveContext';
 import { TabErrorBoundary } from './components/shared/TabErrorBoundary';
 import { getPlotly } from '@/lib/plotly';
+import { CommentsProvider } from './components/comments/CommentsContext';
+import CardComments from './components/comments/CardComments';
+import RunCommentsButton from './components/comments/RunCommentsButton';
+import CommentDeepLink from './components/comments/CommentDeepLink';
+import type { ExpansionState } from './types';
 
 const TAB_PANEL_IDS: Record<TabIndex, string> = {
   [TAB.results]: 'tabpanel-results',
@@ -224,6 +229,12 @@ export default function TestRunDetailsPage() {
     setExpansion(`${card}Expanded`, true);
     scrollToCard(`${card}-card-expanded`, { delay: 150, maxRetries: 8 });
   }, [setExpansion]);
+  // The comments jump and deep link: same as a card link, for any card.
+  const revealForComments = useCallback((key: keyof ExpansionState) => {
+    setActiveTab(tabOfCard(key));
+    setExpansion(key, true);
+    scrollToCard(`comment-card-${key}`, { delay: 150, maxRetries: 8 });
+  }, [setExpansion]);
   const linkedCard = useSearchParams().get('card');
   useEffect(() => {
     if (LINKABLE_CARDS.includes(linkedCard as LinkableCard)) revealCard(linkedCard as LinkableCard);
@@ -285,17 +296,13 @@ export default function TestRunDetailsPage() {
     alignItems: 'stretch',
   };
 
-  const cardBoxStyle = (isExpanded: boolean) => ({
-    gridColumn: isExpanded ? '1 / -1' : 'auto',
-    height: isExpanded ? 'auto' : '293px',
-    display: 'flex',
-    flexDirection: 'column' as const,
-  });
 
   return (
     <PerformanceAnalysisDrillDownContext.Provider value={onDrillDownToPerformanceAnalysis}>
     <OpenCardLinkContext.Provider value={openCardLink}>
     <CardLinkRequestContext.Provider value={cardLinkContext}>
+    <CommentsProvider runId={testRun.id} reveal={revealForComments}>
+    <CommentDeepLink />
     <Box sx={{ backgroundColor: 'background.default', pb: 4 }}>
       {/* Deletion status banner */}
       {testRun.deletion_status === 'queued' || testRun.deletion_status === 'deleting' ? (
@@ -333,7 +340,7 @@ export default function TestRunDetailsPage() {
       {/* Main Content */}
       <Box sx={{ px: 3 }}>
         {/* Tabs */}
-        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
           <Tabs
             value={activeTab}
             onChange={(_, newValue) => setActiveTab(newValue)}
@@ -346,6 +353,8 @@ export default function TestRunDetailsPage() {
             <Tab label="Root Cause Analysis" id="tab-rca" aria-controls={TAB_PANEL_IDS[TAB.rca]} onClick={(e) => e.detail === 1 && activeTab === TAB.rca && collapseTab(TAB.rca)} />
             <Tab label="Reporting" id="tab-reporting" aria-controls={TAB_PANEL_IDS[TAB.reporting]} onClick={(e) => e.detail === 1 && activeTab === TAB.reporting && collapseTab(TAB.reporting)} />
           </Tabs>
+          <Box sx={{ flex: 1 }} />
+          <RunCommentsButton />
         </Box>
 
         {/* Results Tab */}
@@ -355,7 +364,7 @@ export default function TestRunDetailsPage() {
             <TabErrorBoundary key={testRunId}>
             <TabBody active={activeTab === TAB.results}>
             <Box sx={gridStyle}>
-              <Box sx={cardBoxStyle(expansionState.expanded)}>
+              <CardComments card="expanded" expanded={expansionState.expanded}>
                 <TestRunDetailsCard
                   testRun={testRun}
                   expanded={expansionState.expanded}
@@ -377,31 +386,31 @@ export default function TestRunDetailsPage() {
                   showToast={showToast}
                   onRefreshTriggered={refreshTestRun}
                 />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.configExpanded)}>
+              </CardComments>
+              <CardComments card="configExpanded" expanded={expansionState.configExpanded}>
                 <ConfigurationComparisonSection testRun={testRun} testRunId={testRunId} configExpanded={expansionState.configExpanded} onConfigExpand={() => { const wasCollapsed = !expansionState.configExpanded; toggleExpansion('configExpanded'); if (wasCollapsed) scrollToCard('config-comparison-expanded'); }} showToast={showToast} />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.dashboardsExpanded)}>
+              </CardComments>
+              <CardComments card="dashboardsExpanded" expanded={expansionState.dashboardsExpanded}>
                 <DashboardsSection testRun={testRun} testRunId={testRunId} dashboardsExpanded={expansionState.dashboardsExpanded} onDashboardsExpand={() => { const wasCollapsed = !expansionState.dashboardsExpanded; toggleExpansion('dashboardsExpanded'); if (wasCollapsed) scrollToCard('dashboards-section-expanded'); }} showToast={showToast} />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.anomalyExpanded)}>
+              </CardComments>
+              <CardComments card="anomalyExpanded" expanded={expansionState.anomalyExpanded}>
                 <AnomalyDetectionSection testRun={testRun} testRunId={testRunId} anomalyExpanded={expansionState.anomalyExpanded} onAnomalyExpand={onAnomalyExpand} activeTab={anomalyState.activeTab} onActiveTabChange={setAnomalyActiveTab} conclusionFilter={anomalyState.conclusionFilter} setConclusionFilter={setAnomalyConclusionFilter} showToast={showToast} onTestRunUpdate={handleTestRunUpdate} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.performanceExpanded)}>
+              </CardComments>
+              <CardComments card="performanceExpanded" expanded={expansionState.performanceExpanded}>
                 <PerformanceAnalysisCard initialFilters={perfAnalysisFilters} testRunId={testRunId} testRun={testRun} expanded={expansionState.performanceExpanded} onExpand={() => { const wasCollapsed = !expansionState.performanceExpanded; toggleExpansion('performanceExpanded'); if (wasCollapsed) scrollToCard('performance-analysis-card-expanded'); }} showToast={showToast} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.sloExpanded)}>
+              </CardComments>
+              <CardComments card="sloExpanded" expanded={expansionState.sloExpanded}>
                 <ServiceLevelObjectivesSection testRun={testRun} testRunId={testRunId} sloExpanded={expansionState.sloExpanded} setSloExpanded={(val) => { const wasCollapsed = !expansionState.sloExpanded; setExpansion('sloExpanded', val); if (wasCollapsed && val) scrollToCard('slo-section-expanded'); }} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
-              </Box>
+              </CardComments>
               {hasDeepLinks && (
-                <Box sx={cardBoxStyle(expansionState.deepLinksExpanded)}>
+                <CardComments card="deepLinksExpanded" expanded={expansionState.deepLinksExpanded}>
                   <DeepLinksCard testRun={testRun} expanded={expansionState.deepLinksExpanded} onExpand={() => { const wasCollapsed = !expansionState.deepLinksExpanded; toggleExpansion('deepLinksExpanded'); if (wasCollapsed) scrollToCard('deep-links-card-expanded'); }} />
-                </Box>
+                </CardComments>
               )}
               {events.length > 0 && (
-                <Box sx={cardBoxStyle(expansionState.eventsExpanded)}>
+                <CardComments card="eventsExpanded" expanded={expansionState.eventsExpanded}>
                   <EventsCard testRun={testRun} testRunId={testRunId} expanded={expansionState.eventsExpanded} onExpand={() => { const wasCollapsed = !expansionState.eventsExpanded; toggleExpansion('eventsExpanded'); if (wasCollapsed) scrollToCard('events-card-expanded'); }} showToast={showToast} />
-                </Box>
+                </CardComments>
               )}
             </Box>
             </TabBody>
@@ -417,15 +426,15 @@ export default function TestRunDetailsPage() {
             <TabErrorBoundary key={testRunId}>
             <TabBody active={activeTab === TAB.rca}>
             <Box sx={gridStyle}>
-              <DynatraceCard key={`dynatrace-${drillDownSeq.dynatrace}`} testRun={testRun} expanded={expansionState.dynatraceExpanded} onExpand={() => { const wasCollapsed = !expansionState.dynatraceExpanded; toggleExpansion('dynatraceExpanded'); if (wasCollapsed) scrollToCard('dynatrace-card-expanded'); }} initialFilters={drillDownFilters.dynatrace} onConfigurationStatus={setHasDynatrace} />
-              <DistributedTracingCard key={`tracing-${drillDownSeq.distributedTracing}`} testRun={testRun as unknown as Parameters<typeof DistributedTracingCard>[0]['testRun']} expanded={expansionState.distributedTracingExpanded} onExpand={() => { const wasCollapsed = !expansionState.distributedTracingExpanded; toggleExpansion('distributedTracingExpanded'); if (wasCollapsed) scrollToCard('distributed-tracing-card-expanded'); }} initialFilters={drillDownFilters.distributedTracing} onConfigurationStatus={setHasDistributedTracing} />
+              <CardComments card="dynatraceExpanded" expanded={expansionState.dynatraceExpanded}><DynatraceCard key={`dynatrace-${drillDownSeq.dynatrace}`} testRun={testRun} expanded={expansionState.dynatraceExpanded} onExpand={() => { const wasCollapsed = !expansionState.dynatraceExpanded; toggleExpansion('dynatraceExpanded'); if (wasCollapsed) scrollToCard('dynatrace-card-expanded'); }} initialFilters={drillDownFilters.dynatrace} onConfigurationStatus={setHasDynatrace} /></CardComments>
+              <CardComments card="distributedTracingExpanded" expanded={expansionState.distributedTracingExpanded}><DistributedTracingCard key={`tracing-${drillDownSeq.distributedTracing}`} testRun={testRun as unknown as Parameters<typeof DistributedTracingCard>[0]['testRun']} expanded={expansionState.distributedTracingExpanded} onExpand={() => { const wasCollapsed = !expansionState.distributedTracingExpanded; toggleExpansion('distributedTracingExpanded'); if (wasCollapsed) scrollToCard('distributed-tracing-card-expanded'); }} initialFilters={drillDownFilters.distributedTracing} onConfigurationStatus={setHasDistributedTracing} /></CardComments>
               {(testRun.systems_under_test?.pyroscope_instance_id || testRun.system_under_test?.pyroscope_instance_id) && (
-                <PyroscopeCard testRun={testRun as unknown as Parameters<typeof PyroscopeCard>[0]['testRun']} expanded={expansionState.pyroscopeExpanded} onExpand={() => { const wasCollapsed = !expansionState.pyroscopeExpanded; toggleExpansion('pyroscopeExpanded'); if (wasCollapsed) scrollToCard('pyroscope-card-expanded'); }} />
+                <CardComments card="pyroscopeExpanded" expanded={expansionState.pyroscopeExpanded}><PyroscopeCard testRun={testRun as unknown as Parameters<typeof PyroscopeCard>[0]['testRun']} expanded={expansionState.pyroscopeExpanded} onExpand={() => { const wasCollapsed = !expansionState.pyroscopeExpanded; toggleExpansion('pyroscopeExpanded'); if (wasCollapsed) scrollToCard('pyroscope-card-expanded'); }} /></CardComments>
               )}
-              <SplunkCard testRun={testRun} expanded={expansionState.splunkExpanded} onExpand={() => { const wasCollapsed = !expansionState.splunkExpanded; toggleExpansion('splunkExpanded'); if (wasCollapsed) scrollToCard('splunk-card-expanded'); }} />
-              <Box sx={cardBoxStyle(expansionState.awrExpanded)}>
+              <CardComments card="splunkExpanded" expanded={expansionState.splunkExpanded}><SplunkCard testRun={testRun} expanded={expansionState.splunkExpanded} onExpand={() => { const wasCollapsed = !expansionState.splunkExpanded; toggleExpansion('splunkExpanded'); if (wasCollapsed) scrollToCard('splunk-card-expanded'); }} /></CardComments>
+              <CardComments card="awrExpanded" expanded={expansionState.awrExpanded}>
                 <AwrReportCard testRun={testRun} expanded={expansionState.awrExpanded} onExpand={() => { const wasCollapsed = !expansionState.awrExpanded; toggleExpansion('awrExpanded'); if (wasCollapsed) scrollToCard('awr-report-card-expanded'); }} />
-              </Box>
+              </CardComments>
             </Box>
             </TabBody>
             </TabErrorBoundary>
@@ -440,7 +449,7 @@ export default function TestRunDetailsPage() {
             <TabErrorBoundary key={testRunId}>
             <TabBody active={activeTab === TAB.reporting}>
             <Box sx={gridStyle}>
-              <Box sx={cardBoxStyle(expansionState.reportExpanded)}>
+              <CardComments card="reportExpanded" expanded={expansionState.reportExpanded}>
                 <ReportCard
                   testRun={testRun}
                   expanded={expansionState.reportExpanded}
@@ -453,16 +462,16 @@ export default function TestRunDetailsPage() {
                   onSnackbar={onReportSnackbar}
                   refreshTrigger={reportRefreshTrigger}
                 />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.trendsExpanded)}>
+              </CardComments>
+              <CardComments card="trendsExpanded" expanded={expansionState.trendsExpanded}>
                 <TrendsCard testRun={testRun} testRunId={testRunId} trendsExpanded={expansionState.trendsExpanded} onTrendsExpand={() => { const wasCollapsed = !expansionState.trendsExpanded; toggleExpansion('trendsExpanded'); if (wasCollapsed) scrollToCard('trends-card-expanded'); }} showToast={showToast} />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.compareExpanded)}>
+              </CardComments>
+              <CardComments card="compareExpanded" expanded={expansionState.compareExpanded}>
                 <CompareCard testRun={testRun} testRunId={testRunId} compareExpanded={expansionState.compareExpanded} onCompareExpand={() => { const wasCollapsed = !expansionState.compareExpanded; toggleExpansion('compareExpanded'); if (wasCollapsed) scrollToCard('compare-card-expanded'); }} showToast={showToast} />
-              </Box>
-              <Box sx={cardBoxStyle(expansionState.graphsExpanded)}>
+              </CardComments>
+              <CardComments card="graphsExpanded" expanded={expansionState.graphsExpanded}>
                 <GraphsCard testRun={testRun} testRunId={testRunId} graphsExpanded={expansionState.graphsExpanded} onGraphsExpand={() => { const wasCollapsed = !expansionState.graphsExpanded; toggleExpansion('graphsExpanded'); if (wasCollapsed) scrollToCard('graphs-card-expanded'); }} showToast={showToast} events={events} />
-              </Box>
+              </CardComments>
             </Box>
             </TabBody>
             </TabErrorBoundary>
@@ -516,6 +525,7 @@ export default function TestRunDetailsPage() {
         onError={(error) => showToast(error)}
       />
     </Box>
+    </CommentsProvider>
     </CardLinkRequestContext.Provider>
     </OpenCardLinkContext.Provider>
     </PerformanceAnalysisDrillDownContext.Provider>

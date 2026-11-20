@@ -11,7 +11,7 @@ import {
   Tooltip,
   Checkbox,
 } from '@mui/material';
-import { DataGrid, GridColDef, GridPaginationModel } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridPaginationModel, GridRenderCellParams } from '@mui/x-data-grid';
 import {
   PlayArrow,
   Flag,
@@ -30,6 +30,7 @@ import {
 } from '../utils';
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
 import { PaginationState } from '../hooks/useTestRunsData';
+import CommentCountBadge from '../[id]/components/comments/CommentCountBadge';
 
 interface TestRunsTableProps {
   testRuns: TestRun[];
@@ -69,7 +70,7 @@ export function TestRunsTable({
   const router = useRouter();
   const { currentOrganizationId } = useOrganizationContext();
 
-  const handleRowClick = (testRun: TestRun, event: React.MouseEvent) => {
+  const handleRowClick = (testRun: TestRun, event: React.MouseEvent, extra?: Record<string, string>) => {
     // Don't navigate if clicking on the select column
     const target = event.target as HTMLElement;
     if (target.closest('[data-field="select"]')) {
@@ -84,7 +85,7 @@ export function TestRunsTable({
     if (currentOrganizationId) {
       params.organizationId = currentOrganizationId;
     }
-    const searchParams = new URLSearchParams(params);
+    const searchParams = new URLSearchParams({ ...params, ...extra });
     router.push(`/test-runs/${testRun.test_run_id}?${searchParams.toString()}`);
   };
 
@@ -121,6 +122,31 @@ export function TestRunsTable({
   };
 
   // Running tests columns
+  // Test run id plus its comment badge (shared with the run page's cards): red with the unread
+  // count when others wrote since you last looked, the total otherwise. Opens the run at the
+  // first unread card, or the first card with comments, with its comments open.
+  const renderTestRunIdCell = (params: GridRenderCellParams<TestRun>) => {
+    const total = params.row?.comment_count ?? 0;
+    const unread = params.row?.unread_comments ?? 0;
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, height: '100%' }}>
+        <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{params.value}</Box>
+        {total > 0 && (
+          <CommentCountBadge
+            total={total}
+            unread={unread}
+            subject="this run"
+            testId={`run-comments-${params.row.test_run_id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRowClick(params.row, e, { comments: unread > 0 ? 'next' : 'first' });
+            }}
+          />
+        )}
+      </Box>
+    );
+  };
+
   const runningColumns: GridColDef[] = useMemo(() => {
     const allColumns: GridColDef[] = [
       {
@@ -136,6 +162,7 @@ export function TestRunsTable({
         minWidth: 180,
         flex: 2.6,
         maxWidth: 400,
+        renderCell: renderTestRunIdCell,
       },
       {
         field: 'test_environment',
@@ -249,6 +276,7 @@ export function TestRunsTable({
         minWidth: 180,
         flex: 2.6,
         maxWidth: 400,
+        renderCell: renderTestRunIdCell,
       },
       {
         field: 'test_environment',

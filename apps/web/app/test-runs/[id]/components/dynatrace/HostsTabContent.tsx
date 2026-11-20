@@ -9,6 +9,8 @@ import HostLabelChips from '@/components/HostLabelChips';
 import HostCardLinksMenu from './HostCardLinksMenu';
 import HostDetailPanel from './HostDetailPanel';
 import HostsOverviewTable from './HostsOverviewTable';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import RowCommentButton from '../comments/RowCommentButton';
 
 interface DynatraceEntityMapping {
   id: string;
@@ -29,6 +31,8 @@ interface HostsTabContentProps {
   hostEntities: DynatraceEntityMapping[];
   testRun: TestRun;
   configs: DynatraceConfig[];
+  commentCounts?: CommentItemCounts;
+  focusHost?: { id: string } | null;
 }
 
 // One request per host, this many in flight. Same ceiling the worker's Dynatrace
@@ -36,8 +40,11 @@ interface HostsTabContentProps {
 // tenant. Each request costs 3 Dynatrace calls server-side.
 const HOST_OVERVIEW_CONCURRENCY = 5;
 
-export default function HostsTabContent({ hostEntities, testRun, configs }: HostsTabContentProps) {
-  const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+export default function HostsTabContent({ hostEntities, testRun, configs, commentCounts = {}, focusHost }: HostsTabContentProps) {
+  const [selectedHostId, setSelectedHostId] = useState<string | null>(focusHost?.id ?? null);
+  useEffect(() => {
+    if (focusHost) setSelectedHostId(focusHost.id);
+  }, [focusHost]);
   const [rows, setRows] = useState<HostOverviewRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -104,7 +111,10 @@ export default function HostsTabContent({ hostEntities, testRun, configs }: Host
   if (selectedHost) {
     return (
       <Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+        <Box
+          data-comment-item={`host:${selectedHost.entityId}`}
+          sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap', borderRadius: 1, '& .row-comment-button': { opacity: 1 } }}
+        >
           <Button startIcon={<ArrowBackIcon />} onClick={() => setSelectedHostId(null)}>
             Back to hosts
           </Button>
@@ -114,6 +124,14 @@ export default function HostsTabContent({ hostEntities, testRun, configs }: Host
           </Typography>
           <HostLabelChips labels={selectedHost.labels} />
           <HostCardLinksMenu hostDisplayName={selectedHost.entityDisplayName} />
+          <Box sx={{ ml: 'auto' }}>
+            <RowCommentButton
+              card="dynatrace"
+              itemKey={`host:${selectedHost.entityId}`}
+              itemLabel={selectedHost.entityDisplayName}
+              counts={commentCounts}
+            />
+          </Box>
         </Box>
         <HostDetailPanel
           host={selectedHost}
@@ -131,6 +149,7 @@ export default function HostsTabContent({ hostEntities, testRun, configs }: Host
       rows={rows}
       loading={loading}
       onSelectHost={setSelectedHostId}
+      commentCounts={commentCounts}
     />
   );
 }

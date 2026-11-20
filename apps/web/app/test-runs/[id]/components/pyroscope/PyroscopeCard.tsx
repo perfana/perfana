@@ -30,6 +30,10 @@ import {
   PyroscopeBaselineSelector,
 } from './components';
 
+import { useCommentItemCounts, useCommentItemFocus } from '../comments/CommentsContext';
+import ItemCommentHeader, { NO_EVENT, TabCommentMark } from '../comments/ItemCommentHeader';
+import { isComboKey, parsePyroscopeItemKey, pyroscopeItemKey, pyroscopeItemLabel } from './utils/pyroscope-comment-key';
+
 // Utils
 import { getAccentColor } from './utils/pyroscope-formatters';
 
@@ -46,6 +50,21 @@ export default function PyroscopeCard({
 
   // Data hook
   const pyroscopeData = usePyroscopeData({ testRun, expanded });
+
+  // Comments per application + profiler combination and view (single / diff).
+  const commentCounts = useCommentItemCounts('pyroscope', expanded);
+  useCommentItemFocus('pyroscope', (key) => {
+    const target = parsePyroscopeItemKey(key);
+    if (!target) return false;
+    const idx = pyroscopeData.configurations.findIndex((c) => c.application === target.application && c.profiler === target.profiler);
+    if (idx < 0) return false;
+    if (idx !== pyroscopeData.activeCombinationTab) pyroscopeData.handleCombinationTabChange(NO_EVENT, idx);
+    if (target.viewModeTab !== null && target.viewModeTab !== pyroscopeData.viewModeTab) {
+      pyroscopeData.handleViewModeTabChange(NO_EVENT, target.viewModeTab);
+    }
+    return true;
+  });
+  const activeCombo = pyroscopeData.configurations[pyroscopeData.activeCombinationTab];
 
   // Handle expand/collapse
   const handleExpand = (): void => {
@@ -154,7 +173,7 @@ export default function PyroscopeCard({
                     sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
                   >
                     {pyroscopeData.configurations.map((config, index) => (
-                      <Tab key={index} label={`${config.application} / ${config.profiler.split(':')[0]}`} sx={{ fontSize: '0.875rem', minWidth: 140 }} />
+                      <Tab key={index} label={<span>{`${config.application} / ${config.profiler.split(':')[0]}`}<TabCommentMark counts={commentCounts} itemKey={isComboKey(config)} /></span>} sx={{ fontSize: '0.875rem', minWidth: 140 }} />
                     ))}
                   </Tabs>
                 )}
@@ -164,6 +183,23 @@ export default function PyroscopeCard({
                   <Tab label="Single View" />
                   <Tab label="Diff View" />
                 </Tabs>
+
+                {/* Comments on this profiler in this view; the scroll target when one is opened. */}
+                {activeCombo && (
+                  <ItemCommentHeader
+                    card="pyroscope"
+                    itemKey={pyroscopeItemKey(activeCombo, pyroscopeData.viewModeTab)}
+                    itemLabel={pyroscopeItemLabel(activeCombo, pyroscopeData.viewModeTab)}
+                    title={pyroscopeItemLabel(activeCombo, pyroscopeData.viewModeTab)}
+                    counts={commentCounts}
+                  >
+                    {/* Threads on this profiler in the other view (or from before views were tracked). */}
+                    <TabCommentMark
+                      counts={commentCounts}
+                      itemKey={(k) => isComboKey(activeCombo)(k) && k !== pyroscopeItemKey(activeCombo, pyroscopeData.viewModeTab)}
+                    />
+                  </ItemCommentHeader>
+                )}
 
                 {pyroscopeData.error && <Alert severity="error" sx={{ mb: 2 }}>{pyroscopeData.error}</Alert>}
 

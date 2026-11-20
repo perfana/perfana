@@ -14,6 +14,9 @@ import { describeMapping, fetchSplunkRunSummary, SplunkRunPanel, SplunkRunSummar
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import KPIDisplay from '../shared/KPIDisplay';
 import SoftBadge from '../shared/SoftBadge';
+import RowCommentButton from '../comments/RowCommentButton';
+import { useCommentItemCounts, useCommentItemFocus } from '../comments/CommentsContext';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
 
 const SPLUNK_GREEN = '#65A637';
 const MAX_ROWS = 10;
@@ -24,6 +27,9 @@ interface SplunkCardProps {
   expanded: boolean;
   onExpand: () => void;
 }
+
+/** Comment anchor for a panel. Panel ids repeat across Splunk sources, so the title goes with it. */
+const panelKey = (p: SplunkRunPanel) => `${p.panelId}|${p.title}`;
 
 const fmt = (n: number | null | undefined, digits = 0) =>
   n === null || n === undefined || !Number.isFinite(n) ? '–' : n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -46,6 +52,9 @@ export function errorEvents(panels: SplunkRunPanel[]): number | null {
 export default function SplunkCard({ testRun, expanded, onExpand }: SplunkCardProps) {
   const [summary, setSummary] = useState<SplunkRunSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const commentCounts = useCommentItemCounts('splunk', expanded);
+  // Every panel is on screen once the card is expanded; wait only for the summary to land.
+  useCommentItemFocus('splunk', (key) => !!summary?.configured && summary.panels.some((p) => panelKey(p) === key));
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +160,7 @@ export default function SplunkCard({ testRun, expanded, onExpand }: SplunkCardPr
                 )}
 
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(auto-fit, minmax(360px, 1fr))' }, gap: 3 }}>
-                  {configured.panels.map((p) => <PanelSummary key={p.panelId} panel={p} />)}
+                  {configured.panels.map((p) => <PanelSummary key={panelKey(p)} panel={p} commentCounts={commentCounts} />)}
                 </Box>
               </Box>
             )}
@@ -162,13 +171,16 @@ export default function SplunkCard({ testRun, expanded, onExpand }: SplunkCardPr
   );
 }
 
-function PanelSummary({ panel }: { panel: SplunkRunPanel }) {
+function PanelSummary({ panel, commentCounts }: { panel: SplunkRunPanel; commentCounts: CommentItemCounts }) {
   const isCount = panel.aggregation === 'count';
   const rows = panel.series.slice(0, MAX_ROWS);
   const top = Math.max(1, ...rows.map((s) => (isCount ? s.total : s.mean) ?? 0));
 
   return (
-    <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 2 }}>
+    <Box
+      data-comment-item={panelKey(panel)}
+      sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 2, '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 } }}
+    >
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
         <Box>
           <Typography variant="subtitle2" fontWeight={600}>{panel.title}</Typography>
@@ -176,6 +188,8 @@ function PanelSummary({ panel }: { panel: SplunkRunPanel }) {
             {panel.aggregation}{panel.splitBy ? ` by ${panel.splitBy}` : ''}
           </Typography>
         </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <RowCommentButton card="splunk" itemKey={panelKey(panel)} itemLabel={panel.title} counts={commentCounts} />
         {panel.link && (
           <Tooltip title="Open this search in Splunk for the run window">
             <IconButton size="small" component={Link} href={panel.link} target="_blank" rel="noopener noreferrer" aria-label={`Open ${panel.title} in Splunk`}>
@@ -183,6 +197,7 @@ function PanelSummary({ panel }: { panel: SplunkRunPanel }) {
             </IconButton>
           </Tooltip>
         )}
+        </Box>
       </Box>
       {rows.length === 0 ? (
         <Typography variant="body2" color="text.secondary">No data for this run.</Typography>
