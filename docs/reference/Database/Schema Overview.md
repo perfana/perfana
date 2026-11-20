@@ -79,6 +79,8 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 | `ProfileGrafanaDashboard` | Dashboard linked to profile |
 | `ProfileBenchmark` | Benchmark linked to profile |
 | `ProfileSeriesGroupingRule` | Series grouping rule on a profile dashboard (`profile_series_grouping_rules`, migration 1826); grafana-sync provisions it into `series_grouping_rules` |
+| `TestRunComment` | Comment or reply on a test-run card, optionally anchored to one row or section of it (`test_run_comments`, migration 1827); cascades with the run |
+| `TestRunCommentRead` | Per-user, per-card "last seen" mark behind the unread badges (`test_run_comment_reads`, migration 1827); a missing row means unread |
 
 ### Data Science
 

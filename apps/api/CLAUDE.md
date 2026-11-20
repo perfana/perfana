@@ -2034,9 +2034,13 @@ no membership row. A claim outside that set is logged at WARN and dropped; a
 `team_id` is honoured only when `teams.organization_id` is in the set. Do not
 "optimise" this back into a union to save the `teams` lookup.
 
-**5. `subscribe:test-run` fails closed on every uncertainty.** Unknown run, run
-with a NULL `organization_id`, caller with no memberships, either lookup
-throwing — all deny. The run lookup branches on whether the id is a uuid rather
+**5. `subscribe:test-run` fails closed on every uncertainty.** Unknown run, a run
+whose system has a NULL `organization_id`, caller with no memberships, either
+lookup throwing — all deny. Since v0.2.97.87 the room carries comment text
+(`comment:created` / `updated` / `deleted`), so the check reads the **system's**
+`organization_id` and `team_id` (inner join), never the run's own column, and a
+team-owned system also needs `canViewTeamResources`: the same rule as
+`TestRunsCrudQueryService.denialReason` and `CommentsService.resolveRun`. The run lookup branches on whether the id is a uuid rather
 than using `WHERE id::text = $1 OR test_run_id = $1`: that cast makes the PK arm
 non-indexable and sends the OR to a sequential scan with a per-row cast, on a
 path that now decides access and must not be the thing that times out.
@@ -2070,9 +2074,10 @@ parts differ.
   so a non-uuid would make the query throw rather than return no rows, and
   `systems_under_test` has no non-uuid key a caller could legitimately be using
   here (the web client sends `test_runs.system_under_test_id`).
-- **These rooms carry live traffic**, unlike the test-run room rule 5 is about:
-  `job:progress`, `job:completed`, `job:failed`, `job:stuck` and `job:blocked`
-  are all emitted to them. Joining one IS the read.
+- **These rooms carry live traffic**, as the per-run test-run room of rule 5 now
+  does too (comment text, since v0.2.97.87): `job:progress`, `job:completed`,
+  `job:failed`, `job:stuck` and `job:blocked` are all emitted to them. Joining
+  one IS the read.
 - **The connect acknowledgment's job list was dropped, not scoped.** It carried
   `getAllActiveJobs()` — every tenant's — for every authenticated socket, and
   `JobProgress` names the test run, system, environment and workload, so that
