@@ -1,4 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { withRequestQuery } from '../../common/db/request-em';
+import { commentCountsByRun } from '../comments/comment-unread.sql';
 import { TestRunsQueryService } from './services/test-runs-query.service';
 import { RollupPendingResult } from './services/test-runs-performance-query.types';
 import { SummaryTimeseriesResponse } from './services/test-runs-performance-query.service';
@@ -77,6 +81,10 @@ export interface TestRun {
   };
   is_changepoint?: boolean;
   is_control_group?: boolean;
+  /** Comments on the run that are not deleted, summed over cards (test-run list only). */
+  comment_count?: number;
+  /** Of those, by others and not yet seen by the caller (test-run list only). */
+  unread_comments?: number;
   system_name?: string;
   /**
    * Ownership, carried on the payload so the realtime gateway can target the
@@ -118,7 +126,11 @@ export class TestRunsService {
     private metricsService: TestRunsMetricsService,
     private apdexService: TestRunsApdexService,
     private authzService: AuthorizationService,
+    @InjectDataSource() private dataSource: DataSource,
   ) {}
+
+  /** Set once `test_run_comments` is seen to exist; only a positive probe is cached. */
+  private commentTablesPresent = false;
 
   // ========== Authorization ==========
 
@@ -133,7 +145,24 @@ export class TestRunsService {
   // ========== Query Methods (delegated to QueryService) ==========
 
   async findAllPaginated(userId: string, roles: string[], paginationDto?: PaginationQueryDto, organizationId?: string): Promise<PaginatedResponseDto<TestRun>> {
-    return this.queryService.findAllPaginated(userId, roles, paginationDto, organizationId);
+    const page = await this.queryService.findAllPaginated(userId, roles, paginationDto, organizationId);
+    const db = withRequestQuery(this.dataSource);
+    // An API that starts before migration 1827 would otherwise turn the whole list into a 500, and
+    // abort the request's RLS transaction. to_regclass cannot fail, so the probe is safe to run there.
+    if (!this.commentTablesPresent) {
+      const [probe] = (await db.query(`SELECT to_regclass('public.test_run_comments') IS NOT NULL AS present`)) as { present: boolean }[];
+      this.commentTablesPresent = Boolean(probe?.present);
+    }
+    // One grouped query over this page's runs; the rows were already org-filtered above.
+    const counts = this.commentTablesPresent
+      ? await commentCountsByRun(db, page.data.map((r) => r.id), userId)
+      : new Map<string, { total: number; unread: number }>();
+    for (const run of page.data) {
+      const c = counts.get(run.id);
+      run.comment_count = c?.total ?? 0;
+      run.unread_comments = c?.unread ?? 0;
+    }
+    return page;
   }
 
   async getFilterOptions(userId: string, roles: string[], organizationId?: string, selected?: { system?: string; environment?: string; workload?: string }): Promise<{ systems: string[]; environments: string[]; workloads: string[] }> {

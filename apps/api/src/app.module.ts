@@ -23,6 +23,7 @@ import { DeepLinksModule } from './modules/deep-links/deep-links.module';
 import { ComparePresetsModule } from './modules/compare-presets/compare-presets.module';
 import { TrendsPresetsModule } from './modules/trends-presets/trends-presets.module';
 import { GraphPresetsModule } from './modules/graph-presets/graph-presets.module';
+import { CommentsModule } from './modules/comments/comments.module';
 import { SeriesGroupingModule } from './modules/series-grouping/series-grouping.module';
 import { TracingServicesModule } from './modules/tracing-services/tracing-services.module';
 import { TracingInstancesModule } from './modules/tracing-instances/tracing-instances.module';
@@ -111,6 +112,7 @@ import IORedis from 'ioredis';
     ComparePresetsModule,
     TrendsPresetsModule,
     GraphPresetsModule,
+    CommentsModule,
     SeriesGroupingModule,
     TracingServicesModule,
     TracingInstancesModule,

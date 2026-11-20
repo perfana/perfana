@@ -417,6 +417,33 @@ export class TestRunsGateway
   }
 
   /**
+   * Emit a test-run comment event (design: docs/designs/test-run-comments.md, R12).
+   *
+   * The full payload, comment text included, goes ONLY to the per-run room, which a socket
+   * joins through the access-checked `subscribe:test-run` (keyed by the run's uuid). The
+   * organization and team rooms get a body-free `comment:badge` so list and card badges can
+   * refresh without putting comment text in the browser of every connected org member.
+   *
+   * Rooms come from the comment row's own organization and team, copied from the run at create,
+   * never from the caller's UserCtx: `UserCtx.organizationId` is undefined for ordinary
+   * Keycloak logins (root CLAUDE.md #58). A comment without an organization is not emitted.
+   */
+  emitCommentEvent(
+    eventType: 'comment:created' | 'comment:updated' | 'comment:deleted',
+    owner: { testRunId: string; cardKey: string; organizationId?: string | null; teamId?: string | null },
+    payload: object,
+  ): void {
+    if (!owner.organizationId) {
+      this.logger.warn(`Comment event ${eventType} on run ${owner.testRunId} has no organization; not emitted`);
+      return;
+    }
+    this.server.to(TestRunRooms.testRun(owner.testRunId)).emit(eventType, JSON.parse(JSON.stringify(payload)));
+    const badgeRooms = [TestRunRooms.organization(owner.organizationId)];
+    if (owner.teamId) badgeRooms.push(TestRunRooms.team(owner.teamId));
+    this.server.to(badgeRooms).emit('comment:badge', { testRunId: owner.testRunId, cardKey: owner.cardKey });
+  }
+
+  /**
    * Organization ids this socket's identity is actually a member of.
    *
    * Delegates to AuthorizationService rather than querying
@@ -479,6 +506,7 @@ export class TestRunsGateway
     }
 
     let organizationId: string | null | undefined;
+    let teamId: string | null | undefined;
     try {
       // Branch on the shape rather than `WHERE id::text = $1 OR test_run_id = $1`:
       // casting the uuid primary key makes that arm non-indexable, so one arm of
@@ -487,13 +515,16 @@ export class TestRunsGateway
       // access, so a statement timeout here has to deny rather than degrade.
       const isUuid =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(testRunId);
-      const rows = await this.dataSource.query<{ organization_id: string | null }[]>(
+      // The system's team rides along: this room carries user-written comment text, so it takes
+      // the same team rule as a test-run read (TestRunsCrudQueryService.denialReason).
+      const rows = await this.dataSource.query<{ organization_id: string | null; team_id?: string | null }[]>(
         isUuid
-          ? `SELECT organization_id FROM test_runs WHERE id = $1::uuid LIMIT 1`
-          : `SELECT organization_id FROM test_runs WHERE test_run_id = $1 LIMIT 1`,
+          ? `SELECT tr.organization_id, sut.team_id FROM test_runs tr LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id WHERE tr.id = $1::uuid LIMIT 1`
+          : `SELECT tr.organization_id, sut.team_id FROM test_runs tr LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id WHERE tr.test_run_id = $1 LIMIT 1`,
         [testRunId],
       );
       organizationId = rows[0]?.organization_id;
+      teamId = rows[0]?.team_id;
     } catch (error) {
       this.logger.error(
         `Failed to verify test run access: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
@@ -506,7 +537,13 @@ export class TestRunsGateway
     }
 
     const accessibleOrgIds = await this.resolveAccessibleOrganizationIds(client.userId);
-    return accessibleOrgIds.includes(organizationId);
+    if (!accessibleOrgIds.includes(organizationId)) return false;
+    if (!teamId) return true;
+    try {
+      return (await this.authzService.canViewTeamResources(client.userId, teamId)).allowed;
+    } catch {
+      return false; // deny on error, like the lookup above
+    }
   }
 
   /**

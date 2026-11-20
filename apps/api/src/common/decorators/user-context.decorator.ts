@@ -23,6 +23,12 @@ export interface UserContext {
   teamId?: string;
   /** The user's email (only available for Keycloak JWT auth) */
   email?: string;
+  /**
+   * A name to show for the user: JWT `name`, then `given_name family_name`, then
+   * `preferred_username`, then email.
+   * Undefined for API-key callers, which have no person behind them.
+   */
+  displayName?: string;
 }
 
 /**
@@ -46,6 +52,14 @@ export interface UserContext {
  * }
  * ```
  */
+export function resolveDisplayName(request: AuthenticatedRequest): string | undefined {
+  if (request.authType !== 'keycloak-jwt' || !request.user) return undefined;
+  const { name, given_name, family_name, preferred_username, email } = request.user;
+  // Some realms send given_name/family_name without the combined `name` claim.
+  const parts = [given_name, family_name].filter((v) => typeof v === 'string' && v.trim() !== '').join(' ');
+  return [name, parts, preferred_username, email].find((v) => typeof v === 'string' && v.trim() !== '')?.trim();
+}
+
 export const UserCtx = createParamDecorator(
   async (_data: unknown, ctx: ExecutionContext): Promise<UserContext> => {
     const request = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -81,6 +95,7 @@ export const UserCtx = createParamDecorator(
       organizationId,
       teamId: teams.length > 0 ? teams[0] : undefined,
       email: KeycloakEnhancedAuthGuard.getUserEmail(request) || undefined,
+      displayName: resolveDisplayName(request),
     };
 
     return result;

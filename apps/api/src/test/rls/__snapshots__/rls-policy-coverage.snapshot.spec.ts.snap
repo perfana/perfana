@@ -442,6 +442,23 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     "policies": [],
     "rls": false,
   },
+  "test_run_comment_reads": {
+    "force": true,
+    "policies": [
+      "ALL:rls_test_run_comment_reads_own",
+    ],
+    "rls": true,
+  },
+  "test_run_comments": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_test_run_comments_delete",
+      "INSERT:rls_test_run_comments_insert",
+      "SELECT:rls_test_run_comments_select",
+      "UPDATE:rls_test_run_comments_update",
+    ],
+    "rls": true,
+  },
   "test_run_events": {
     "force": false,
     "policies": [],

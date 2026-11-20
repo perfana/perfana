@@ -82,6 +82,10 @@ export interface TestRun {
   };
   is_changepoint?: boolean;
   is_control_group?: boolean;
+  /** Comments on the run that are not deleted, summed over cards (test-run list only). */
+  comment_count?: number;
+  /** Of those, by others and not yet seen by the caller (test-run list only). */
+  unread_comments?: number;
   system_name?: string;
 }
 

@@ -26,6 +26,7 @@ describe('TestRunsGateway tenant isolation', () => {
   let gateway: TestRunsGateway;
   let query: jest.Mock;
   let getAccessibleOrganizations: jest.Mock;
+  let canViewTeamResources: jest.Mock;
   let emit: jest.Mock;
   let serverEmit: jest.Mock;
   let to: jest.Mock;
@@ -54,6 +55,7 @@ describe('TestRunsGateway tenant isolation', () => {
   beforeEach(() => {
     query = jest.fn();
     getAccessibleOrganizations = jest.fn().mockResolvedValue([]);
+    canViewTeamResources = jest.fn().mockResolvedValue({ allowed: true });
     emit = jest.fn();
     serverEmit = jest.fn();
     // A loud default: every fan-out assertion below counts `to` calls, and a
@@ -64,7 +66,7 @@ describe('TestRunsGateway tenant isolation', () => {
     gateway = new TestRunsGateway(
       { get: jest.fn() } as unknown as ConfigService,
       {} as ApiKeysService,
-      { getAccessibleOrganizations } as unknown as AuthorizationService,
+      { getAccessibleOrganizations, canViewTeamResources } as unknown as AuthorizationService,
       { query } as unknown as DataSource,
     );
     gateway.server = { emit: serverEmit, to } as never;
@@ -120,6 +122,25 @@ describe('TestRunsGateway tenant isolation', () => {
       expect(getAccessibleOrganizations).not.toHaveBeenCalled();
     });
 
+    /*
+     * Value: protects=the per-run room, which carries comment text, refusing an org member who
+     * may not see the run's team (restrict_to_team_members), like a test-run read does;
+     * fails_when=the team check is dropped from mayReadTestRun; why_new=every subscribe case
+     * had no team; seam=none; no_claim=canViewTeamResources' own rules (mocked)
+     */
+    it('denies an org member the team of the run\'s system does not admit', async () => {
+      query.mockResolvedValueOnce([{ organization_id: 'org-1', team_id: 'team-r' }]);
+      getAccessibleOrganizations.mockResolvedValue(['org-1']);
+      canViewTeamResources.mockResolvedValueOnce({ allowed: false, reason: 'restricted' });
+      const client = socket();
+
+      const result = await gateway.handleSubscribeToTestRun(client, { testRunId: 'run-1' });
+
+      expect(result).toEqual({ success: false, error: 'Access denied to this test run' });
+      expect(canViewTeamResources).toHaveBeenCalledWith('user-a', 'team-r');
+      expect(client.join).not.toHaveBeenCalled();
+    });
+
     it('denies when the run does not exist', async () => {
       query.mockResolvedValueOnce([]);
 
@@ -164,12 +185,12 @@ describe('TestRunsGateway tenant isolation', () => {
       await gateway.handleSubscribeToTestRun(socket(), {
         testRunId: '00000000-0000-4000-8000-000000000000',
       });
-      expect(query.mock.calls[0]![0]).toContain('WHERE id = $1::uuid');
+      expect(query.mock.calls[0]![0]).toContain('WHERE tr.id = $1::uuid');
       expect(query.mock.calls[0]![0]).not.toContain('::text');
 
       query.mockClear();
       await gateway.handleSubscribeToTestRun(socket(), { testRunId: 'MyRun-2026-01' });
-      expect(query.mock.calls[0]![0]).toContain('WHERE test_run_id = $1');
+      expect(query.mock.calls[0]![0]).toContain('WHERE tr.test_run_id = $1');
       expect(query.mock.calls[0]![0]).not.toContain('id = $1::uuid');
     });
 
@@ -220,6 +241,28 @@ describe('TestRunsGateway tenant isolation', () => {
       expect(result).toEqual({ success: true, room: 'test-run:run-1', testRunId: 'run-1' });
       expect(query).not.toHaveBeenCalled();
       expect(getAccessibleOrganizations).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('comment events', () => {
+    const owner = { testRunId: 'run-uuid', cardKey: 'graphs', organizationId: 'org-a', teamId: 'team-a' };
+
+    it('sends the comment text only to the per-run room, and a body-free badge to org and team', () => {
+      gateway.emitCommentEvent('comment:created', owner, { id: 'c1', body: 'secret text' });
+
+      expect(serverEmit).not.toHaveBeenCalled();
+      expect(to).toHaveBeenNthCalledWith(1, `test-run:run-uuid`);
+      expect(emit).toHaveBeenNthCalledWith(1, 'comment:created', { id: 'c1', body: 'secret text' });
+      expect(to).toHaveBeenNthCalledWith(2, ['org:org-a', 'team:team-a']);
+      expect(emit).toHaveBeenNthCalledWith(2, 'comment:badge', { testRunId: 'run-uuid', cardKey: 'graphs' });
+      expect(JSON.stringify(emit.mock.calls[1])).not.toContain('secret');
+    });
+
+    it('emits nothing at all for a comment without an organization', () => {
+      gateway.emitCommentEvent('comment:created', { ...owner, organizationId: null }, { body: 'x' });
+
+      expect(to).not.toHaveBeenCalled();
+      expect(serverEmit).not.toHaveBeenCalled();
     });
   });
 

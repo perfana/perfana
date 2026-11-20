@@ -11,6 +11,9 @@ import { UpdateRunningTestDto } from './dto/update-running-test.dto';
 import { PaginatedResponseDto } from '../../common/dto';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
+import { getDataSourceToken } from '@nestjs/typeorm';
+
+const mockDataSourceQuery = jest.fn().mockResolvedValue([]);
 
 // Test user context
 const testUserId = 'test-user-id';
@@ -187,6 +190,10 @@ describe('TestRunsService', () => {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
+        {
+          provide: getDataSourceToken(),
+          useValue: { manager: { query: mockDataSourceQuery } },
+        },
       ],
     }).compile();
 
@@ -220,6 +227,41 @@ describe('TestRunsService', () => {
 
         expect(mockQueryService.findAllPaginated).toHaveBeenCalledWith(testUserId, testRoles, { page: 1, limit: 10 }, undefined);
         expect(result).toEqual(paginatedResult);
+      });
+
+      // Regression contract (design R10): the list keeps its shape; only comment_count and unread_comments are added,
+      // from ONE grouped query over the page's run ids.
+      it('adds comment_count and unread_comments per run from one grouped query and changes nothing else', async () => {
+        const run = createMockTestRun();
+        const before = { ...run };
+        mockQueryService.findAllPaginated!.mockResolvedValue({ data: [run], total: 1, page: 1, limit: 10, totalPages: 1 });
+        mockDataSourceQuery
+          .mockResolvedValueOnce([{ present: true }]) // table probe
+          .mockResolvedValueOnce([
+            { test_run_id: run.id, card_key: 'graphs', total: 4, unread: 2 },
+            { test_run_id: run.id, card_key: 'slo', total: 1, unread: 1 },
+          ]);
+
+        const result = await service.findAllPaginated(testUserId, testRoles, { page: 1, limit: 10 });
+
+        expect(mockDataSourceQuery).toHaveBeenCalledTimes(2);
+        expect(mockDataSourceQuery.mock.calls[1][1]).toEqual([[run.id], testUserId]);
+        expect(result.data[0]).toEqual({ ...before, comment_count: 5, unread_comments: 3 });
+      });
+
+      // Value: protects=the test-run list still loads when the API runs before migration 1827;
+      // fails_when=the to_regclass probe is removed and the count query hits a missing table;
+      // why_new=the shape test above always has the table; seam=none; no_claim=real Postgres error codes (mocked query)
+      it('returns zero counts and skips the count query while test_run_comments does not exist yet', async () => {
+        const run = createMockTestRun();
+        mockQueryService.findAllPaginated!.mockResolvedValue({ data: [run], total: 1, page: 1, limit: 10, totalPages: 1 });
+        mockDataSourceQuery.mockResolvedValueOnce([{ present: false }]);
+
+        const result = await service.findAllPaginated(testUserId, testRoles, { page: 1, limit: 10 });
+
+        expect(mockDataSourceQuery).toHaveBeenCalledTimes(1);
+        expect(mockDataSourceQuery.mock.calls[0][0]).toContain('to_regclass');
+        expect(result.data[0]).toMatchObject({ comment_count: 0, unread_comments: 0 });
       });
     });
 

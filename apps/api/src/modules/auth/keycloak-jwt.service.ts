@@ -5,6 +5,8 @@ import { createRemoteJWKSet, jwtVerify, JWTPayload, JWTVerifyGetKey } from 'jose
 export interface KeycloakUser {
   sub: string;
   email?: string;
+  /** Full name claim, the first choice for a display name (UserContext.displayName). */
+  name?: string;
   preferred_username?: string;
   given_name?: string;
   family_name?: string;
@@ -146,6 +148,7 @@ export class KeycloakJwtService {
     return {
       sub: payload.sub!,
       email: payload.email as string,
+      name: payload.name as string | undefined,
       preferred_username: payload.preferred_username as string,
       given_name: payload.given_name as string,
       family_name: payload.family_name as string,
