@@ -358,8 +358,10 @@ per-scenario SLO was clicked in by hand (22 on WERKNL). A profile benchmark with
 `source = 'performance-metrics'` (`PERF_TEST_PROFILE_SOURCE`, `packages/shared/src/constants/perf-test-profile.ts`)
 has `profile_dashboard_id` NULL (migration 1810 dropped the NOT NULL) and its `dashboard_uid` is a
 **regex** over the app-dashboard uid; `BenchmarkProcessorService` fans it out over every matching
-scenario dashboard of the SUT/env/org through `findApplicationDashboardsByUidPattern`. Six things hold
-it together:
+scenario dashboard of the SUT/env/org through `findApplicationDashboardsByUidPattern`, **limited to the
+dashboards the run has `ds_metrics` for**. Scenario dashboards are never removed, so without that
+`EXISTS` a run was given SLOs for every scenario any earlier run of the SUT had. A scenario with no
+rows yet is picked up by a later 2-minute pass. Six things hold it together:
 
 1. **The regex is validated twice and pinned once.** `ProfilesService.resolveDashboardColumns` and
    `ProvisioningService` reject it with `validateRegexPattern` on write; the processor re-checks it

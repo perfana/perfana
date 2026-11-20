@@ -53,6 +53,7 @@ it('fans a perf-test profile benchmark out over every uid-matching scenario dash
     'WERKNL',
     'acceptatie',
     'org-1',
+    testRun,
   );
   expect(finder.findApplicationDashboardsByTemplateDashboardUid).not.toHaveBeenCalled();
   expect(updates.insertBenchmarkBasedOnProfileBenchmark).toHaveBeenCalledTimes(2);
