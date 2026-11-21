@@ -58,6 +58,27 @@ export const COMMENT_CARD_LABELS: Readonly<Record<CommentCardKey, string>> = Obj
   graphs: 'Graphs',
 });
 
+/**
+ * Who wrote a comment (migration 1831): a person, or an AI agent through an API key carrying
+ * `API_KEY_COMMENTS_WRITE_ROLE`. Stored in `test_run_comments.author_kind` and mirrored by its
+ * CHECK, so a stored value must never change.
+ */
+export const COMMENT_AUTHOR_KINDS = Object.freeze(['user', 'agent'] as const);
+export type CommentAuthorKind = (typeof COMMENT_AUTHOR_KINDS)[number];
+
+/**
+ * The opt-in API-key role that lets a key write comments (design: test-run-analysis-stories.md,
+ * "Reversing v1 R3"). Carried in `api_keys.roles`; it maps to no capability and grants nothing
+ * outside the comments routes, which check for it by name.
+ */
+export const API_KEY_COMMENTS_WRITE_ROLE = 'comments:write';
+
+/** Per API key per run: most root comments and replies an agent may write (design limits). */
+export const AGENT_COMMENT_LIMITS = Object.freeze({ roots: 100, replies: 200 });
+
+/** Width of `test_run_comments.client_ref`. */
+export const COMMENT_CLIENT_REF_MAX_LENGTH = 64;
+
 /** Comments older than this never count as unread (design R7). */
 export const COMMENT_UNREAD_WINDOW_DAYS = 30;
 
@@ -87,6 +108,110 @@ export function configCommentItemKey(configKey: string): string {
  */
 export function dashboardCommentItemKey(applicationDashboardId: string): string {
   return `dashboard:${applicationDashboardId}`;
+}
+
+/** Code points, so a key or label is never cut through a surrogate pair. */
+const codePoints = (s: string): string[] => Array.from(s);
+
+/** `s` cut to `max` code points. */
+export function clipCommentText(s: string, max: number): string {
+  const c = codePoints(s);
+  return c.length > max ? c.slice(0, max).join('') : s;
+}
+
+/**
+ * A Configuration row's comment anchor, or null when its item key would not fit `item_key`
+ * (the API would refuse it). Keys that long are not expected; the guard only avoids a 400.
+ * Shared by the web row and the API's agent anchor resolver, so both build the same key.
+ */
+export function configCommentAnchor(configKey: string): { itemKey: string; itemLabel: string } | null {
+  const itemKey = configCommentItemKey(configKey);
+  if (codePoints(itemKey).length > COMMENT_ITEM_KEY_MAX_LENGTH) return null;
+  return { itemKey, itemLabel: clipCommentText(configKey, COMMENT_ITEM_LABEL_MAX_LENGTH) };
+}
+
+/** What a Dashboards tile comment is anchored to and called. */
+export function dashboardCommentAnchor(dashboard: {
+  id: string;
+  dashboard_label?: string | null;
+  dashboard_name?: string | null;
+}): { itemKey: string; itemLabel: string } {
+  const label = dashboard.dashboard_label || dashboard.dashboard_name || dashboard.id;
+  return { itemKey: dashboardCommentItemKey(dashboard.id), itemLabel: clipCommentText(label, COMMENT_ITEM_LABEL_MAX_LENGTH) };
+}
+
+/** The scenario group Performance analysis lists a transaction without a scenario under. */
+export const TRANSACTION_NO_SCENARIO_GROUP = 'No Scenario';
+
+/** The Performance analysis group a transaction's `scenario_name` lands in. */
+export function transactionScenarioGroup(scenarioName: string | null | undefined): string {
+  return scenarioName || TRANSACTION_NO_SCENARIO_GROUP;
+}
+
+/**
+ * Item key of a Performance analysis transaction row: the scenario group it is listed under
+ * plus its name (two scenarios can share a transaction name). JSON so either part may contain
+ * any text. Stored, so the format must never change.
+ */
+export function transactionCommentItemKey(scenarioGroup: string, transactionName: string): string {
+  return JSON.stringify([scenarioGroup, transactionName]);
+}
+
+/** What a transaction row's comment is called. */
+export function transactionCommentItemLabel(scenarioGroup: string, transactionName: string): string {
+  return `${scenarioGroup} · ${transactionName}`.slice(0, COMMENT_ITEM_LABEL_MAX_LENGTH);
+}
+
+export function parseTransactionCommentItemKey(key: string): { scenario: string; transaction: string } | null {
+  try {
+    const v: unknown = JSON.parse(key);
+    return Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === 'string')
+      ? { scenario: v[0] as string, transaction: v[1] as string }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The check-result fields an SLO row's key and label are built from (snake_case, as the API returns them). */
+export interface SloCommentResultFields {
+  panel_type?: string | null;
+  evaluate_type?: string | null;
+  benchmark_id?: string | null;
+  panel_title?: string | null;
+  application_dashboard_id?: string | null;
+  panel_id?: number | null;
+  metric_name?: string | null;
+  dashboard_label?: string | null;
+}
+
+export function isApdexCheckResult(result: Pick<SloCommentResultFields, 'panel_type' | 'evaluate_type'>): boolean {
+  return result.panel_type === 'apdex' || result.evaluate_type === 'apdex';
+}
+
+/**
+ * Identity of one SLO row: its React key, its expansion entry and its comment item key.
+ * Carries `benchmark_id` because two SLOs can share a dashboard, panel and metric name; is NOT
+ * `check_results.id`, because a re-evaluate rewrites results with fresh uuids. Stored as a
+ * comment's item key, so the format must never change.
+ */
+export function sloCommentItemKey(result: SloCommentResultFields): string {
+  const benchmarkId = result.benchmark_id || 'unknown';
+  if (isApdexCheckResult(result)) {
+    return `apdex_${benchmarkId}_${result.panel_title || 'unknown'}`;
+  }
+  const dashboardId = result.application_dashboard_id || benchmarkId;
+  const panelId = result.panel_id ?? 'unknown';
+  const metricName = result.metric_name || 'unknown';
+  return `${dashboardId}_${panelId}_${metricName}_${benchmarkId}`;
+}
+
+/** What an SLO row's comment is called. */
+export function sloCommentItemLabel(result: SloCommentResultFields): string {
+  if (isApdexCheckResult(result)) {
+    return result.panel_title && result.panel_title !== 'Workload Apdex' ? `Apdex SLO · ${result.panel_title}` : 'Apdex SLO';
+  }
+  return [result.dashboard_label, result.panel_title, result.metric_name].filter(Boolean).join(' · ').slice(0, COMMENT_ITEM_LABEL_MAX_LENGTH) || 'SLO';
 }
 
 /** Longest config value a Configuration comment's view keeps; mirrored by the API DTO. */
