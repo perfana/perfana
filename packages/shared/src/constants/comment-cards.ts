@@ -160,6 +160,19 @@ export const STORY_STEP_NOTE_MAX_LENGTH = 2_000;
 /** Most steps one story may hold. */
 export const STORY_MAX_STEPS = 50;
 
+/**
+ * The report Comments section's `config.layout` (analysis stories, PR5): `by-card` lists every
+ * thread grouped by card, `stories` walks the run's published stories. Absent means `by-card`, so
+ * every template stored before the option existed renders as it did.
+ */
+export const COMMENTS_SECTION_LAYOUTS = Object.freeze(['by-card', 'stories'] as const);
+export type CommentsSectionLayout = (typeof COMMENTS_SECTION_LAYOUTS)[number];
+
+/** A section config's layout; anything absent or unknown reads as `by-card`. */
+export function commentsSectionLayout(config: Record<string, unknown> | undefined): CommentsSectionLayout {
+  return config?.layout === 'stories' ? 'stories' : 'by-card';
+}
+
 /** Stored in `test_run_stories.status` and mirrored by its CHECK. */
 export const STORY_STATUSES = Object.freeze(['draft', 'published'] as const);
 export type StoryStatus = (typeof STORY_STATUSES)[number];
