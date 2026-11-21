@@ -342,7 +342,12 @@ export class CommentsRenderer {
 
   private renderStory(story: ReportStory, steps: string[]): string {
     const n = story.steps.length;
-    const meta = [`by <strong style="color:${REPORT_COLORS.ink};">${escapeHtml(story.authorName || 'Unknown')}</strong>`];
+    const strong = (name: string | null) => `<strong style="color:${REPORT_COLORS.ink};">${escapeHtml(name || 'Unknown')}</strong>`;
+    // An agent's investigation names the person who published it and marks the agent, as the
+    // channel post does: a reader must never take an agent's claim for a colleague's.
+    const meta = story.authorKind === 'agent'
+      ? [`${story.publishedByName ? `${strong(story.publishedByName)} published · ` : ''}proposed by ${strong(story.authorName)} ${chip('AI', 'info')}`]
+      : [`by ${strong(story.authorName)}`];
     if (story.publishedAt) meta.push(`published ${escapeHtml(formatTimestamp(story.publishedAt))}`);
     const summary = story.summary && story.summary.trim()
       ? `<div class="story-summary" style="white-space:pre-wrap; overflow-wrap:anywhere; color:${REPORT_COLORS.ink}; margin:0 0 14px; padding:10px 14px; border-left:3px solid ${REPORT_COLORS.cardBorder};">${escapeHtml(story.summary)}</div>`
@@ -380,7 +385,9 @@ export class CommentsRenderer {
       // The step keeps its place (and its tag and note); a deleted root's body is never printed.
       body = `<div style="font-style:italic; color:${REPORT_COLORS.mutedInk};">${c ? 'Comment deleted' : 'Comment not available'}</div>`;
     } else {
-      const meta = [`<strong style="color:${REPORT_COLORS.ink};">${escapeHtml(c.authorName || 'Unknown')}</strong>`, `<span>${escapeHtml(formatTimestamp(c.createdAt))}</span>`];
+      const meta = [`<strong style="color:${REPORT_COLORS.ink};">${escapeHtml(c.authorName || 'Unknown')}</strong>`];
+      if (c.authorKind === 'agent') meta.push(chip('AI', 'info'));
+      meta.push(`<span>${escapeHtml(formatTimestamp(c.createdAt))}</span>`);
       if (c.editedAt) meta.push('<span>(edited)</span>');
       const chart = this.isGraphsMarker(c)
         ? await this.renderMarkerChart(c, testRun, STORY_CHART_INDEX_OFFSET + chartIdx, userId, roles)

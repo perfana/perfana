@@ -632,6 +632,10 @@ export interface ReportStory {
   title: string;
   summary: string | null;
   authorName: string;
+  /** `agent` for an AI agent's investigation (migration 1833); printed as "proposed by <agent> [AI]". */
+  authorKind: 'user' | 'agent';
+  /** Who published it; for an agent's investigation, the person who reviewed it. */
+  publishedByName: string | null;
   publishedAt: Date | null;
   steps: ReportStoryStep[];
 }

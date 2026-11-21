@@ -235,6 +235,8 @@ describe('CommentsRenderer stories layout', () => {
     title: 'Checkout latency after deploy',
     summary: 'The heap was halved.',
     authorName: 'Daniel',
+    authorKind: 'user',
+    publishedByName: 'Daniel',
     publishedAt: new Date('2026-11-20T12:00:00Z'),
     steps: [],
     ...over,
@@ -279,6 +281,37 @@ describe('CommentsRenderer stories layout', () => {
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
     expect(html).toContain('1 step<');
+  });
+
+  // Value: protects=an AI agent's published investigation never reads as a person's work in a
+  // stored report: it names the publisher, marks the agent with an AI chip, and chips agent-written
+  // steps; fails_when=the fetcher stops selecting author_kind / published_by_name or the renderer
+  // prints "by <agent>" bare; why_new=only the by-card layout's AI chip was covered; seam=none;
+  // no_claim=the fetcher's SQL (mocked here).
+  it('marks an agent investigation and its agent-written steps as AI, and names who published it', async () => {
+    const { renderer } = setup([], [], [
+      story({
+        id: 'ag', title: 'Agent analysis', authorName: 'Analysis agent', authorKind: 'agent', publishedByName: 'Ada',
+        steps: [
+          { position: 1, note: null, comment: row({ id: 'c1', authorName: 'Analysis agent', authorKind: 'agent', body: 'agent step' }) },
+          { position: 2, note: null, comment: row({ id: 'c2', authorName: 'Bob', authorKind: 'user', body: 'person step' }) },
+        ],
+      }),
+      story({ id: 'pp', title: 'Person analysis', authorName: 'Carol', steps: [] }),
+    ]);
+    const html = await renderer.renderCommentsSection(section({ layout: 'stories' }), testRun);
+    const agentStory = html.slice(html.indexOf('Agent analysis'), html.indexOf('agent step'));
+    expect(agentStory).toContain('>Ada</strong> published · proposed by <strong');
+    expect(agentStory).toContain('>Analysis agent</strong>');
+    expect(agentStory).toMatch(/>AI</);
+    expect(agentStory).not.toMatch(/10px;">by </);
+    const agentStep = html.slice(html.indexOf('Step 1'), html.indexOf('agent step'));
+    const personStep = html.slice(html.indexOf('Step 2'), html.indexOf('person step'));
+    expect(agentStep).toMatch(/>AI</);
+    expect(personStep).not.toMatch(/>AI</);
+    const personStory = html.slice(html.indexOf('Person analysis'));
+    expect(personStory).toMatch(/10px;">by <strong/);
+    expect(personStory).not.toMatch(/>AI</);
   });
 
   it('escapes every story and step field', async () => {

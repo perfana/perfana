@@ -3655,16 +3655,19 @@ export class ReportDataFetcherService {
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
     const rows: Array<{
       story_id: string; story_title: string; story_summary: string | null; story_author: string;
+      story_author_kind: string | null; story_published_by: string | null;
       published_at: Date | null; position: number | null; note: string | null;
       id: string | null; card_key: string; parent_id: string | null; body: string; author_name: string;
       item_label: string | null; marker_seq: number | null; marker_time: Date | null;
       chart_context: Record<string, unknown> | null; created_at: Date; edited_at: Date | null;
-      deleted_at: Date | null; tag: string | null;
+      deleted_at: Date | null; tag: string | null; author_kind: string | null;
     }> = await withRequestEm(this.testRunRepo).query(
       `SELECT s.id AS story_id, s.title AS story_title, s.summary AS story_summary,
-              s.author_name AS story_author, s.published_at, st.position, st.note,
+              s.author_name AS story_author, s.author_kind AS story_author_kind,
+              s.published_by_name AS story_published_by, s.published_at, st.position, st.note,
               c.id, c.card_key, c.parent_id, c.body, c.author_name, c.item_label,
-              c.marker_seq, c.marker_time, c.chart_context, c.created_at, c.edited_at, c.deleted_at, c.tag
+              c.marker_seq, c.marker_time, c.chart_context, c.created_at, c.edited_at, c.deleted_at, c.tag,
+              c.author_kind
          FROM test_run_stories s
          JOIN test_runs tr ON tr.id = s.test_run_id
          JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
@@ -3690,6 +3693,8 @@ export class ReportDataFetcherService {
           title: r.story_title,
           summary: r.story_summary,
           authorName: r.story_author,
+          authorKind: r.story_author_kind === 'agent' ? 'agent' : 'user',
+          publishedByName: r.story_published_by,
           publishedAt: r.published_at ? new Date(r.published_at) : null,
           steps: [],
         };
@@ -3706,6 +3711,7 @@ export class ReportDataFetcherService {
           parentId: r.parent_id,
           body: r.body,
           authorName: r.author_name,
+          authorKind: r.author_kind === 'agent' ? 'agent' : 'user',
           itemLabel: r.item_label,
           markerSeq: r.marker_seq,
           markerTime: r.marker_time ? new Date(r.marker_time) : null,
