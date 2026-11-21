@@ -5,7 +5,7 @@ Comments let your team discuss a test run where the evidence is: on a card of th
 **Before you start**
 
 - Open a test run at `/test-runs/[id]`.
-- You need a Perfana login. Comments are always written by a person: an API key can read comments but cannot write, edit or delete them.
+- You need a Perfana login. An API key can read comments but cannot write, edit or delete them, unless it was created with **Allow writing comments**: then it writes as an AI agent, marked as such (see [Comments from AI agents](#comments-from-ai-agents)), and still cannot delete anything.
 
 ## Start a thread on a card
 

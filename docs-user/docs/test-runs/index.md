@@ -40,7 +40,7 @@
 
     ---
 
-    Threads on cards and rows, graph markers, unread badges.
+    Threads on cards and rows, tags, graph markers, unread badges, investigations and AI-agent comments.
 
     [:octicons-arrow-right-24: Comment](comments.md)
 
