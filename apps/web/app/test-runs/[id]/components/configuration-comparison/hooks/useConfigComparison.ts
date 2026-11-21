@@ -37,6 +37,14 @@ export function useConfigComparison({
   const [selectedRelatedTestRun, setSelectedRelatedTestRun] = useState<string>('');
   const [selectedTestRunConfigs, setSelectedTestRunConfigs] = useState<ConfigItem[]>([]);
   const [selectedConfigLoading, setSelectedConfigLoading] = useState(false);
+  // State, not just the ref below: a comment deep link waits on it to pick the recorded run.
+  const [relatedTestRunsLoaded, setRelatedTestRunsLoaded] = useState(false);
+  // Each run's configs once fetched, so switching back to a run shows ITS configs. The attempt
+  // guard below used to skip the fetch on a second visit and leave the last run's configs on screen.
+  const selectedConfigsCache = useRef<Record<string, ConfigItem[]>>({});
+  // The run the picker shows; a slower answer for a run picked earlier must not overwrite it.
+  const selectedRunRef = useRef('');
+  const selectedConfigsInFlight = useRef(new Set<string>());
 
   // Status filters and expected changes state
   const [statusFilters, setStatusFilters] = useState<string[]>(['changed', 'new']);
@@ -114,6 +122,7 @@ export function useConfigComparison({
           console.warn('Related test runs not found');
           setRelatedTestRuns([]);
           relatedTestRunsAttempted.current = true;
+          setRelatedTestRunsLoaded(true);
           return;
         }
         throw new Error('Failed to fetch related test runs');
@@ -122,6 +131,7 @@ export function useConfigComparison({
       const relatedRuns = await response.json();
       setRelatedTestRuns(relatedRuns);
       relatedTestRunsAttempted.current = true;
+      setRelatedTestRunsLoaded(true);
 
       // Automatically select the previous test run
       if (relatedRuns.length > 0 && !selectedRelatedTestRun) {
@@ -131,6 +141,7 @@ export function useConfigComparison({
         );
 
         if (previousTestRun) {
+          selectedRunRef.current = previousTestRun.test_run_id;
           setSelectedRelatedTestRun(previousTestRun.test_run_id);
           loadSelectedTestRunConfigs(previousTestRun.test_run_id);
         }
@@ -139,32 +150,45 @@ export function useConfigComparison({
       console.error('Failed to load related test runs:', err);
       setRelatedTestRuns([]);
       relatedTestRunsAttempted.current = true;
+      setRelatedTestRunsLoaded(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildUrlWithParams, testRun, selectedRelatedTestRun]);
 
   // Load selected test run configurations
   const loadSelectedTestRunConfigs = useCallback(async (selectedTestRunId: string) => {
-    // Skip if already attempted for this test run (prevents infinite retry loop)
-    if (selectedTestRunConfigsAttempted.current[selectedTestRunId]) {
+    const cached = selectedConfigsCache.current[selectedTestRunId];
+    if (cached) {
+      setSelectedTestRunConfigs(cached);
+      setSelectedConfigLoading(false);
       return;
     }
+    // Skip if already attempted for this test run (prevents infinite retry loop). Still in flight
+    // or failed: show nothing rather than the previous run's configs under this run's name.
+    if (selectedTestRunConfigsAttempted.current[selectedTestRunId]) {
+      setSelectedTestRunConfigs([]);
+      setSelectedConfigLoading(selectedConfigsInFlight.current.has(selectedTestRunId));
+      return;
+    }
+    const current = () => selectedRunRef.current === selectedTestRunId;
 
     try {
       setSelectedConfigLoading(true);
       selectedTestRunConfigsAttempted.current[selectedTestRunId] = true;
+      selectedConfigsInFlight.current.add(selectedTestRunId);
       const url = buildUrlWithParams(`/test-runs/${selectedTestRunId}/configs`);
 
       const response = await authenticatedFetch(url);
       if (!response.ok) {
         if (response.status === 404) {
           console.warn('Selected test run configs not found');
-          setSelectedTestRunConfigs([]);
+          selectedConfigsCache.current[selectedTestRunId] = [];
+          if (current()) setSelectedTestRunConfigs([]);
           return;
         }
         if (response.status === 429) {
           console.warn('Rate limit exceeded, please try again later');
-          setSelectedTestRunConfigs([]);
+          if (current()) setSelectedTestRunConfigs([]);
           return;
         }
         throw new Error('Failed to fetch selected test run configs');
@@ -172,7 +196,8 @@ export function useConfigComparison({
 
       const configs = await response.json();
       const normalizedConfigs = normalizeConfigs(configs);
-      setSelectedTestRunConfigs(normalizedConfigs);
+      selectedConfigsCache.current[selectedTestRunId] = normalizedConfigs;
+      if (current()) setSelectedTestRunConfigs(normalizedConfigs);
 
       // Update allTags to include tags from the selected test run
       setAllTags(prevTags => {
@@ -182,9 +207,11 @@ export function useConfigComparison({
       });
     } catch (err) {
       console.error('Failed to load selected test run configs:', err);
-      setSelectedTestRunConfigs([]);
+      if (current()) setSelectedTestRunConfigs([]);
     } finally {
-      setSelectedConfigLoading(false);
+      selectedConfigsInFlight.current.delete(selectedTestRunId);
+      // An answer for a run no longer shown leaves the loading flag to that run's own request.
+      if (current()) setSelectedConfigLoading(false);
     }
   }, [buildUrlWithParams]);
 
@@ -319,10 +346,12 @@ export function useConfigComparison({
 
   // Handle related test run selection change
   const handleRelatedTestRunChange = useCallback((selectedTestRunId: string) => {
+    selectedRunRef.current = selectedTestRunId;
     setSelectedRelatedTestRun(selectedTestRunId);
     if (selectedTestRunId) {
       loadSelectedTestRunConfigs(selectedTestRunId);
     } else {
+      setSelectedConfigLoading(false);
       setSelectedTestRunConfigs([]);
     }
   }, [loadSelectedTestRunConfigs]);
@@ -332,6 +361,9 @@ export function useConfigComparison({
     relatedTestRunsAttempted.current = false;
     testRunConfigsAttempted.current = false;
     selectedTestRunConfigsAttempted.current = {};
+    selectedConfigsCache.current = {};
+    selectedRunRef.current = '';
+    setRelatedTestRunsLoaded(false);
     setRelatedTestRuns([]);
     setTestRunConfigs([]);
     setSelectedTestRunConfigs([]);
@@ -378,6 +410,12 @@ export function useConfigComparison({
     return createConfigComparisons(testRunConfigs, selectedTestRunConfigs, expectedConfigChanges);
   })();
 
+  // The comparison is final: this run's configs answered, the related runs answered, and the
+  // picked run's configs (if any) answered. Until then an item can be missing only because it
+  // has not loaded, so a comment's "not in this comparison" must wait for it.
+  const comparisonReady =
+    testRunConfigsAttempted.current && relatedTestRunsLoaded && !configLoading && !selectedConfigLoading;
+
   // Apply filters
   const filteredComparisons = filterComparisons(
     configComparisons,
@@ -404,6 +442,7 @@ export function useConfigComparison({
     selectedRelatedTestRun,
     selectedTestRunConfigs,
     selectedConfigLoading,
+    relatedTestRunsLoaded,
     handleRelatedTestRunChange,
 
     // Status filters and expected changes
@@ -416,6 +455,7 @@ export function useConfigComparison({
     // Computed values
     configComparisons,
     filteredComparisons,
+    comparisonReady,
     accentColor,
 
     // Loading functions

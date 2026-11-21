@@ -1,4 +1,6 @@
 import { TestRun } from '@/types/test-runs';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import type { ToastAction } from '../../../types';
 
 /**
  * Props for the ConfigurationComparisonSection component
@@ -8,7 +10,7 @@ export interface ConfigurationComparisonSectionProps {
   testRunId: string;
   configExpanded: boolean;
   onConfigExpand: () => void;
-  showToast: (message: string) => void;
+  showToast: (message: string, action?: ToastAction) => void;
 }
 
 /**
@@ -81,6 +83,8 @@ export interface ConfigDiffTableProps {
   testRunConfigs: ConfigItem[];
   expectedChangesLoading: boolean;
   onToggleExpectedChange: (configKey: string, isExpected: boolean) => void;
+  /** Per config item thread counts; absent outside the run page's comments provider. */
+  commentCounts?: CommentItemCounts;
 }
 
 /**

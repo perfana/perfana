@@ -805,3 +805,78 @@ describe('comment views on Graphs, Trends and Compare', () => {
     expect(await screen.findByText('1 series · Last week · p95')).toBeInTheDocument();
   });
 });
+
+// Value: protects=a root comment anchored to a Configuration item records the view for THAT item
+// (the drawer hands the anchor to the card's capture), and the drawer prints the recorded
+// comparison under the comment with a Restore view that replays it on the Configuration card;
+// fails_when=captureView stops receiving the anchor, the snapshot moves above the body or
+// disappears, or describeView mislabels a config view; why_new=PR1 of
+// test-run-analysis-stories.md; seam=none; no_claim=the card's own capture and replay
+// (useConfigComments test) and the API's validation (comments specs).
+describe('comment views on Configuration items', () => {
+  const view: api.ConfigView = { kind: 'config', comparedToTestRunId: 'App-00006', status: 'changed', previousValue: '2g', currentValue: '512m' };
+
+  it('describes a config view', () => {
+    expect(describeView(view, false)).toBe('Compared with run App-00006: 2g → 512m (changed)');
+    expect(describeView({ ...view, status: 'same', previousValue: '512m' }, false)).toBe('Compared with run App-00006: 512m (same)');
+    expect(describeView({ kind: 'config', status: 'new', currentValue: '1', previousValue: null }, false)).toBe('Not compared with another run: 1 (new)');
+  });
+
+  it("posts an item comment with that item's view", async () => {
+    const capture = jest.fn((itemKey?: string | null) => (itemKey === 'config:heap.max' ? view : null));
+    function Card() {
+      const ctx = useComments();
+      const register = ctx?.registerViewCapture;
+      React.useEffect(() => register?.('config', capture), [register]);
+      return <button onClick={() => ctx?.commentOnItem('config', 'config:heap.max', 'heap.max')}>comment on row</button>;
+    }
+    mocked.fetchCommentCounts.mockResolvedValue({});
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: [], lastSeenAt: null });
+    mocked.postComment.mockResolvedValue(comment({ id: 'n1', cardKey: 'config' }));
+    render(
+      <CommentsProvider runId="run" reveal={jest.fn()}>
+        <Card />
+        <CommentsDrawer />
+      </CommentsProvider>,
+    );
+    fireEvent.click(screen.getByText('comment on row'));
+    fireEvent.change(await screen.findByLabelText('Comment on heap.max…'), { target: { value: 'heap shrank' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Comment' })));
+    expect(capture).toHaveBeenCalledWith('config:heap.max');
+    expect(mocked.postComment).toHaveBeenCalledWith('run', 'config', 'heap shrank', undefined, { itemKey: 'config:heap.max', itemLabel: 'heap.max' }, view);
+  });
+
+  it('shows the comparison under the comment, and Restore view asks the Configuration card to replay it', async () => {
+    const root = comment({ id: 'k1', cardKey: 'config', itemKey: 'config:heap.max', itemLabel: 'heap.max', body: 'heap shrank', chartContext: view });
+    mocked.fetchCommentCounts.mockResolvedValue({ config: { total: 1, unread: 0 } });
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: [{ ...root, replies: [] }], lastSeenAt: '2999-01-01T00:00:00Z' });
+    const reveal = jest.fn();
+    function Viewer() {
+      const ctx = useComments();
+      return (
+        <>
+          <button onClick={() => ctx?.openDrawer('config', 'k1')}>open</button>
+          <span data-testid="req">{ctx?.viewRequest ? `${ctx.viewRequest.card}:${ctx.viewRequest.comment.id}` : 'none'}</span>
+          <span data-testid="focus">{ctx?.itemFocus ? ctx.itemFocus.itemKey : 'none'}</span>
+        </>
+      );
+    }
+    render(
+      <CommentsProvider runId="run" reveal={reveal}>
+        <Viewer />
+        <CommentsDrawer />
+      </CommentsProvider>,
+    );
+    fireEvent.click(screen.getByText('open'));
+    const snapshot = await screen.findByText('Compared with run App-00006: 2g → 512m (changed)');
+    // Opening the thread only focuses the item; it does not replay the comparison.
+    await waitFor(() => expect(screen.getByTestId('focus')).toHaveTextContent('config:heap.max'));
+    expect(screen.getByTestId('req')).toHaveTextContent('none');
+    const bodies = screen.getAllByText('heap shrank');
+    const body = bodies[bodies.length - 1]!;
+    expect(body.compareDocumentPosition(snapshot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore view' }));
+    expect(screen.getByTestId('req')).toHaveTextContent('config:k1');
+    expect(reveal).toHaveBeenCalledWith('configExpanded');
+  });
+});
