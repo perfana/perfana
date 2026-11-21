@@ -38,6 +38,8 @@ import { CARD_LABELS, useComments, type MarkerDraft } from './CommentsContext';
 import { CommentTagChip } from './CommentTagChip';
 import { CommentTagPicker } from './CommentTagPicker';
 import { AddToStoryMenu } from '../stories/AddToStoryMenu';
+import { useOpenStory } from '../stories/StoriesPanel';
+import { StoryChips } from './run-comments/CommentRow';
 import CommentAuthor from './CommentAuthor';
 
 /** Cards whose single thread opens (and focuses its item) as soon as the comments open. */
@@ -323,6 +325,7 @@ const visuallyHidden = {
  */
 export default function CommentsDrawer() {
   const ctx = useComments();
+  const openStory = useOpenStory();
   const { user } = useAuth();
   const me = user?.id ?? '';
   const card = ctx?.openCard ?? null;
@@ -405,6 +408,25 @@ export default function CommentsDrawer() {
     load();
     setTimeout(() => titleRef.current?.focus(), 50);
   }, [card, load]);
+
+  // An investigation was created, edited or deleted (here, in the Comments dialog, or by someone
+  // else): refresh which investigations each thread is in, quietly, without reloading the list,
+  // collapsing the open thread or marking anything seen.
+  const storySeq = ctx?.storyEvent?.seq;
+  useEffect(() => {
+    if (!card || storySeq === undefined) return;
+    let cancelled = false;
+    fetchCommentThreads(runId, card)
+      .then((res) => {
+        if (cancelled) return;
+        const byId = new Map(res.threads.map((t) => [t.id, t.stories]));
+        setThreads((prev) => prev?.map((t) => (byId.has(t.id) ? { ...t, stories: byId.get(t.id) } : t)) ?? prev);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [card, runId, storySeq]);
 
   // Apply live events for this card.
   const lastEvent = ctx?.lastEvent;
@@ -646,6 +668,12 @@ export default function CommentsDrawer() {
                   )}
                 </Box>
               </ButtonBase>
+              {/* Outside the row's button: a chip is a button of its own. It opens the investigation. */}
+              {t.stories && t.stories.length > 0 && (
+                <Box data-testid="drawer-thread-stories" sx={{ px: 1, pb: 0.75, pl: 4.5 }}>
+                  <StoryChips stories={t.stories} onRead={openStory} />
+                </Box>
+              )}
               {open && (
                 <Box sx={{ px: 1, pb: 1.5 }}>
                   {/* A chart view heads its comment; a Configuration comparison is a fact about

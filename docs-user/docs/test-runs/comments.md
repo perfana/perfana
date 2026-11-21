@@ -47,6 +47,8 @@ A tag says what a thread is in an analysis, so a reader can tell the symptom fro
 
 The tag is shown above the thread's text in the panel, and before the comment in the report's Comments section. A deleted comment keeps its tag.
 
+A thread whose first comment is a step of an investigation you can see shows a chip per investigation under it in the panel, such as **In: Checkout latency after deploy**, the same as in the Comments dialog. Click one to open that investigation in the reader.
+
 ## Reply, edit and delete
 
 - **Reply**: click a thread to expand it, then type in **Reply…** and click **Reply**. Threads are one level deep: every reply belongs to the thread's first comment.

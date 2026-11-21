@@ -142,6 +142,31 @@ it('marks an agent author with an AI chip in the drawer, and a person without on
   expect(within(humanRow as HTMLElement).queryByTestId('comment-author-ai')).toBeNull();
 });
 
+it('shows the investigations a thread is in, and a chip opens that investigation in the reader', async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 2, unread: 0 } });
+  mocked.fetchCommentThreads.mockResolvedValue({
+    lastSeenAt: '2999-01-01T00:00:00Z',
+    threads: [
+      { ...comment({ id: 'in', body: 'p95 jumps' }), stories: [{ id: 'st1', title: 'Checkout latency after deploy', position: 1 }], replies: [] },
+      { ...comment({ id: 'out', body: 'not in one' }), stories: [], replies: [] },
+    ],
+  });
+  const router = (jest.requireMock('next/navigation') as { useRouter: () => { push: jest.Mock } }).useRouter();
+  router.push.mockClear();
+  renderPage();
+  fireEvent.click(await screen.findByTestId('card-comments-graphs'));
+  const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
+  await within(drawer).findAllByText('p95 jumps');
+  const chips = within(drawer).getAllByTestId('drawer-thread-stories');
+  expect(chips).toHaveLength(1);
+  const chip = within(chips[0]!).getByRole('button', { name: /Read the investigation Checkout latency after deploy/ });
+  expect(chip).toHaveTextContent('In: Checkout latency after deploy');
+  // Outside the thread's own row button: a button inside a button is invalid and swallows clicks.
+  expect(chip.closest('button[aria-expanded]')).toBeNull();
+  fireEvent.click(chip);
+  expect(router.push).toHaveBeenCalledWith(expect.stringContaining('story=st1'), { scroll: false });
+});
+
 it('lists unread threads first, expands the oldest unread one, and marks seen only after loading', async () => {
   mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 1, unread: 1 } });
   mocked.fetchCommentThreads.mockResolvedValue({
