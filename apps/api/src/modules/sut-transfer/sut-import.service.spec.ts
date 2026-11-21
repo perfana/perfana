@@ -574,6 +574,36 @@ describe('SutImportService (integration)', () => {
       expect(replay.skippedCounts['test_run_story_steps']).toBe(3);
     });
 
+    it('stamps every imported story announced, so the target never posts an old analysis', async () => {
+      await seedSutAndRun(srcOrg);
+      await insertComment(c.root, { body: 'root cause', createdAt: '2026-11-01T10:10:00Z' });
+      // Published but not yet announced in the source: notified_at NULL in the bundle.
+      await insertStory(story.pub, 'published', [[c.root, 1, null]]);
+      await insertStory(story.draft, 'draft', [[c.root, 1, null]]);
+      const raw = gunzipSync(await exportBundle()).toString('utf8').split('\n');
+      // And a bundle from before migration 1832 carries no notified_at at all.
+      const legacy = raw.map((line) => {
+        if (!line.includes(story.pub) || !line.includes('"title"')) return line;
+        const row = JSON.parse(line);
+        expect(row.notified_at).toBeNull();
+        delete row.notified_at;
+        return JSON.stringify(row);
+      });
+      await cleanup();
+
+      const before = new Date();
+      await importService.import(gzipSync(Buffer.from(legacy.join('\n'))), targetOrg);
+      const rows: Array<{ id: string; notified_at: Date | null }> = await dataSource.query(
+        `SELECT id, notified_at FROM test_run_stories WHERE test_run_id = $1`,
+        [c.run],
+      );
+      expect(rows).toHaveLength(2);
+      for (const r of rows) {
+        expect(r.notified_at).not.toBeNull();
+        expect(new Date(r.notified_at!).getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
+      }
+    });
+
     it('drops a step whose comment lost its marker number to a comment already here, instead of aborting', async () => {
       await seedSutAndRun(srcOrg);
       await insertComment(c.marker, { markerSeq: 1, body: 'source marker', createdAt: '2026-11-01T10:00:00Z' });
