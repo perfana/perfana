@@ -1,7 +1,7 @@
-// Value: protects=the story reader walks steps by URL and by keys, reveals/focuses/replays without
-// ever opening the drawer, replays silently and puts every touched card back on exit, and degrades
+// Value: protects=the story reader walks steps by URL and by keys, reveals/focuses/replays and opens
+// the step's thread in the card's drawer (without a second, toasting replay), replays silently and puts every touched card back on exit, and degrades
 // on deleted or missing cards; the editor's Suggest order, reorder buttons and atomic save; Add to
-// story's "New story…"; fails_when=a step opens the drawer, a replay is not silent, Exit restores
+// story's "New story…"; fails_when=a step leaves the drawer closed or replays through it, a replay is not silent, Exit restores
 // nothing, keyboard nav fires inside a text field, a deleted step navigates, or Save splits the
 // step list; why_new=new components; seam=the comments context and next/navigation are mocked at
 // their modules; no_claim=the cards' own replay (their hook tests), the API (live-DB spec).
@@ -86,6 +86,7 @@ beforeEach(() => {
     focusItem: jest.fn(),
     restoreView: jest.fn(),
     openDrawer: jest.fn(),
+    closeDrawer: jest.fn(),
     applyView: jest.fn(),
     setActiveThreadId: jest.fn(),
     noteStoryRead: jest.fn(),
@@ -122,7 +123,7 @@ describe('StoryReader', () => {
     expect(ctx.reveal).not.toHaveBeenCalled();
   });
 
-  it('a chart step snapshots the card, then replays silently, and never opens the drawer', async () => {
+  it('a chart step snapshots the card, replays silently, and opens its thread in the drawer without a second replay', async () => {
     setUrl('story=s1&step=1');
     render(<StoryReader />);
     await screen.findByTestId('story-bar');
@@ -132,19 +133,21 @@ describe('StoryReader', () => {
     expect(ctx.restoreView).toHaveBeenCalledWith(expect.objectContaining({ id: 'm1' }), { silent: true });
     expect((ctx.captureView as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan((ctx.restoreView as jest.Mock).mock.invocationCallOrder[0]!);
     expect(ctx.setActiveThreadId).toHaveBeenCalledWith('m1');
-    expect(ctx.openDrawer).not.toHaveBeenCalled();
+    expect(ctx.openDrawer).toHaveBeenCalledWith('graphs', 'm1'); // no third argument: no replay through the drawer
+    expect((ctx.restoreView as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan((ctx.openDrawer as jest.Mock).mock.invocationCallOrder[0]!);
   });
 
-  it('an item step focuses the item, shows the step note, and Open thread opens that thread', async () => {
+  it('an item step focuses the item, opens its thread, and Open thread reopens it after the drawer was closed', async () => {
     setUrl('story=s1&step=2');
     render(<StoryReader />);
     await screen.findByTestId('story-bar');
     expect(ctx.focusItem).toHaveBeenCalledWith('config', 'config:heap.max');
     expect(ctx.restoreView).not.toHaveBeenCalled();
     expect(screen.getByTestId('story-step-note')).toHaveTextContent('then the config');
-    expect(ctx.openDrawer).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Open thread' }));
+    expect(ctx.openDrawer).toHaveBeenCalledTimes(1);
     expect(ctx.openDrawer).toHaveBeenCalledWith('config', 'cfg');
+    fireEvent.click(screen.getByRole('button', { name: 'Open thread' }));
+    expect(ctx.openDrawer).toHaveBeenCalledTimes(2);
   });
 
   it('a deleted step keeps its tag and note and does not navigate', async () => {
@@ -156,6 +159,8 @@ describe('StoryReader', () => {
     expect(within(bar).getByTestId('story-step-note')).toHaveTextContent('ruled out early');
     expect(ctx.reveal).not.toHaveBeenCalled();
     expect(ctx.focusItem).not.toHaveBeenCalled();
+    expect(ctx.openDrawer).not.toHaveBeenCalled();
+    expect(ctx.closeDrawer).toHaveBeenCalled(); // a previous step's drawer does not linger
   });
 
   it('says so when the step\'s card is not on this run', async () => {
@@ -217,6 +222,7 @@ describe('StoryReader', () => {
       expect(ctx.applyView).toHaveBeenCalledTimes(1);
       expect(ctx.applyView).toHaveBeenCalledWith('graphs', { kind: 'graphs', series: [{ dashboardId: 'mine', panelId: 9, metricName: 'before' }] });
       expect(ctx.setActiveThreadId).toHaveBeenLastCalledWith(null);
+      expect(ctx.closeDrawer).toHaveBeenCalled(); // the story's drawer goes with it
       expect(screen.queryByTestId('story-bar')).not.toBeInTheDocument();
     } finally {
       jest.useRealTimers();

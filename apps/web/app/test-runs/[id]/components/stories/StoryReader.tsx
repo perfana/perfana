@@ -140,6 +140,7 @@ export default function StoryReader() {
     return () => {
       const entries = [...saved.entries()];
       saved.clear();
+      ctxRef.current?.closeDrawer(); // the drawer was the story's, opened by its steps
       ctxRef.current?.setActiveThreadId(null);
       entries.forEach(([card, view], i) => setTimeout(() => ctxRef.current?.applyView(card, view), i * 60));
     };
@@ -150,17 +151,24 @@ export default function StoryReader() {
   const stepCommentId = step?.comment.id;
   const stepIndex = screen?.kind === 'step' ? screen.index : -1;
 
-  // What a step does: reveal the card, focus the item, replay the view. Never the drawer. Keyed on
-  // the step's comment, so a refetch of the same story does not navigate again.
+  // What a step does: reveal the card, focus the item, replay the view, and open the card's comment
+  // drawer on the step's thread, so its replies are right there. Keyed on the step's comment, so a
+  // refetch of the same story does not navigate again. The view is replayed here, silently, so the
+  // drawer is opened without its own replay (which would toast an Undo per step). Opening the drawer
+  // marks that card's comments seen, as opening it by hand does.
   useEffect(() => {
     setExpanded(false);
     setUnavailable(false);
     const c = ctxRef.current;
     if (!c || !step) return;
     const comment = step.comment;
-    if (comment.deleted) return; // a deleted step keeps its place in the walk and goes nowhere
+    if (comment.deleted) {
+      c.closeDrawer(); // a deleted step keeps its place in the walk and goes nowhere
+      return;
+    }
     const key = expansionKeyOf(comment.cardKey);
     if (!key) {
+      c.closeDrawer();
       setUnavailable(true);
       return;
     }
@@ -170,6 +178,7 @@ export default function StoryReader() {
     c.reveal(key);
     if (comment.itemKey) c.focusItem(comment.cardKey, comment.itemKey);
     if (comment.chartContext) c.restoreView(comment, { silent: true });
+    c.openDrawer(comment.cardKey, comment.id);
     c.setActiveThreadId(comment.markerSeq != null ? comment.id : null);
     const t = setTimeout(() => {
       if (!document.querySelector(`[data-testid="comment-card-${key}"]`)) setUnavailable(true);

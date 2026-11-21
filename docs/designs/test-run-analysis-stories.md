@@ -257,7 +257,7 @@ Long bodies are clamped with "more", which expands the bar upwards. "Open thread
 - `restoreView(comment)` when it has a `chart_context` (Graphs, Trends, Compare), which also positions marker pins;
 - highlight the marker pin or row for ~2 s.
 
-It does **not** open the drawer. That is what makes the reader different from the run-header button.
+**Revised 2026-11-21 after user testing:** it **also opens the card's drawer on the step's thread**, so the replies are beside the evidence. The view is replayed by the reader itself (silently); the drawer is opened without its own replay, so no Undo toast per step. Opening it marks that card seen, as opening it by hand does. A deleted step or a card missing from the run closes the drawer, and Exit closes it.
 
 **View preservation.** The v1 replay shows a "Previous view replaced · Undo" toast per replay. In story mode those toasts are suppressed: on the first visit to each card the reader snapshots that card's view (the existing `captureView`), and **Exit story** restores every card it touched. One undo for the whole walk.
 
@@ -388,7 +388,7 @@ No delete or publish tools. The MCP README gets a worked example: diagnose a run
 - **RLS:** the new tables in `apps/api/src/test/rls/` alongside `test-run-comments.spec.ts`.
 - **Realtime:** `story:changed` carries no title, summary or steps.
 - **SUT transfer:** round-trip a run with a story; import a bundle exported before PR1.
-- **Web:** reader navigates prev/next and via URL; it never opens the drawer; Exit restores each touched card's view; no per-step Undo toast in story mode; keyboard nav ignores inputs; deleted step does not navigate.
+- **Web:** reader navigates prev/next and via URL; each step opens its thread in the card's drawer without a second replay; Exit restores each touched card's view; no per-step Undo toast in story mode; keyboard nav ignores inputs; deleted step does not navigate.
 - **Browser (Vibium):** a six-step story across Performance analysis, Graphs (marker), Dynatrace and Configuration on a real run, at desktop and 1302 px content width (Common Issue #37), checking the bar never covers the focused row or marker.
 
 ## Open Questions

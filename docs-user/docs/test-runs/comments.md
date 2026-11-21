@@ -122,7 +122,7 @@ Click **Publish** to let everyone who can see the run read the investigation; **
 Click **Read** on an investigation in the **Investigations** tab, or one of the **In: …** chips on a comment in **All comments**. The dialog closes and the investigation opens:
 
 1. **Introduction**: the title, the author and the list of steps. Click **Start**, or a step to begin there.
-2. **Steps**: a bar at the bottom of the screen shows the step number (*Investigation · step 3 of 6*), the tag, the card and row, the comment (click **more** for a long one), its author and the author's note for the step. Behind it, the page opens the card, scrolls to the row and shows the recorded chart view. The comments panel stays closed; click **Open thread** to read the replies.
+2. **Steps**: a bar at the bottom of the screen shows the step number (*Investigation · step 3 of 6*), the tag, the card and row, the comment (click **more** for a long one), its author and the author's note for the step. Behind it, the page opens the card, scrolls to the row, shows the recorded chart view and opens the card's comments panel on that thread, so its replies are right there. Opening the panel marks that card's comments as read, as opening it yourself does. If you close the panel, **Open thread** opens it again.
 3. **Conclusion**: the investigation's conclusion, with links back to any step.
 
 Use **‹ Prev** and **Next ›**, or the left and right arrow keys, to move through the steps. Press <kbd>Esc</kbd> or click the close icon to leave the investigation. Leaving puts every chart card the investigation changed back to the view you had before, so no single step needs an undo. A row filter that a step applied on **Configuration** or **Dashboards** stays until you click **Show all**.
