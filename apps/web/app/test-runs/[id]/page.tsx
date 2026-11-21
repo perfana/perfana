@@ -61,6 +61,7 @@ import { CommentsProvider } from './components/comments/CommentsContext';
 import CardComments from './components/comments/CardComments';
 import RunCommentsButton from './components/comments/RunCommentsButton';
 import CommentDeepLink from './components/comments/CommentDeepLink';
+import CommentsCard from './components/comments-card/CommentsCard';
 import type { ExpansionState, ToastAction } from './types';
 
 const TAB_PANEL_IDS: Record<TabIndex, string> = {
@@ -389,6 +390,8 @@ export default function TestRunDetailsPage() {
                   onRefreshTriggered={refreshTestRun}
                 />
               </CardComments>
+              {/* Run-wide list of every card's comments; not itself commentable, so no CardComments. */}
+              <CommentsCard expanded={expansionState.commentsExpanded} onExpand={() => { const wasCollapsed = !expansionState.commentsExpanded; toggleExpansion('commentsExpanded'); if (wasCollapsed) scrollToCard('comments-card-expanded'); }} />
               <CardComments card="configExpanded" expanded={expansionState.configExpanded}>
                 <ConfigurationComparisonSection testRun={testRun} testRunId={testRunId} configExpanded={expansionState.configExpanded} onConfigExpand={() => { const wasCollapsed = !expansionState.configExpanded; toggleExpansion('configExpanded'); if (wasCollapsed) scrollToCard('config-comparison-expanded'); }} showToast={showToast} />
               </CardComments>
