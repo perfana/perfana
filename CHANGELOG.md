@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.94] - 2026-11-21
+
+### Fixed
+- **No empty slot on the Root Cause Analysis tab for an integration that is not set up.** A run without Dynatrace, Distributed tracing or Splunk left a blank card-sized gap with a comment button where that card would be. The slot is now gone and the remaining cards close up.
+
 ## [0.2.97.93] - 2026-11-21
 
 ### Added
