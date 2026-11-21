@@ -163,4 +163,23 @@ describe('CommentsRenderer', () => {
     expect(dataFetcher.getTestRunComments).not.toHaveBeenCalled();
     expect(html).toContain('No test run data available');
   });
+
+  // Value: protects=a Configuration item comment prints the comparison it was written against,
+  // escaped, under the comment, and only for a live config view; fails_when=renderConfigView is
+  // dropped, stops escaping config values, or prints for a deleted root or another card;
+  // why_new=PR1 of test-run-analysis-stories.md; seam=none; no_claim=the API's DTO checks.
+  it('prints a Configuration comment’s comparison under it, as text', async () => {
+    const view = { kind: 'config', comparedToTestRunId: 'App-00006', status: 'changed', previousValue: '2g', currentValue: '<b>512m</b>' };
+    const { renderer } = setup([
+      row({ cardKey: 'config', itemLabel: 'heap.max', body: 'heap shrank', chartContext: view }),
+      row({ cardKey: 'config', itemLabel: 'gone', body: null, deletedAt: new Date(), chartContext: { ...view, currentValue: 'secret' } }),
+      row({ cardKey: 'performance', chartContext: { ...view, currentValue: 'wrong-card' } }),
+    ]);
+    const html = await renderer.renderCommentsSection(section(), testRun);
+    expect(html).toContain('Compared with run App-00006: 2g → &lt;b&gt;512m&lt;/b&gt; (changed)');
+    expect(html).not.toContain('<b>512m</b>');
+    expect(html.indexOf('heap shrank')).toBeLessThan(html.indexOf('Compared with run'));
+    expect(html).not.toContain('secret');
+    expect(html).not.toContain('wrong-card');
+  });
 });

@@ -89,6 +89,35 @@ export function dashboardCommentItemKey(applicationDashboardId: string): string 
   return `dashboard:${applicationDashboardId}`;
 }
 
+/** Longest config value a Configuration comment's view keeps; mirrored by the API DTO. */
+export const CONFIG_VIEW_VALUE_MAX_LENGTH = 2_000;
+
+/**
+ * What a root comment on a Configuration item records (`chart_context`, `kind: 'config'`): the
+ * run the card compared with and the item's status and values in that comparison. A value is
+ * null when the key is absent from that side.
+ */
+export interface ConfigCommentView {
+  kind?: 'config';
+  comparedToTestRunId?: string;
+  status: 'changed' | 'expected' | 'new' | 'removed' | 'same';
+  currentValue?: string | null;
+  previousValue?: string | null;
+}
+
+/**
+ * One line for a Configuration comment's recorded comparison, shown under the comment in the
+ * drawer and in a report: `Compared with run 1234: 2 GB → 512 MB (changed)`. Plain text; the
+ * caller escapes it for HTML.
+ */
+export function describeConfigCommentView(view: Pick<ConfigCommentView, 'comparedToTestRunId' | 'status' | 'currentValue' | 'previousValue'>): string {
+  const show = (v: string | null | undefined) => (v === null || v === undefined ? '(not present)' : v);
+  const status = view.status === 'expected' ? 'ignored change' : view.status;
+  if (!view.comparedToTestRunId) return `Not compared with another run: ${show(view.currentValue)} (${status})`;
+  const values = view.status === 'same' ? show(view.currentValue) : `${show(view.previousValue)} → ${show(view.currentValue)}`;
+  return `Compared with run ${view.comparedToTestRunId}: ${values} (${status})`;
+}
+
 /**
  * Analysis tags a root comment may carry (design: docs/designs/test-run-analysis-stories.md,
  * "Tags"). Stored in `test_run_comments.tag` and mirrored by that column's CHECK, so a stored

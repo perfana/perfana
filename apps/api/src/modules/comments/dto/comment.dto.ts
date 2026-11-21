@@ -21,6 +21,7 @@ import { CompareSeriesConfig } from '../../compare-presets/dto/create-compare-pr
 import {
   COMMENT_BODY_MAX_LENGTH,
   COMMENT_CARD_KEYS,
+  CONFIG_VIEW_VALUE_MAX_LENGTH,
   type CommentCardKey,
 } from '@perfana/shared/constants/comment-cards';
 
@@ -122,9 +123,6 @@ export class CompareChartContextDto {
   @Length(1, 255)
   baselineTestRunId?: string;
 }
-
-/** Longest config value a Configuration view keeps (design: test-run-analysis-stories.md). */
-export const CONFIG_VIEW_VALUE_MAX_LENGTH = 2_000;
 
 /**
  * What a Configuration item comment was written against: the run the card compared with and
