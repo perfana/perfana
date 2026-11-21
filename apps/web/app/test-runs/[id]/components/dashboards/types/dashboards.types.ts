@@ -54,6 +54,8 @@ export interface DashboardsDataState {
 
   // Loading states
   dashboardsLoading: boolean;
+  /** The list has answered for this run (or failed), so a missing dashboard is really missing. */
+  dashboardsLoaded: boolean;
 
   // Selection state
   selectedDashboardTags: string[];

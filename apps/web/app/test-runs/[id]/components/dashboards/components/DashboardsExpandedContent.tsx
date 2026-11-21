@@ -9,8 +9,10 @@ import {
   IconButton,
 } from '@mui/material';
 import { Close } from '@mui/icons-material';
+import type React from 'react';
 import { Dashboard } from '../types';
 import { DashboardCard } from './DashboardCard';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
 
 interface DashboardsExpandedContentProps {
   dashboards: Dashboard[];
@@ -25,6 +27,12 @@ interface DashboardsExpandedContentProps {
   onTagToggle: (tag: string) => void;
   onViewDashboard: (dashboard: Dashboard) => void;
   onOpenInGrafana: (dashboard: Dashboard) => void;
+  commentCounts?: CommentItemCounts;
+  /**
+   * The comment filter's chip. While it is set `filteredDashboards` holds only the comment's
+   * dashboard, so the counts and empty states written for the user's filters stay out.
+   */
+  commentFilter?: React.ReactNode;
 }
 
 export function DashboardsExpandedContent({
@@ -40,7 +48,10 @@ export function DashboardsExpandedContent({
   onTagToggle,
   onViewDashboard,
   onOpenInGrafana,
+  commentCounts,
+  commentFilter,
 }: DashboardsExpandedContentProps) {
+  const userFiltered = !commentFilter && (selectedDashboardTags.length > 0 || dashboardSearchText.length > 0);
   return (
     <>
       {/* Dashboard Search */}
@@ -137,7 +148,7 @@ export function DashboardsExpandedContent({
               />
             ))}
           </Box>
-          {(selectedDashboardTags.length > 0 || dashboardSearchText.length > 0) && (
+          {userFiltered && (
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
               Showing {filteredDashboards.length} of {dashboards.length} dashboards
               {dashboardSearchText && ` matching "${dashboardSearchText}"`}
@@ -146,6 +157,8 @@ export function DashboardsExpandedContent({
           )}
         </Box>
       )}
+
+      {commentFilter}
 
       {/* Dashboard Grid or Loading/Empty State */}
       {dashboardsLoading ? (
@@ -175,6 +188,7 @@ export function DashboardsExpandedContent({
               dashboard={dashboard}
               onView={onViewDashboard}
               onOpenInGrafana={onOpenInGrafana}
+              commentCounts={commentCounts}
             />
           ))}
         </Box>
@@ -183,7 +197,7 @@ export function DashboardsExpandedContent({
           <Typography variant="body2" color="text.secondary" gutterBottom>
             {dashboards.length === 0
               ? "No dashboards configured for this system and environment."
-              : (selectedDashboardTags.length > 0 || dashboardSearchText.length > 0)
+              : userFiltered
                 ? (() => {
                     const filters = [];
                     if (dashboardSearchText) filters.push(`search "${dashboardSearchText}"`);
@@ -198,7 +212,7 @@ export function DashboardsExpandedContent({
               System: <strong>{systemName}</strong>{' '}
               Environment: <strong>{testEnvironment}</strong>
             </Typography>
-          ) : (selectedDashboardTags.length > 0 || dashboardSearchText.length > 0) ? (
+          ) : userFiltered ? (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Try clearing the search or changing filters to see more results.
             </Typography>
