@@ -150,13 +150,18 @@ export class TestRunsService {
     // An API that starts before migration 1827 would otherwise turn the whole list into a 500, and
     // abort the request's RLS transaction. to_regclass cannot fail, so the probe is safe to run there.
     if (!this.commentTablesPresent) {
-      const [probe] = (await db.query(`SELECT to_regclass('public.test_run_comments') IS NOT NULL AS present`)) as { present: boolean }[];
+      // The count also reads author_kind (migration 1831), so probe the column, not just the table.
+      const [probe] = (await db.query(
+        `SELECT EXISTS (SELECT 1 FROM pg_attribute
+                         WHERE attrelid = to_regclass('public.test_run_comments')
+                           AND attname = 'author_kind' AND NOT attisdropped) AS present`,
+      )) as { present: boolean }[];
       this.commentTablesPresent = Boolean(probe?.present);
     }
     // One grouped query over this page's runs; the rows were already org-filtered above.
     const counts = this.commentTablesPresent
       ? await commentCountsByRun(db, page.data.map((r) => r.id), userId)
-      : new Map<string, { total: number; unread: number }>();
+      : new Map<string, { total: number; unread: number; unreadAgent: number }>();
     for (const run of page.data) {
       const c = counts.get(run.id);
       run.comment_count = c?.total ?? 0;

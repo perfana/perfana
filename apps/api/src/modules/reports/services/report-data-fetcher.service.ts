@@ -3603,10 +3603,11 @@ export class ReportDataFetcherService {
       id: string; card_key: string; parent_id: string | null; body: string; author_name: string;
       item_label: string | null; marker_seq: number | null; marker_time: Date | null;
       chart_context: Record<string, unknown> | null; created_at: Date; edited_at: Date | null;
-      deleted_at: Date | null; tag: string | null;
+      deleted_at: Date | null; tag: string | null; author_kind: string | null;
     }> = await withRequestEm(this.testRunRepo).query(
       `SELECT c.id, c.card_key, c.parent_id, c.body, c.author_name, c.item_label,
-              c.marker_seq, c.marker_time, c.chart_context, c.created_at, c.edited_at, c.deleted_at, c.tag
+              c.marker_seq, c.marker_time, c.chart_context, c.created_at, c.edited_at, c.deleted_at, c.tag,
+              c.author_kind
          FROM test_run_comments c
          JOIN test_runs tr ON tr.id = c.test_run_id
          JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
@@ -3623,6 +3624,7 @@ export class ReportDataFetcherService {
       parentId: r.parent_id,
       body: r.body,
       authorName: r.author_name,
+      authorKind: r.author_kind === 'agent' ? 'agent' : 'user',
       itemLabel: r.item_label,
       markerSeq: r.marker_seq,
       markerTime: r.marker_time ? new Date(r.marker_time) : null,

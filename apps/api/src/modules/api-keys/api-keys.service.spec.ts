@@ -239,6 +239,20 @@ describe('ApiKeysService', () => {
       expect(decoded).toMatch(/^Test Key#[a-f0-9-]{36}$/);
     });
 
+    // The opt-in agent scope: any key creator may add it, unlike a role the creator does not hold.
+    it('lets an org admin who is not a global admin add comments:write, but no role they lack', async () => {
+      const authz = (service as unknown as { authzService: { getCapabilities: jest.Mock } }).authzService;
+      authz.getCapabilities.mockImplementation(async (_u: string, _r: string[], org: string | null) =>
+        org === null ? [] : ['api-key:create'],
+      );
+      repository.create.mockResolvedValue(createMockApiKey({ roles: ['comments:write'] }));
+      const ok = await service.createApiKey({ description: 'Agent', ttl: '30d', roles: ['comments:write'] }, 'sub-1', ['user'], 'org-1');
+      expect(ok.apiKey.roles).toEqual(['comments:write']);
+      await expect(
+        service.createApiKey({ description: 'Admin', ttl: '30d', roles: ['comments:write', 'perfana-admin'] }, 'sub-1', ['user'], 'org-1'),
+      ).rejects.toThrow(/perfana-admin/);
+    });
+
     it('should default to empty roles when not provided', async () => {
       // Arrange
       const createDto = {

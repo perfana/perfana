@@ -600,6 +600,8 @@ export interface ReportCommentRow {
   parentId: string | null;
   body: string;
   authorName: string;
+  /** `agent` when an AI agent wrote it through an API key (migration 1831); printed as an AI chip. */
+  authorKind?: 'user' | 'agent';
   itemLabel: string | null;
   markerSeq: number | null;
   markerTime: Date | null;

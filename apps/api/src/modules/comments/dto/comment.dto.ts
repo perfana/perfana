@@ -24,6 +24,8 @@ import {
   COMMENT_CARD_KEYS,
   CONFIG_VIEW_VALUE_MAX_LENGTH,
   COMMENT_TAGS,
+  COMMENT_CLIENT_REF_MAX_LENGTH,
+  type CommentAuthorKind,
   type CommentCardKey,
   type CommentTag,
 } from '@perfana/shared/constants/comment-cards';
@@ -169,7 +171,9 @@ export const CHART_CONTEXT_DTO_BY_CARD = {
 } as const;
 
 export class CreateCommentDto {
-  @ApiProperty({ enum: COMMENT_CARD_KEYS, description: 'The card the comment belongs to' })
+  @ApiPropertyOptional({ enum: COMMENT_CARD_KEYS, description: 'The card the comment belongs to. Required unless `anchor` names it.' })
+  // Optional only with an anchor, which implies its card; the service checks the two agree.
+  @ValidateIf((o: CreateCommentDto) => o.anchor === undefined || o.card !== undefined)
   @IsIn(COMMENT_CARD_KEYS as string[])
   card!: CommentCardKey;
 
@@ -217,6 +221,30 @@ export class CreateCommentDto {
   @IsOptional()
   @IsIn(COMMENT_TAGS as readonly string[] as string[])
   tag?: CommentTag | null;
+
+  @ApiPropertyOptional({
+    description:
+      'What a root comment is about, named rather than keyed: the API resolves it into the card, item key, label and ' +
+      'recorded view, and answers 400 naming anything not found in the run. One of ' +
+      "`{type:'card',card}`, `{type:'transaction',name,scenario?}`, `{type:'config',key,comparedToTestRunId?}`, " +
+      "`{type:'dashboard',applicationDashboardId}`, `{type:'slo',checkResultId}`, " +
+      "`{type:'marker',time,series:[{dashboardLabel,panelId,metricName,applicationDashboardId?}],range?}`. " +
+      'Not allowed with itemKey, itemLabel, markerTime, chartContext or parentId.',
+  })
+  @IsOptional()
+  @IsObject()
+  anchor?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description:
+      'Idempotency key, for API keys with the comments:write role: a repeat with the same value on the same run ' +
+      'returns the first comment (200) instead of a second one. Ignored for signed-in users.',
+    maxLength: COMMENT_CLIENT_REF_MAX_LENGTH,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, COMMENT_CLIENT_REF_MAX_LENGTH)
+  clientRef?: string;
 }
 
 /**
@@ -261,6 +289,8 @@ export interface CommentResponse {
   deleted: boolean;
   authorId: string;
   authorName: string;
+  /** `agent` when an API key with the comments:write role wrote it; the UI shows an AI chip. */
+  authorKind: CommentAuthorKind;
   markerSeq: number | null;
   markerTime: string | null;
   chartContext: Record<string, unknown> | null;

@@ -492,6 +492,27 @@ describe('getAvailableDashboards with a series group', () => {
     expect(await service.getAvailableDashboards(RUN, 'user-1', ['user'])).toEqual([ROW]);
     expect(metricsRepo.manager.query).toHaveBeenCalledTimes(2); // presence probe + lookup
   });
+
+  // For MCP agents: the id an agent anchors a dashboard comment or a marker series with.
+  it('adds the application dashboard id behind each label, and lists both when two share it', async () => {
+    const { service, metricsRepo } = build({ lookup: [] });
+    const ADMIN = { dashboard_label: 'Admin', panel_title: 'x', panel_id: 1, unit: '', metric_count: '1', metric_names: ['a'] };
+    metricsRepo.query.mockImplementation(async (sql: string) =>
+      sql.includes('FROM application_dashboards')
+        ? [
+            { id: 'ad-1', dashboard_label: 'Perf' },
+            { id: 'ad-2', dashboard_label: 'Admin' },
+            { id: 'ad-3', dashboard_label: 'Admin' },
+          ]
+        : [OTHER, ADMIN, { ...OTHER, dashboard_label: 'Gone' }],
+    );
+
+    const rows = await service.getAvailableDashboards(RUN, 'user-1', ['user']);
+
+    expect(rows[0]).toEqual({ ...OTHER, application_dashboard_id: 'ad-1', application_dashboard_ids: ['ad-1'] });
+    expect(rows[1]).toEqual({ ...ADMIN, application_dashboard_id: null, application_dashboard_ids: ['ad-2', 'ad-3'] });
+    expect(rows[2]).toEqual({ ...OTHER, dashboard_label: 'Gone' });
+  });
 });
 
 describe('getMetricTimeSeries with a series group', () => {

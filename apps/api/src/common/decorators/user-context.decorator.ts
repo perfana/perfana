@@ -29,6 +29,11 @@ export interface UserContext {
    * Undefined for API-key callers, which have no person behind them.
    */
   displayName?: string;
+  /**
+   * The API key's description, for an API-key caller only. What an agent's comments are signed
+   * with (design: test-run-analysis-stories.md, "Marking agent content").
+   */
+  apiKeyDescription?: string;
 }
 
 /**
@@ -96,6 +101,7 @@ export const UserCtx = createParamDecorator(
       teamId: teams.length > 0 ? teams[0] : undefined,
       email: KeycloakEnhancedAuthGuard.getUserEmail(request) || undefined,
       displayName: resolveDisplayName(request),
+      ...(request.authType === 'api-key' && request.apiKey ? { apiKeyDescription: request.apiKey.description } : {}),
     };
 
     return result;

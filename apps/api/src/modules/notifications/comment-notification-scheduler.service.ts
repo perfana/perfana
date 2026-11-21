@@ -55,6 +55,7 @@ export class CommentNotificationScheduler {
         `SELECT test_run_id
            FROM test_run_comments
           WHERE notified_at IS NULL AND deleted_at IS NULL
+            AND author_kind = 'user'
             AND (notify_after IS NULL OR notify_after <= now())
           GROUP BY test_run_id
          HAVING MIN(created_at) <= now() - make_interval(secs => $1)
@@ -172,6 +173,9 @@ export class CommentNotificationScheduler {
         `SELECT id, author_name, card_key, created_at
            FROM test_run_comments
           WHERE test_run_id = $1 AND notified_at IS NULL AND deleted_at IS NULL
+            -- Agent comments are stamped notified_at on insert (design: "No per-comment channel
+            -- posts for agents"); this keeps the sweep from claiming one whose stamp was lost.
+            AND author_kind = 'user'
             AND (notify_after IS NULL OR notify_after <= now())
           ORDER BY created_at, id
             FOR UPDATE SKIP LOCKED`,
