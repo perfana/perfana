@@ -37,6 +37,7 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
   const ctx = useComments();
   const runId = ctx?.runId;
   const storyEvent = ctx?.storyEvent?.seq ?? 0;
+  const storyRead = ctx?.storyReadSeq ?? 0;
   const [stories, setStories] = useState<RunStorySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
     return () => {
       live = false;
     };
-  }, [runId, storyEvent, editing]);
+  }, [runId, storyEvent, storyRead, editing]);
 
   if (editing) return <StoryEditor storyId={editing} onClose={() => setEditing(null)} onRead={openStory} />;
 
@@ -91,11 +92,21 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
               component="li"
               key={s.id}
               data-testid="story-row"
+              data-unread={s.unread ? 'true' : undefined}
               sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, py: 1.25, borderTop: 1, borderColor: 'divider' }}
             >
               <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{s.title}</Typography>
+                  {s.unread && (
+                    <Box
+                      component="span"
+                      role="img"
+                      aria-label="Unread"
+                      data-testid="story-unread-dot"
+                      sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'error.main', flexShrink: 0 }}
+                    />
+                  )}
+                  <Typography variant="body2" sx={{ fontWeight: s.unread ? 700 : 600, overflowWrap: 'anywhere' }}>{s.title}</Typography>
                   <Chip
                     size="small"
                     variant="outlined"

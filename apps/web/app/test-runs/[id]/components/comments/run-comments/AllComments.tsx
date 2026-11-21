@@ -10,26 +10,37 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { COMMENT_TAGS, type CommentCardKey, type CommentTag } from '@perfana/shared/constants/comment-cards';
-import { fetchCommentThreads, type RunCommentThread } from '@/lib/test-run-comments';
+import { fetchCommentThreads, isUnreadThread, type RunCommentThread } from '@/lib/test-run-comments';
+import { useAuth } from '@/contexts/auth-context';
 import { CARD_LABELS, PAGE_ORDER, useComments } from '../CommentsContext';
 import { CommentTagChip } from '../CommentTagChip';
 import { CommentRow, tagOf } from './CommentRow';
 
 const newestFirst = (a: RunCommentThread, b: RunCommentThread) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
 
+type LastSeenByCard = Partial<Record<CommentCardKey, string | null>>;
+
 /**
  * Every root on the run, fetched while `enabled` (the dialog is open) and kept current from the
- * page's comment events, with the drawer's semantics but across every card.
+ * page's comment events, with the drawer's semantics but across every card. Refetched quietly on
+ * every story change, so each root's investigations stay current. `lastSeenByCard` is the caller's
+ * last look at each card, read with the threads; the dialog never moves it.
  */
 function useRunThreads(enabled: boolean) {
   const ctx = useComments();
   const runId = ctx?.runId;
   const [threads, setThreads] = useState<RunCommentThread[] | null>(null);
+  const [lastSeenByCard, setLastSeenByCard] = useState<LastSeenByCard | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   // Events up to the fetch are already in its answer; only later ones are applied.
   const seqAtFetch = useRef(0);
   const lastEventRef = useRef(ctx?.lastEvent);
   lastEventRef.current = ctx?.lastEvent;
+  // The story change each fetch already reflects, so one change refetches once.
+  const storySeq = ctx?.storyEvent?.seq ?? 0;
+  const storySeqRef = useRef(storySeq);
+  storySeqRef.current = storySeq;
+  const handledStorySeq = useRef(storySeq);
 
   useEffect(() => {
     if (!runId || !enabled) {
@@ -39,13 +50,32 @@ function useRunThreads(enabled: boolean) {
     let live = true;
     setError(null);
     seqAtFetch.current = lastEventRef.current?.seq ?? 0;
+    handledStorySeq.current = storySeqRef.current;
     fetchCommentThreads(runId)
-      .then((r) => live && setThreads(r.threads))
+      .then((r) => {
+        if (!live) return;
+        setThreads(r.threads);
+        setLastSeenByCard(r.lastSeenByCard);
+      })
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Loading comments failed'));
     return () => {
       live = false;
     };
   }, [runId, enabled]);
+
+  // A story changed (here or elsewhere): refetch for the roots' `stories`, keeping the list on screen.
+  useEffect(() => {
+    if (!runId || !enabled || storySeq === handledStorySeq.current) return;
+    handledStorySeq.current = storySeq;
+    let live = true;
+    seqAtFetch.current = lastEventRef.current?.seq ?? 0;
+    fetchCommentThreads(runId)
+      .then((r) => live && setThreads(r.threads))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [runId, enabled, storySeq]);
 
   const lastEvent = ctx?.lastEvent;
   useEffect(() => {
@@ -67,7 +97,7 @@ function useRunThreads(enabled: boolean) {
     });
   }, [lastEvent]);
 
-  return { threads, error };
+  return { threads, lastSeenByCard, error };
 }
 
 interface Filters {
@@ -75,17 +105,31 @@ interface Filters {
   card: CommentCardKey | '';
   author: string;
   markersOnly: boolean;
+  /** Only roots that are no step of any investigation the caller can see. */
+  notInInvestigation: boolean;
 }
-const NO_FILTERS: Filters = { tags: [], card: '', author: '', markersOnly: false };
+const NO_FILTERS: Filters = { tags: [], card: '', author: '', markersOnly: false, notInInvestigation: false };
 
 /**
  * The All comments tab of the run's Comments dialog (design: docs/designs/test-run-analysis-stories.md,
  * "The comments card", moved into a header dialog): every root on the run, newest first, with
  * client-side filters. `onShow` is called for "Show in context"; the dialog closes itself there
- * first. Reading the list marks nothing seen.
+ * first. Reading the list marks nothing seen: a row's unread dot applies the counts' rule to the
+ * last looks the API returned, and only a card's drawer moves them.
  */
-export function AllComments({ enabled, onShow }: { enabled: boolean; onShow: (thread: RunCommentThread) => void }) {
-  const { threads, error } = useRunThreads(enabled);
+export function AllComments({
+  enabled,
+  onShow,
+  onReadStory,
+}: {
+  enabled: boolean;
+  onShow: (thread: RunCommentThread) => void;
+  /** Open an investigation in the reader; the dialog closes itself there first. */
+  onReadStory?: (storyId: string) => void;
+}) {
+  const { threads, lastSeenByCard, error } = useRunThreads(enabled);
+  const { user } = useAuth();
+  const me = user?.id ?? '';
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
 
   const sorted = useMemo(() => (threads ? [...threads].sort(newestFirst) : []), [threads]);
@@ -106,11 +150,12 @@ export function AllComments({ enabled, onShow }: { enabled: boolean; onShow: (th
         if (filters.card && t.cardKey !== filters.card) return false;
         if (filters.author && t.authorName !== filters.author) return false;
         if (filters.markersOnly && t.markerSeq == null) return false;
+        if (filters.notInInvestigation && (t.stories?.length ?? 0) > 0) return false;
         return true;
       }),
     [sorted, filters],
   );
-  const filtered = filters.tags.length > 0 || !!filters.card || !!filters.author || filters.markersOnly;
+  const filtered = filters.tags.length > 0 || !!filters.card || !!filters.author || filters.markersOnly || filters.notInInvestigation;
   const toggleTag = (tag: CommentTag) =>
     setFilters((f) => ({ ...f, tags: f.tags.includes(tag) ? f.tags.filter((t) => t !== tag) : [...f.tags, tag] }));
 
@@ -172,6 +217,16 @@ export function AllComments({ enabled, onShow }: { enabled: boolean; onShow: (th
               }
               label="Markers only"
             />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={filters.notInInvestigation}
+                  onChange={(e) => setFilters((f) => ({ ...f, notInInvestigation: e.target.checked }))}
+                />
+              }
+              label="Not in an investigation yet"
+            />
             {filtered && (
               <Button size="small" onClick={() => setFilters(NO_FILTERS)}>
                 Clear filters
@@ -194,6 +249,8 @@ export function AllComments({ enabled, onShow }: { enabled: boolean; onShow: (th
                   tagSelected={(tag) => filters.tags.includes(tag)}
                   onTag={toggleTag}
                   onShow={() => onShow(t)}
+                  unread={isUnreadThread(t, me, lastSeenByCard)}
+                  onReadStory={onReadStory}
                 />
               ))}
             </Box>

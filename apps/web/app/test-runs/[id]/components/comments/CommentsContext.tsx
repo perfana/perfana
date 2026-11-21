@@ -121,6 +121,14 @@ interface CommentsContextValue {
   /** The last `story:changed` for this run; consumers refetch through the access-checked GET. */
   storyEvent: { storyId: string; seq: number } | null;
   /**
+   * Record a story change this client made itself (Add to investigation), so the lists refetch
+   * even when the socket is down; the `story:changed` echo then refetches once more, harmlessly.
+   */
+  noteStoryChanged: (storyId: string) => void;
+  /** Bumped when the reader marked an investigation read, so its unread badges refetch. */
+  storyReadSeq: number;
+  noteStoryRead: () => void;
+  /**
    * A card (Graphs, Trends, Compare, Configuration) registers how to read its current view;
    * returns the unregister. `itemKey` is the item the new comment is anchored to, for a card
    * whose view is per item (Configuration).
@@ -193,6 +201,7 @@ export function CommentsProvider({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [viewRequest, setViewRequest] = useState<CommentsContextValue['viewRequest']>(null);
   const [storyEvent, setStoryEvent] = useState<CommentsContextValue['storyEvent']>(null);
+  const [storyReadSeq, setStoryReadSeq] = useState(0);
   const captures = useRef(new Map<CommentCardKey, ViewCapture>());
   const openCardRef = useRef(openCard);
   openCardRef.current = openCard;
@@ -288,6 +297,8 @@ export function CommentsProvider({
     };
     setViewRequest({ card, key: `restore:${card}:${seq}`, comment, silent: true });
   }, []);
+  const noteStoryChanged = useCallback((storyId: string) => setStoryEvent({ storyId, seq: ++seqRef.current }), []);
+  const noteStoryRead = useCallback(() => setStoryReadSeq((n) => n + 1), []);
   const registerViewCapture = useCallback((card: CommentCardKey, capture: ViewCapture) => {
     captures.current.set(card, capture);
     return () => {
@@ -349,8 +360,8 @@ export function CommentsProvider({
   const totalUnreadAgent = Object.values(counts).reduce<number>((a, c) => a + (c?.unreadAgent ?? 0), 0);
 
   const value = useMemo(
-    () => ({ runId, runStart, counts, unread, totalUnread, totalUnreadAgent, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, applyView, storyEvent, registerViewCapture, captureView }),
-    [runId, runStart, counts, unread, totalUnread, totalUnreadAgent, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, applyView, storyEvent, registerViewCapture, captureView],
+    () => ({ runId, runStart, counts, unread, totalUnread, totalUnreadAgent, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, applyView, storyEvent, noteStoryChanged, storyReadSeq, noteStoryRead, registerViewCapture, captureView }),
+    [runId, runStart, counts, unread, totalUnread, totalUnreadAgent, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, applyView, storyEvent, noteStoryChanged, storyReadSeq, noteStoryRead, registerViewCapture, captureView],
   );
   return <CommentsContext.Provider value={value}>{children}</CommentsContext.Provider>;
 }

@@ -31,6 +31,12 @@ export interface RunStorySummary {
   canEdit: boolean;
   /** The caller may delete it (author, any user for an agent's draft, org admin, global admin). */
   canDelete: boolean;
+  /**
+   * New for the caller: someone else published it (or, an AI agent's draft, the agent wrote or changed
+   * it) since the caller last opened it, within the unread window. Absent from an API older than
+   * migration 1834, which reads as read.
+   */
+  unread?: boolean;
 }
 
 /** A step with its comment as it reads now; `comment.deleted` when it was deleted since. */
@@ -92,6 +98,10 @@ export const updateStory = async (id: string, patch: { title?: string; summary?:
 /** The full ordered list; replaces every step. */
 export const replaceStorySteps = async (id: string, steps: StoryStepInput[]) =>
   json<RunStory>(await authenticatedFetch(`${storyUrl(id)}/steps`, send('PUT', { steps })), 'Saving steps');
+
+/** Mark an investigation read by the caller; the reader calls it when it opens one. */
+export const markStorySeen = async (id: string) =>
+  json<void>(await authenticatedFetch(`${storyUrl(id)}/seen`, { method: 'PUT' }), 'Marking the investigation read');
 
 export const deleteStory = async (id: string) =>
   json<void>(await authenticatedFetch(storyUrl(id), { method: 'DELETE' }), 'Deleting story');

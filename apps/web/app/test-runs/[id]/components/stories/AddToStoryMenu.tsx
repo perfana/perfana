@@ -49,6 +49,7 @@ export function AddToStoryMenu({ commentId, label }: { commentId: string; label?
     setAnchor(null);
     try {
       const { added } = await addCommentToStory(story.id, commentId);
+      if (added) ctx.noteStoryChanged?.(story.id);
       setToast(added ? `Added to “${story.title}”` : `Already a step of “${story.title}”`);
     } catch (e) {
       setToast(message(e));
@@ -60,7 +61,8 @@ export function AddToStoryMenu({ commentId, label }: { commentId: string; label?
     setBusy(true);
     setDialogError(null);
     try {
-      await createStory(ctx.runId, t, [{ commentId }]);
+      const created = await createStory(ctx.runId, t, [{ commentId }]);
+      ctx.noteStoryChanged?.(created.id);
       setNaming(false);
       setTitle('');
       setToast(`Started “${t}”: edit it under Comments (run header) › Stories`);

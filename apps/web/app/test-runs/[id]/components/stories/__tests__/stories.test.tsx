@@ -33,6 +33,7 @@ jest.mock('@/lib/test-run-stories', () => ({
   replaceStorySteps: jest.fn(),
   updateStory: jest.fn(),
   deleteStory: jest.fn(),
+  markStorySeen: jest.fn(),
 }));
 const api = storiesApi as jest.Mocked<typeof storiesApi>;
 
@@ -87,9 +88,13 @@ beforeEach(() => {
     openDrawer: jest.fn(),
     applyView: jest.fn(),
     setActiveThreadId: jest.fn(),
+    noteStoryRead: jest.fn(),
+    noteStoryChanged: jest.fn(),
+    storyReadSeq: 0,
     captureView: jest.fn(() => ({ kind: 'graphs', series: [{ dashboardId: 'mine', panelId: 9, metricName: 'before' }] })),
   });
   api.fetchStory.mockResolvedValue(clone(STORY));
+  api.markStorySeen.mockResolvedValue(undefined);
   document.body.innerHTML = '';
 });
 
@@ -223,6 +228,26 @@ describe('StoryReader', () => {
     expect(within(dialog).getByText('Heap too small.')).toBeInTheDocument();
   });
 
+  // PR7: opening an investigation marks it read, once, and only when the API says it is unread.
+  it('marks an unread investigation read when it opens, once, and tells the page', async () => {
+    api.fetchStory.mockResolvedValue({ ...clone(STORY), unread: true });
+    setUrl('story=s1');
+    const { rerender } = render(<StoryReader />);
+    await screen.findByRole('dialog', { name: 'Checkout latency' });
+    await waitFor(() => expect(api.markStorySeen).toHaveBeenCalledWith('s1'));
+    await waitFor(() => expect(ctx.noteStoryRead).toHaveBeenCalledTimes(1));
+    rerender(<StoryReader />);
+    expect(api.markStorySeen).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes nothing for an investigation that is already read', async () => {
+    api.fetchStory.mockResolvedValue({ ...clone(STORY), unread: false });
+    setUrl('story=s1&step=2');
+    render(<StoryReader />);
+    await screen.findByTestId('story-bar');
+    expect(api.markStorySeen).not.toHaveBeenCalled();
+  });
+
   it('says a story it cannot read is not available', async () => {
     api.fetchStory.mockRejectedValue(Object.assign(new Error('Loading story failed (404)'), { status: 404 }));
     setUrl('story=nope');
@@ -313,6 +338,8 @@ describe('AddToStoryMenu', () => {
     fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'GC pauses' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(api.createStory).toHaveBeenCalledWith('run-1', 'GC pauses', [{ commentId: 'c42' }]));
+    // The comment's "In: …" chips refetch even with the socket down.
+    await waitFor(() => expect(ctx.noteStoryChanged).toHaveBeenCalledWith('s1'));
   });
 });
 

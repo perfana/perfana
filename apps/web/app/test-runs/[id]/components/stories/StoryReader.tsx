@@ -16,7 +16,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import type { CommentCardKey } from '@perfana/shared/constants/comment-cards';
 import type { CommentView } from '@/lib/test-run-comments';
 import { formatCommentTime } from '@/lib/test-run-comments';
-import { fetchStory, storyHref, type RunStory, type RunStoryStep } from '@/lib/test-run-stories';
+import { fetchStory, markStorySeen, storyHref, type RunStory, type RunStoryStep } from '@/lib/test-run-stories';
 import { expansionKeyOf, useComments } from '../comments/CommentsContext';
 import { CommentTagChip } from '../comments/CommentTagChip';
 import { firstLine, isTypingTarget, stepWhere, tagOf } from './story-format';
@@ -43,7 +43,8 @@ export function readerScreen(stepParam: string | null, stepCount: number): { kin
  * View preservation: the first time a step replays a view on a card, that card's current view is
  * captured (`captureView`); the per-replay "Showing the comment's view · Undo" toasts are
  * suppressed (`silent`), and leaving the story (Exit, Esc, or the URL losing `story`) puts every
- * captured card back. Reading marks nothing seen.
+ * captured card back. Opening it marks the investigation itself read (`PUT /stories/:id/seen`), never
+ * the comments in it: those stay unread until their card's drawer is open.
  */
 export default function StoryReader() {
   const ctx = useComments();
@@ -115,6 +116,20 @@ export default function StoryReader() {
       live = false;
     };
   }, [storyId, storyEventSeq, commentSeq]);
+
+  // Opening an investigation marks it read for the caller (PR7), once per story per visit and only
+  // when the API says it is unread, so a refetch does not write again. This is the one place it is
+  // marked read; the Comments dialog never does.
+  const markedSeen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!story || story.id !== storyId || !story.unread || markedSeen.current === story.id) return;
+    markedSeen.current = story.id;
+    markStorySeen(story.id)
+      .then(() => ctxRef.current?.noteStoryRead?.())
+      .catch(() => {
+        markedSeen.current = null;
+      });
+  }, [story, storyId]);
 
   // Leaving the story (or switching to another one) puts back every card it replaced a view on.
   // One card at a time: the page keeps a single view request, which each card consumes on its own
