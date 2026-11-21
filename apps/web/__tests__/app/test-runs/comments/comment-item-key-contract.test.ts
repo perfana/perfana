@@ -6,6 +6,7 @@
  * private copy reappearing here fails rather than silently stranding agent comments.
  */
 import {
+  anomalyItemKey as sharedAnomalyItemKey,
   configCommentAnchor as sharedConfigAnchor,
   dashboardCommentItemKey,
   sloCommentItemKey,
@@ -21,6 +22,9 @@ import { configCommentAnchor } from '@/app/test-runs/[id]/components/configurati
 import { dashboardCommentAnchor } from '@/app/test-runs/[id]/components/dashboards/components/DashboardCard';
 import { unreadCommentsLabel } from '@/lib/test-run-comments';
 import type { CheckResult } from '@/lib/types';
+import { anomalyItemKey, anomalyItemLabel } from '@/app/test-runs/[id]/components/anomaly-detection/utils';
+import { parseTracingItemKey, tracingItemKey } from '@/app/test-runs/[id]/components/distributed-tracing/components/DistributedTracingExpandedContent';
+import { parsePyroscopeItemKey, pyroscopeItemKey, pyroscopeItemLabel } from '@/app/test-runs/[id]/components/pyroscope/utils/pyroscope-comment-key';
 
 describe('comment item keys: the web rows use the shared builders', () => {
   it('transaction row', () => {
@@ -50,6 +54,31 @@ describe('comment item keys: the web rows use the shared builders', () => {
   it('Dashboards tile', () => {
     const d = { id: 'ad-9', dashboard_label: 'JVM', dashboard_name: 'jvm' } as never;
     expect(dashboardCommentAnchor(d)).toEqual({ itemKey: dashboardCommentItemKey('ad-9'), itemLabel: 'JVM' });
+  });
+});
+
+describe('comment item keys: Anomaly detection, Distributed tracing and Pyroscope (stored formats)', () => {
+  it('Anomaly detection row: <dashboard>|<panel>|<series>', () => {
+    const row = { application_dashboard_id: 'ad-1', panel_id: '7', metric_name: 'pdf_gen', dashboard_label: 'JVM', panel_title: 'Heap' };
+    expect(anomalyItemKey).toBe(sharedAnomalyItemKey);
+    expect(anomalyItemKey(row)).toBe('ad-1|7|pdf_gen');
+    // A numeric panel id (what the API resolver has) builds the same key as the string the card holds.
+    expect(anomalyItemKey({ ...row, panel_id: 7 })).toBe('ad-1|7|pdf_gen');
+    expect(anomalyItemLabel(row)).toBe('JVM · Heap · pdf_gen');
+  });
+
+  it('Distributed tracing: [service id, name, scenario, transaction, sampler] as JSON', () => {
+    const key = tracingItemKey({ tracingServiceId: 's1', serviceName: 'orders' }, { scenario: 'Checkout', transaction: null, sampler: null });
+    expect(key).toBe('["s1","orders","Checkout",null,null]');
+    expect(parseTracingItemKey(key)).toEqual({ serviceId: 's1', serviceName: 'orders', scenario: 'Checkout', transaction: null, sampler: null });
+  });
+
+  it('Pyroscope: [application, profiler, view] as JSON, and the earlier app|profiler form still reads', () => {
+    const combo = { application: 'shop', profiler: 'process_cpu:cpu' };
+    expect(pyroscopeItemKey(combo, 1)).toBe('["shop","process_cpu:cpu","diff"]');
+    expect(pyroscopeItemKey(combo, 0)).toBe('["shop","process_cpu:cpu","single"]');
+    expect(pyroscopeItemLabel(combo, 1)).toBe('shop / process_cpu · Diff view');
+    expect(parsePyroscopeItemKey('shop|process_cpu:cpu')).toEqual({ ...combo, viewModeTab: null });
   });
 });
 

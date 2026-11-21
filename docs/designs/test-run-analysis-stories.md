@@ -327,6 +327,9 @@ So `POST /test-runs/:id/comments` gains an optional **`anchor`**, mutually exclu
 | `{ type: 'dashboard', applicationDashboardId }` | Dashboards card item | `get_available_metrics`, which gains the id (see below) |
 | `{ type: 'slo', checkResultId }` | SLO row | `get_check_results` (which must return the result id; check its response in implementation) |
 | `{ type: 'marker', time, series: [{ dashboardLabel, panelId, metricName }], range? }` | a numbered Graphs marker with its `chart_context` | `get_available_metrics`, `get_metric_trends` |
+| `{ type: 'adapt', applicationDashboardId, panelId, metricName }` | Anomaly detection row (issue #768) | `get_adapt_results`, which gained `applicationDashboardId` and `panelId` per result |
+| `{ type: 'tracing', serviceName, scenario?, transaction?, sampler? }` | Distributed tracing service tab and its request filters; the tracing service id is resolved by the same system → environment → workload hierarchy the card uses (issue #768) | `list_connected_sources`, `get_slow_traces` |
+| `{ type: 'pyroscope', application, profiler, view }` | Pyroscope application/profiler tab in single or diff view; `diff` needs a completed earlier run of the workload (issue #768) | `list_connected_sources`, `get_hotspots`, `get_flamegraph` |
 
 Rules:
 
@@ -335,7 +338,7 @@ Rules:
 - **`item_label`** is built by the server from the resolved item (the transaction name, the config key, the dashboard label), not taken from the agent.
 - **Markers.** `marker_seq` is assigned as for a user's marker. `chart_context.series` is built in the graph-preset series shape the replay already reads, and `range` defaults to the run's window, clamped to the run. `dashboardLabel` is not unique across Grafana instances (Common Issue #51): if it matches more than one application dashboard in the run's workload, the server answers 400 listing the candidates, and the agent retries with `applicationDashboardId` in the series entry.
 - **Dashboards need an id the agent can see.** `get_available_metrics` returns dashboards by label today. It gains `applicationDashboardId` per dashboard, so the agent can anchor dashboard comments and disambiguate markers.
-- Cards outside this table (anomaly rows, Dynatrace services, Splunk panels, tracing, Pyroscope) take card-level agent comments in v1; each can be added as an anchor type later with its own builder and contract test.
+- Cards outside this table (Dynatrace services, Splunk panels) take card-level agent comments; each can be added as an anchor type later with its own builder and contract test. Anomaly rows, tracing and Pyroscope were added in issue #768: one Adapt row per comment (no "regressions only" view state), and a Pyroscope `diff` anchor does not carry a baseline run, because the card picks the latest completed run itself; recording a chosen baseline would need a Pyroscope `chart_context`.
 
 `apps/mcp` cannot import `@perfana/shared` (CLAUDE.md Common Issue #81), which is a second reason the resolution lives in the API: the MCP server only passes the anchor through.
 

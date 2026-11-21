@@ -56,6 +56,25 @@ export const anchorSchema = z
         .describe('Series the marker is drawn on, from get_available_metrics'),
       range: z.tuple([z.string(), z.string()]).optional().describe('Zoom window [from, to]; defaults to the whole run'),
     }),
+    z.object({
+      type: z.literal('adapt'),
+      applicationDashboardId: z.string().describe('applicationDashboardId of the regression, from get_adapt_results'),
+      panelId: z.number().describe('panelId of the regression, from get_adapt_results'),
+      metricName: z.string().describe('metric_name of the regression, from get_adapt_results'),
+    }).describe('One row of Anomaly detection (Adapt): opens the card scrolled to that row. One comment per regression.'),
+    z.object({
+      type: z.literal('tracing'),
+      serviceName: z.string().describe('A traced service name, as get_slow_traces / get_error_traces take it (list_connected_sources shows tracing is connected)'),
+      scenario: z.string().optional().describe('Request filter: scenario, as passed to get_slow_traces'),
+      transaction: z.string().optional().describe('Request filter: transaction, as passed to get_slow_traces'),
+      sampler: z.string().optional().describe('Request filter: sampler (request name)'),
+    }).describe('A Distributed tracing service tab with its request filters set.'),
+    z.object({
+      type: z.literal('pyroscope'),
+      application: z.string().describe('Application, one of list_connected_sources pyroscope.configurations (the service get_hotspots / get_flamegraph take)'),
+      profiler: z.string().describe('Profiler of that configuration, exactly as list_connected_sources lists it'),
+      view: z.enum(['single', 'diff']).describe('"diff" opens the baseline-vs-current comparison; needs an earlier completed run of the same workload'),
+    }).describe('A Pyroscope application/profiler tab in single or diff view.'),
   ])
   .describe(
     'What the comment is about. The server checks it exists in the run (a 400 names what it could not find) and builds the ' +

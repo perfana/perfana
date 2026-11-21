@@ -134,10 +134,34 @@ describe('comment tools', () => {
       { type: 'dashboard', applicationDashboardId: 'ad' },
       { type: 'slo', checkResultId: 'cr' },
       { type: 'marker', time: 't', series: [{ dashboardLabel: 'P', panelId: 1, metricName: 'm' }] },
+      { type: 'adapt', applicationDashboardId: 'ad', panelId: 7, metricName: 'pdf_gen' },
+      { type: 'tracing', serviceName: 'matrix-multiply' },
+      { type: 'tracing', serviceName: 'orders', scenario: 'Checkout', transaction: 'T04', sampler: 'POST /pay' },
+      { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu', view: 'diff' },
+      { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu', view: 'single' },
     ]) {
       assert.equal(anchorSchema.safeParse(a).success, true, JSON.stringify(a));
     }
     assert.equal(anchorSchema.safeParse({ type: 'anomaly', id: 'x' }).success, false);
+  });
+
+  it('refuses an adapt, tracing or pyroscope anchor missing what the API needs', () => {
+    for (const a of [
+      { type: 'adapt', applicationDashboardId: 'ad', metricName: 'm' },
+      { type: 'adapt', applicationDashboardId: 'ad', panelId: '7', metricName: 'm' },
+      { type: 'tracing' },
+      { type: 'pyroscope', application: 'shop', profiler: 'p' },
+      { type: 'pyroscope', application: 'shop', profiler: 'p', view: 'side-by-side' },
+    ]) {
+      assert.equal(anchorSchema.safeParse(a).success, false, JSON.stringify(a));
+    }
+  });
+
+  it('passes a pyroscope diff anchor through to the API unchanged', async () => {
+    const calls = mockFetch(201, comment({ cardKey: 'pyroscope', itemLabel: 'shop / process_cpu · Diff view', markerSeq: null, markerTime: null }));
+    const anchor = { type: 'pyroscope' as const, application: 'shop', profiler: 'process_cpu:cpu', view: 'diff' as const };
+    await addTestRunComment(client, { testRunId: 'shop-0042', body: 'multiply 2.14s -> 51.3s', tag: 'root-cause', anchor });
+    assert.deepEqual(JSON.parse(calls[0].init.body!).anchor, anchor);
   });
 });
 

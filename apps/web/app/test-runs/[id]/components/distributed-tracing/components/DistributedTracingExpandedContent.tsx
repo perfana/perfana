@@ -21,32 +21,16 @@ import { VisualiseTab } from './VisualiseTab';
 import TracesDiffTab from '../TracesDiffTab';
 import type { CommentItemCounts } from '@/lib/test-run-comments';
 import ItemCommentHeader, { TabCommentMark } from '../../comments/ItemCommentHeader';
+import {
+  parseTracingItemKey,
+  tracingItemKey,
+  tracingItemLabel,
+  type TracingCommentFilters,
+} from '@perfana/shared/constants/comment-cards';
 
-export interface TracingFilters {
-  scenario: string | null;
-  transaction: string | null;
-  sampler: string | null;
-}
-
-/**
- * Comment anchor: a traced service name plus the request filters it was written under, so
- * opening the comment brings back the same scenario / transaction / sampler.
- */
-export const tracingItemKey = (s: ServiceNameItem, f: TracingFilters) =>
-  JSON.stringify([s.tracingServiceId, s.serviceName, f.scenario, f.transaction, f.sampler]);
-
-export function parseTracingItemKey(key: string): { serviceId: string; serviceName: string } & TracingFilters | null {
-  try {
-    const [serviceId, serviceName, scenario, transaction, sampler] = JSON.parse(key) as (string | null)[];
-    if (typeof serviceId !== 'string' || typeof serviceName !== 'string') return null;
-    return { serviceId, serviceName, scenario: scenario ?? null, transaction: transaction ?? null, sampler: sampler ?? null };
-  } catch {
-    return null;
-  }
-}
-
-const tracingItemLabel = (s: ServiceNameItem, f: TracingFilters) =>
-  [s.serviceName, [f.scenario, f.transaction, f.sampler].filter(Boolean).join(' / ')].filter(Boolean).join(' · ').slice(0, 255);
+// Comment anchors live in shared so the API can build the same keys for an agent.
+export type TracingFilters = TracingCommentFilters;
+export { tracingItemKey, parseTracingItemKey };
 
 const isServiceKey = (s: ServiceNameItem) => (key: string) => {
   const p = parseTracingItemKey(key);

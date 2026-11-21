@@ -4,13 +4,20 @@ import { validateSync, type ValidationError } from 'class-validator';
 import type { EntityManager } from 'typeorm';
 import {
   CONFIG_VIEW_VALUE_MAX_LENGTH,
+  PYROSCOPE_VIEWS,
+  anomalyItemKey,
+  anomalyItemLabel,
   clipCommentText,
   configCommentAnchor,
   dashboardCommentAnchor,
+  pyroscopeItemKey,
+  pyroscopeItemLabel,
   sloCommentItemKey,
   sloCommentItemLabel,
   transactionCommentItemKey,
   transactionCommentItemLabel,
+  tracingItemKey,
+  tracingItemLabel,
   transactionScenarioGroup,
   type CommentCardKey,
   type ConfigCommentView,
@@ -18,6 +25,7 @@ import {
 import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
 import {
   ANCHOR_CARD,
+  type AdaptAnchorDto,
   ANCHOR_DTO_BY_TYPE,
   COMMENT_ANCHOR_TYPES,
   type CardAnchorDto,
@@ -25,7 +33,9 @@ import {
   type ConfigAnchorDto,
   type DashboardAnchorDto,
   type MarkerAnchorDto,
+  type PyroscopeAnchorDto,
   type SloAnchorDto,
+  type TracingAnchorDto,
   type TransactionAnchorDto,
 } from './dto/comment-anchor.dto';
 
@@ -129,6 +139,12 @@ export async function resolveAnchor(em: EntityManager, run: AnchorRun, anchor: C
       return { ...none, ...(await resolveSlo(em, run, anchor as SloAnchorDto)) };
     case 'marker':
       return { ...none, ...(await resolveMarker(em, run, anchor as MarkerAnchorDto)) };
+    case 'adapt':
+      return { ...none, ...(await resolveAdapt(em, run, anchor as AdaptAnchorDto)) };
+    case 'tracing':
+      return { ...none, ...(await resolveTracing(em, run, anchor as TracingAnchorDto)) };
+    case 'pyroscope':
+      return { ...none, ...(await resolvePyroscope(em, run, anchor as PyroscopeAnchorDto)) };
   }
 }
 
@@ -254,6 +270,118 @@ async function resolveSlo(em: EntityManager, run: AnchorRun, anchor: SloAnchorDt
   );
   if (!rows[0]) throw new BadRequestException(`Check result ${anchor.checkResultId} does not belong to this test run`);
   return { itemKey: sloCommentItemKey(rows[0]), itemLabel: sloCommentItemLabel(rows[0]) };
+}
+
+/**
+ * An Anomaly detection row: an Adapt result of this run. The card lists one row per
+ * `ds_adapt_results` row, keyed on dashboard, panel and series.
+ */
+async function resolveAdapt(em: EntityManager, run: AnchorRun, anchor: AdaptAnchorDto) {
+  const rows: { dashboard_label: string | null; panel_title: string | null }[] = await em.query(
+    `SELECT dashboard_label, panel_title FROM ds_adapt_results
+      WHERE test_run_id = $1 AND application_dashboard_id = $2::uuid AND panel_id = $3 AND metric_name = $4
+      LIMIT 1`,
+    [run.testRunId, anchor.applicationDashboardId, anchor.panelId, anchor.metricName],
+  );
+  if (!rows[0]) {
+    const onPanel: { metric_name: string }[] = await em.query(
+      `SELECT DISTINCT metric_name FROM ds_adapt_results
+        WHERE test_run_id = $1 AND application_dashboard_id = $2::uuid AND panel_id = $3
+        ORDER BY metric_name LIMIT ${MAX_LISTED + 1}`,
+      [run.testRunId, anchor.applicationDashboardId, anchor.panelId],
+    );
+    const where = `panel ${anchor.panelId} of application dashboard ${anchor.applicationDashboardId}`;
+    throw new BadRequestException(
+      onPanel.length > 0
+        ? `No Adapt result for series "${anchor.metricName}" on ${where} in this test run; that panel has: ${list(onPanel.map((r) => r.metric_name))}`
+        : `No Adapt result for ${where} in this test run`,
+    );
+  }
+  const row = {
+    application_dashboard_id: anchor.applicationDashboardId,
+    panel_id: anchor.panelId,
+    metric_name: anchor.metricName,
+    dashboard_label: rows[0].dashboard_label,
+    panel_title: rows[0].panel_title,
+  };
+  return { itemKey: anomalyItemKey(row), itemLabel: anomalyItemLabel(row) };
+}
+
+/**
+ * A Distributed tracing service tab and the request filters it was written under. The card shows
+ * the run's tracing service by the same hierarchy as `TracingServiceRepository.findWithHierarchy`:
+ * system + environment + workload, else system + environment, else the system alone. The item key
+ * carries that service's id, so the service name must be one the winning level configures.
+ */
+async function resolveTracing(em: EntityManager, run: AnchorRun, anchor: TracingAnchorDto) {
+  const rows: { id: string; service_names: string[] | null; level: number }[] = await em.query(
+    `SELECT id, service_names,
+            CASE WHEN workload IS NOT NULL THEN 0 WHEN test_environment IS NOT NULL THEN 1 ELSE 2 END AS level
+       FROM tracing_services
+      WHERE system_under_test_id = $1
+        AND ((test_environment = $2 AND workload = $3)
+          OR (test_environment = $2 AND workload IS NULL)
+          OR (test_environment IS NULL AND workload IS NULL))
+      ORDER BY level, created_at, id`,
+    [run.systemUnderTestId, run.testEnvironment, run.workload],
+  );
+  if (rows.length === 0) {
+    throw new BadRequestException("No tracing service is configured for this run's system, environment and workload");
+  }
+  const level = rows[0]!.level;
+  const shown = rows.filter((r) => r.level === level);
+  const service = shown.find((r) => (r.service_names ?? []).includes(anchor.serviceName));
+  if (!service) {
+    const names = [...new Set(shown.flatMap((r) => r.service_names ?? []))].sort();
+    throw new BadRequestException(
+      names.length > 0
+        ? `Service "${anchor.serviceName}" is not configured in this run's tracing service; it traces: ${list(names)}`
+        : `Service "${anchor.serviceName}" is not configured: this run's tracing service lists no service names`,
+    );
+  }
+  const s = { tracingServiceId: service.id, serviceName: anchor.serviceName };
+  const filters = { scenario: anchor.scenario ?? null, transaction: anchor.transaction ?? null, sampler: anchor.sampler ?? null };
+  return { itemKey: tracingItemKey(s, filters), itemLabel: tracingItemLabel(s, filters) };
+}
+
+/**
+ * A Pyroscope application + profiler tab, in single or diff view. The pair must be one of the
+ * system's `pyroscope_configurations`. A diff view compares with a baseline run the card picks from
+ * the completed runs of the same system, environment and workload (the latest by default), so a
+ * diff anchor needs at least one such run to exist.
+ */
+async function resolvePyroscope(em: EntityManager, run: AnchorRun, anchor: PyroscopeAnchorDto) {
+  const rows: { pyroscope_instance_id: string | null; pyroscope_configurations: Array<{ application?: unknown; profiler?: unknown }> | null }[] =
+    await em.query(`SELECT pyroscope_instance_id, pyroscope_configurations FROM systems_under_test WHERE id = $1`, [run.systemUnderTestId]);
+  const configs = (rows[0]?.pyroscope_configurations ?? []).filter(
+    (c): c is { application: string; profiler: string } => typeof c?.application === 'string' && typeof c?.profiler === 'string',
+  );
+  if (!rows[0]?.pyroscope_instance_id || configs.length === 0) {
+    throw new BadRequestException("Pyroscope is not configured for this run's system");
+  }
+  if (!configs.some((c) => c.application === anchor.application && c.profiler === anchor.profiler)) {
+    throw new BadRequestException(
+      `Application "${anchor.application}" with profiler "${anchor.profiler}" is not configured for this run's system; configured: ` +
+        list(configs.map((c) => `${c.application} (${c.profiler})`)),
+    );
+  }
+  const viewModeTab = PYROSCOPE_VIEWS.indexOf(anchor.view);
+  if (anchor.view === 'diff') {
+    const baselines: unknown[] = await em.query(
+      `SELECT 1 FROM test_runs
+        WHERE system_under_test_id = $1 AND test_environment = $2 AND workload = $3 AND id <> $4
+          AND completed AND start_time IS NOT NULL AND end_time IS NOT NULL
+        LIMIT 1`,
+      [run.systemUnderTestId, run.testEnvironment, run.workload, run.id],
+    );
+    if (baselines.length === 0) {
+      throw new BadRequestException(
+        'The diff view needs a completed earlier run of this system, environment and workload to compare with, and there is none; use view "single"',
+      );
+    }
+  }
+  const combo = { application: anchor.application, profiler: anchor.profiler };
+  return { itemKey: pyroscopeItemKey(combo, viewModeTab), itemLabel: pyroscopeItemLabel(combo, viewModeTab) };
 }
 
 /** The graph-preset `source` the Graphs card gives a series, from its dashboard's metrics source. */

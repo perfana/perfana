@@ -719,14 +719,5 @@ export const collectPanelTargets = (
   return Array.from(byTarget.values());
 };
 
-/**
- * A comment anchor for an anomaly row: stable within the run, unlike the table's row key,
- * which carries the row's position on the current page.
- */
-export function anomalyItemKey(row: Pick<AnomalyData, 'application_dashboard_id' | 'panel_id' | 'metric_name'>): string {
-  return `${row.application_dashboard_id}|${row.panel_id}|${row.metric_name}`;
-}
-
-export function anomalyItemLabel(row: Pick<AnomalyData, 'dashboard_label' | 'panel_title' | 'metric_name'>): string {
-  return [row.dashboard_label, row.panel_title, row.metric_name].filter(Boolean).join(' · ').slice(0, 255);
-}
+// Comment anchors live in shared so the API can build the same keys for an agent.
+export { anomalyItemKey, anomalyItemLabel } from '@perfana/shared/constants/comment-cards';

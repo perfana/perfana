@@ -173,6 +173,107 @@ export function parseTransactionCommentItemKey(key: string): { scenario: string;
   }
 }
 
+/** The Adapt result fields an Anomaly detection row's key and label are built from (snake_case, as the API returns them). */
+export interface AnomalyCommentRowFields {
+  application_dashboard_id: string;
+  panel_id: string | number;
+  metric_name: string;
+  dashboard_label?: string | null;
+  panel_title?: string | null;
+}
+
+/**
+ * Item key of an Anomaly detection (Adapt) row: stable within the run, unlike the table's row key,
+ * which carries the row's position on the current page. Stored, so the format must never change.
+ */
+export function anomalyItemKey(row: Pick<AnomalyCommentRowFields, 'application_dashboard_id' | 'panel_id' | 'metric_name'>): string {
+  return `${row.application_dashboard_id}|${row.panel_id}|${row.metric_name}`;
+}
+
+/** What an Anomaly detection row's comment is called. */
+export function anomalyItemLabel(row: Pick<AnomalyCommentRowFields, 'dashboard_label' | 'panel_title' | 'metric_name'>): string {
+  return [row.dashboard_label, row.panel_title, row.metric_name].filter(Boolean).join(' · ').slice(0, COMMENT_ITEM_LABEL_MAX_LENGTH);
+}
+
+/** The Distributed tracing card's request filters a comment is written under. */
+export interface TracingCommentFilters {
+  scenario: string | null;
+  transaction: string | null;
+  sampler: string | null;
+}
+
+/** A traced service name and the tracing service (configuration row) it belongs to. */
+export interface TracingCommentService {
+  tracingServiceId: string;
+  serviceName: string;
+}
+
+/**
+ * Item key of a Distributed tracing comment: a traced service name plus the request filters it was
+ * written under, so opening the comment brings back the same scenario / transaction / sampler.
+ * Stored, so the format must never change.
+ */
+export function tracingItemKey(s: TracingCommentService, f: TracingCommentFilters): string {
+  return JSON.stringify([s.tracingServiceId, s.serviceName, f.scenario, f.transaction, f.sampler]);
+}
+
+export function parseTracingItemKey(key: string): ({ serviceId: string; serviceName: string } & TracingCommentFilters) | null {
+  try {
+    const [serviceId, serviceName, scenario, transaction, sampler] = JSON.parse(key) as (string | null)[];
+    if (typeof serviceId !== 'string' || typeof serviceName !== 'string') return null;
+    return { serviceId, serviceName, scenario: scenario ?? null, transaction: transaction ?? null, sampler: sampler ?? null };
+  } catch {
+    return null;
+  }
+}
+
+/** What a Distributed tracing comment is called. */
+export function tracingItemLabel(s: Pick<TracingCommentService, 'serviceName'>, f: TracingCommentFilters): string {
+  return [s.serviceName, [f.scenario, f.transaction, f.sampler].filter(Boolean).join(' / ')].filter(Boolean).join(' · ').slice(0, COMMENT_ITEM_LABEL_MAX_LENGTH);
+}
+
+/** The Pyroscope card's views, by tab index. Stored inside the item key, so never reorder. */
+export const PYROSCOPE_VIEWS = ['single', 'diff'] as const;
+export type PyroscopeView = (typeof PYROSCOPE_VIEWS)[number];
+
+/** A Pyroscope application + profiler pair, as configured on the system. */
+export interface PyroscopeCommentCombo {
+  application: string;
+  profiler: string;
+}
+
+/**
+ * Item key of a Pyroscope comment: an application + profiler pair and the view (single / diff).
+ * `viewModeTab` is the card's tab index. Stored, so the format must never change.
+ */
+export function pyroscopeItemKey(c: PyroscopeCommentCombo, viewModeTab: number): string {
+  return JSON.stringify([c.application, c.profiler, PYROSCOPE_VIEWS[viewModeTab] ?? 'single']);
+}
+
+/** What a Pyroscope comment is called. */
+export function pyroscopeItemLabel(c: PyroscopeCommentCombo, viewModeTab: number): string {
+  return `${c.application} / ${c.profiler.split(':')[0]} · ${viewModeTab === 1 ? 'Diff view' : 'Single view'}`.slice(0, COMMENT_ITEM_LABEL_MAX_LENGTH);
+}
+
+/**
+ * Reads both the current key and the earlier `application|profiler` form, which carried no view
+ * (`viewModeTab` null: leave the view as it is).
+ */
+export function parsePyroscopeItemKey(key: string): (PyroscopeCommentCombo & { viewModeTab: number | null }) | null {
+  if (key.startsWith('[')) {
+    try {
+      const [application, profiler, view] = JSON.parse(key) as string[];
+      if (typeof application !== 'string' || typeof profiler !== 'string') return null;
+      const idx = PYROSCOPE_VIEWS.indexOf(view as PyroscopeView);
+      return { application, profiler, viewModeTab: idx < 0 ? null : idx };
+    } catch {
+      return null;
+    }
+  }
+  const bar = key.indexOf('|');
+  return bar < 0 ? null : { application: key.slice(0, bar), profiler: key.slice(bar + 1), viewModeTab: null };
+}
+
 /** The check-result fields an SLO row's key and label are built from (snake_case, as the API returns them). */
 export interface SloCommentResultFields {
   panel_type?: string | null;

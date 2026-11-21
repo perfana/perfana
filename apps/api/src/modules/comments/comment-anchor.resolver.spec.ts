@@ -217,3 +217,93 @@ describe('parseAnchor', () => {
     expect(seriesSource(null)).toBe('grafana');
   });
 });
+
+describe('Adapt, tracing and Pyroscope anchors', () => {
+  const TS = '99999999-9999-4999-8999-999999999990';
+  const TS_ENV = '99999999-9999-4999-8999-999999999991';
+  const pyroscopeSut = [{ pyroscope_instance_id: 'p1', pyroscope_configurations: [{ application: 'shop', profiler: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds' }] }];
+
+  it('adapt: <dashboard>|<panel>|<series>, labelled like the Anomaly detection row', async () => {
+    const em = emWith([['FROM ds_adapt_results', [{ dashboard_label: 'JVM', panel_title: 'Heap' }]]]);
+    const r = await resolve(em, { type: 'adapt', applicationDashboardId: DASH, panelId: 7, metricName: 'order_confirmation_pdf_gen' });
+    expect(r.card).toBe('anomaly');
+    expect(r.itemKey).toBe(`${DASH}|7|order_confirmation_pdf_gen`);
+    expect(r.itemLabel).toBe('JVM · Heap · order_confirmation_pdf_gen');
+    expect(r.chartContext).toBeNull();
+  });
+
+  it('adapt: no result for the series lists what the panel has; no result for the panel says so', async () => {
+    const em = emWith([['SELECT DISTINCT metric_name FROM ds_adapt_results', [{ metric_name: 'a' }, { metric_name: 'b' }]]]);
+    await expect(resolve(em, { type: 'adapt', applicationDashboardId: DASH, panelId: 7, metricName: 'ghost' })).rejects.toThrow(
+      /No Adapt result for series "ghost" on panel 7 .* that panel has: a, b/,
+    );
+    await expect(resolve(emWith([]), { type: 'adapt', applicationDashboardId: DASH, panelId: 7, metricName: 'ghost' })).rejects.toThrow(
+      new RegExp(`No Adapt result for panel 7 of application dashboard ${DASH} in this test run`),
+    );
+  });
+
+  it('tracing: [service id, name, scenario, transaction, sampler] from the most specific tracing service', async () => {
+    const em = emWith([['FROM tracing_services', [
+      { id: TS, service_names: ['orders', 'matrix-multiply'], level: 0 },
+      { id: TS_ENV, service_names: ['matrix-multiply'], level: 1 },
+    ]]]);
+    const r = await resolve(em, { type: 'tracing', serviceName: 'matrix-multiply', scenario: 'Checkout', transaction: 'T04_Pay' });
+    expect(r.card).toBe('distributed-tracing');
+    expect(r.itemKey).toBe(`["${TS}","matrix-multiply","Checkout","T04_Pay",null]`);
+    expect(r.itemLabel).toBe('matrix-multiply · Checkout / T04_Pay');
+    // The run's scope is bound, never interpolated.
+    expect(em.query.mock.calls[0]![1]).toEqual([RUN.systemUnderTestId, RUN.testEnvironment, RUN.workload]);
+  });
+
+  it('tracing: a service only a less specific level configures is not the one the card shows', async () => {
+    const em = emWith([['FROM tracing_services', [
+      { id: TS, service_names: ['orders'], level: 0 },
+      { id: TS_ENV, service_names: ['matrix-multiply'], level: 1 },
+    ]]]);
+    await expect(resolve(em, { type: 'tracing', serviceName: 'matrix-multiply' })).rejects.toThrow(
+      /Service "matrix-multiply" is not configured in this run's tracing service; it traces: orders/,
+    );
+  });
+
+  it('tracing: no tracing service at all', async () => {
+    await expect(resolve(emWith([]), { type: 'tracing', serviceName: 'orders' })).rejects.toThrow(/No tracing service is configured/);
+  });
+
+  it('pyroscope: [application, profiler, view], diff when asked and a comparison run exists', async () => {
+    const em = emWith([
+      ['FROM systems_under_test', pyroscopeSut],
+      ['FROM test_runs', [{ '?column?': 1 }]],
+    ]);
+    const r = await resolve(em, { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds', view: 'diff' });
+    expect(r.card).toBe('pyroscope');
+    expect(r.itemKey).toBe('["shop","process_cpu:cpu:nanoseconds:cpu:nanoseconds","diff"]');
+    expect(r.itemLabel).toBe('shop / process_cpu · Diff view');
+  });
+
+  it('pyroscope: single view needs no comparison run', async () => {
+    const em = emWith([['FROM systems_under_test', pyroscopeSut]]);
+    const r = await resolve(em, { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds', view: 'single' });
+    expect(r.itemKey).toBe('["shop","process_cpu:cpu:nanoseconds:cpu:nanoseconds","single"]');
+    expect(em.query.mock.calls.some(([sql]) => String(sql).includes('FROM test_runs'))).toBe(false);
+  });
+
+  it('pyroscope: diff with no comparison run, an unconfigured pair, and no Pyroscope at all', async () => {
+    const diff = { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds', view: 'diff' };
+    await expect(resolve(emWith([['FROM systems_under_test', pyroscopeSut]]), diff)).rejects.toThrow(/diff view needs a completed earlier run/);
+    await expect(
+      resolve(emWith([['FROM systems_under_test', pyroscopeSut]]), { ...diff, profiler: 'memory:alloc' }),
+    ).rejects.toThrow(/profiler "memory:alloc" is not configured.*configured: shop \(process_cpu/);
+    await expect(resolve(emWith([['FROM systems_under_test', [{ pyroscope_instance_id: null, pyroscope_configurations: [] }]]]), diff)).rejects.toThrow(
+      /Pyroscope is not configured/,
+    );
+  });
+
+  it.each([
+    [{ type: 'adapt', applicationDashboardId: 'x', panelId: 1, metricName: 'm' }, /anchor.applicationDashboardId/],
+    [{ type: 'adapt', applicationDashboardId: DASH, panelId: -1, metricName: 'm' }, /anchor.panelId/],
+    [{ type: 'tracing', serviceName: '' }, /anchor.serviceName/],
+    [{ type: 'pyroscope', application: 'a', profiler: 'p', view: 'side' }, /anchor.view/],
+  ])('parseAnchor refuses %j', (raw, msg) => {
+    expect(() => parseAnchor(raw)).toThrow(msg);
+  });
+});

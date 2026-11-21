@@ -14,7 +14,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { COMMENT_CARD_KEYS, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_CARD_KEYS, PYROSCOPE_VIEWS, type CommentCardKey, type PyroscopeView } from '@perfana/shared/constants/comment-cards';
 import { MARKER_MAX_SERIES } from './comment.dto';
 
 /**
@@ -23,7 +23,7 @@ import { MARKER_MAX_SERIES } from './comment.dto';
  * thing, the server builds the key"). Validated by the service per `type`, like a chart context,
  * because one nested union type here would have the global whitelist strip the other types' fields.
  */
-export const COMMENT_ANCHOR_TYPES = ['card', 'transaction', 'config', 'dashboard', 'slo', 'marker'] as const;
+export const COMMENT_ANCHOR_TYPES = ['card', 'transaction', 'config', 'dashboard', 'slo', 'marker', 'adapt', 'tracing', 'pyroscope'] as const;
 export type CommentAnchorType = (typeof COMMENT_ANCHOR_TYPES)[number];
 
 /** The card each anchor type belongs to; `card` names its own. */
@@ -33,6 +33,9 @@ export const ANCHOR_CARD: Readonly<Record<Exclude<CommentAnchorType, 'card'>, Co
   dashboard: 'dashboards',
   slo: 'slo',
   marker: 'graphs',
+  adapt: 'anomaly',
+  tracing: 'distributed-tracing',
+  pyroscope: 'pyroscope',
 });
 
 export class CardAnchorDto {
@@ -97,6 +100,34 @@ export class MarkerAnchorDto {
   range?: [string, string];
 }
 
+export class AdaptAnchorDto {
+  @IsIn(['adapt']) type!: 'adapt';
+  @ApiProperty({ description: 'application_dashboard_id of the Adapt result (get_adapt_results)' })
+  @IsUUID() applicationDashboardId!: string;
+  @IsInt() @Min(0) panelId!: number;
+  @ApiProperty({ description: 'Series name, as the Adapt result names it' })
+  @IsString() @Length(1, 500) metricName!: string;
+}
+
+export class TracingAnchorDto {
+  @IsIn(['tracing']) type!: 'tracing';
+  @ApiProperty({ description: 'A service name configured in the run\'s tracing service' })
+  @IsString() @Length(1, 255) serviceName!: string;
+  @IsOptional() @IsString() @Length(1, 1000) scenario?: string;
+  @IsOptional() @IsString() @Length(1, 1000) transaction?: string;
+  @IsOptional() @IsString() @Length(1, 1000) sampler?: string;
+}
+
+export class PyroscopeAnchorDto {
+  @IsIn(['pyroscope']) type!: 'pyroscope';
+  @ApiProperty({ description: 'Pyroscope application, as configured on the system' })
+  @IsString() @Length(1, 255) application!: string;
+  @ApiProperty({ description: 'Profiler type, as configured with that application (e.g. process_cpu:cpu:nanoseconds:cpu:nanoseconds)' })
+  @IsString() @Length(1, 255) profiler!: string;
+  @ApiProperty({ enum: PYROSCOPE_VIEWS, description: '"diff" opens the baseline-vs-current comparison' })
+  @IsIn([...PYROSCOPE_VIEWS]) view!: PyroscopeView;
+}
+
 export const ANCHOR_DTO_BY_TYPE = {
   card: CardAnchorDto,
   transaction: TransactionAnchorDto,
@@ -104,6 +135,9 @@ export const ANCHOR_DTO_BY_TYPE = {
   dashboard: DashboardAnchorDto,
   slo: SloAnchorDto,
   marker: MarkerAnchorDto,
+  adapt: AdaptAnchorDto,
+  tracing: TracingAnchorDto,
+  pyroscope: PyroscopeAnchorDto,
 } as const;
 
 export type CommentAnchor =
@@ -112,4 +146,7 @@ export type CommentAnchor =
   | ConfigAnchorDto
   | DashboardAnchorDto
   | SloAnchorDto
-  | MarkerAnchorDto;
+  | MarkerAnchorDto
+  | AdaptAnchorDto
+  | TracingAnchorDto
+  | PyroscopeAnchorDto;
