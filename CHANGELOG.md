@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.93] - 2026-11-21
+
+### Changed
+- **The Perfana MCP server is version 0.2.0.** It is the first version with the comment and investigation tools, so an AI agent set up with `npx -y @perfana/mcp` gets them once 0.2.0 is published to npm. They need a Perfana server at 0.2.97.92 or later.
+
 ## [0.2.97.92] - 2026-11-21
 
 ### Added

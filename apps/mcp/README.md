@@ -98,6 +98,9 @@ For root cause analysis, a typical agent workflow is:
 
 ## Leaving the analysis on the run (comments)
 
+The comment and investigation tools need `@perfana/mcp` 0.2.0 or later and a Perfana server at
+0.2.97.92 or later; an older server refuses them.
+
 What an agent finds usually ends up as chat text that nobody else on the team sees. With a
 `comments:write` key the agent can leave the walk from symptom to root cause on the run itself, as
 tagged comments pinned to the things they are about. In Perfana each one shows an **AI** chip next to
