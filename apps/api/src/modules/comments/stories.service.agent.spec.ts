@@ -95,7 +95,7 @@ describe('StoriesService agent stories', () => {
     const err = await service.create('run-1', { title: 't' }, agent).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(HttpException);
     expect((err as HttpException).getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
-    expect((err as HttpException).message).toMatch(/limit of 10 stories/);
+    expect((err as HttpException).message).toMatch(/limit of 10 investigations/);
     const sqls = em.query.mock.calls.map(([sql]) => String(sql));
     expect(sqls[0]).toContain("test_run_stories:agent:");
     expect(stories.save).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe('StoriesService agent stories', () => {
 
   it('never lets a key edit a user story, published or not', () => {
     const published = storyRow({ authorId: 'sub-1', authorKind: 'user', status: 'published' }) as unknown as TestRunStory;
-    expect(editDenial(published, agent)).toMatch(/only stories it created/);
+    expect(editDenial(published, agent)).toMatch(/only investigations it created/);
     expect(editDenial(published, ada)).toBeNull();
     expect(editDenial(published, bo)).toMatch(/Only the author/);
   });

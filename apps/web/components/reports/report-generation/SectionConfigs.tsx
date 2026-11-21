@@ -1959,11 +1959,11 @@ export function CommentsConfigForm({ config, onChange, text, onTextChange, testR
           onChange={(e) => onChange({ ...config, layout: e.target.value as CommentsSectionLayout })}
         >
           <MenuItem value="by-card">By card</MenuItem>
-          <MenuItem value="stories">Analysis stories</MenuItem>
+          <MenuItem value="stories">Investigations</MenuItem>
         </Select>
         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
           {layout === 'stories'
-            ? 'Every published analysis story of the run, step by step. Comments in no story are left out.'
+            ? 'Every published investigation of the run, step by step. Comments in no investigation are left out.'
             : 'Every comment thread, grouped by the card it was written on.'}
         </Typography>
       </FormControl>

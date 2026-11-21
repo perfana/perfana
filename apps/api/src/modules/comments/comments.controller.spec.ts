@@ -21,6 +21,7 @@ describe('CommentsController', () => {
     update: jest.fn(),
     replaceSteps: jest.fn(),
     remove: jest.fn(),
+    markSeen: jest.fn(),
   };
   const controller = new CommentsController(service as never, authz as never, stories as never);
   const key = { userId: 'api-key:123', roles: [], apiKeyDescription: 'CI key' } as unknown as UserContext;
@@ -143,6 +144,20 @@ describe('CommentsController', () => {
     await controller.listStories('run', key);
     await controller.getStory('s', key);
     expect(stories.list).toHaveBeenCalledWith('run', { userId: 'api-key:123', displayName: 'CI key', authorKind: 'agent', orgIds: ['org-a'] });
+  });
+
+  // PR7: an investigation's read mark, like a card's, belongs to a person; a key has no unread state.
+  it.each([
+    ['a key without the role', key],
+    ['a comments:write key', agentKey],
+  ])('refuses PUT stories/:id/seen from %s with 403', async (_name, who) => {
+    await expect(controller.storySeen('s', who)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(stories.markSeen).not.toHaveBeenCalled();
+  });
+
+  it('marks an investigation seen for a person', async () => {
+    await controller.storySeen('s', person);
+    expect(stories.markSeen).toHaveBeenCalledWith('s', { userId: 'sub-1', displayName: 'Ada', orgIds: ['org-a'] });
   });
 
   it('hands the step list of a PUT through as the ordered array', async () => {

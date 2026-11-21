@@ -176,17 +176,17 @@ describe('story message builders', () => {
   it('Slack names author, system, run, title and step count, and strips mentions and markup', () => {
     const msg = new SlackMessageBuilder().buildStoryMessage(story);
     const all = JSON.stringify(msg);
-    expect(msg.text).toBe('channel Daniel published an analysis on Shop run run-7: Checkout latency after deploy (1 step)');
+    expect(msg.text).toBe('channel Daniel published an investigation on Shop run run-7: Checkout latency after deploy (1 step)');
     expect(all).not.toContain('@channel');
     expect(all).not.toContain('<latency>');
-    expect(all).toContain('<https://perfana.example/test-runs/u?story=s|Read the analysis in Perfana>');
+    expect(all).toContain('<https://perfana.example/test-runs/u?story=s|Read the investigation in Perfana>');
   });
 
   it('names the AI agent and the person who reviewed and published its story', () => {
     const msg = new SlackMessageBuilder().buildStoryMessage({
       ...story, authorName: 'Claude analysis agent', authorKind: 'agent', publishedByName: '@here Anna',
     });
-    expect(msg.text).toBe('here Anna published an analysis proposed by Claude analysis agent (AI) on Shop run run-7: Checkout latency after deploy (1 step)');
+    expect(msg.text).toBe('here Anna published an investigation proposed by Claude analysis agent (AI) on Shop run run-7: Checkout latency after deploy (1 step)');
   });
 
   it('Teams carries an OpenUri action to the reader', () => {
@@ -197,7 +197,7 @@ describe('story message builders', () => {
 
   it('Mattermost uses text and attachments with a markdown link', () => {
     const msg = new MattermostMessageBuilder().buildStoryMessage(story);
-    expect(msg.text).toContain('published an analysis on Shop run run-7');
-    expect(msg.attachments?.[0]?.text).toContain('[Read the analysis in Perfana](https://perfana.example/test-runs/u?story=s)');
+    expect(msg.text).toContain('published an investigation on Shop run run-7');
+    expect(msg.attachments?.[0]?.text).toContain('[Read the investigation in Perfana](https://perfana.example/test-runs/u?story=s)');
   });
 });

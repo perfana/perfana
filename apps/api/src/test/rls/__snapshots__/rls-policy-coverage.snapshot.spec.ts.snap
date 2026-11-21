@@ -474,6 +474,13 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     ],
     "rls": true,
   },
+  "test_run_story_reads": {
+    "force": true,
+    "policies": [
+      "ALL:rls_test_run_story_reads_own",
+    ],
+    "rls": true,
+  },
   "test_run_story_steps": {
     "force": true,
     "policies": [

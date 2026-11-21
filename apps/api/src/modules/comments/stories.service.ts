@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { TestRunComment, TestRunStory, TestRunStoryStep } from '@perfana/shared/entities';
 import type { OwnedResource } from '@perfana/shared';
-import { AGENT_STORY_LIMIT, STORY_MAX_STEPS } from '@perfana/shared/constants/comment-cards';
+import { AGENT_STORY_LIMIT, COMMENT_UNREAD_WINDOW_DAYS, STORY_MAX_STEPS } from '@perfana/shared/constants/comment-cards';
 import { getRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { TestRunsGateway } from '../test-runs/gateways/test-runs.gateway';
@@ -68,7 +68,7 @@ export class StoriesService {
    * and it is published or the caller's own draft. `forUpdate` row-locks it inside a transaction.
    */
   private async loadStory(id: string, caller: CommentCaller, em: EntityManager, forUpdate = false): Promise<TestRunStory> {
-    const notFound = new NotFoundException('Story not found');
+    const notFound = new NotFoundException('Investigation not found');
     if (!UUID_RE.test(id)) throw notFound;
     const story = await em
       .getRepository(TestRunStory)
@@ -98,8 +98,58 @@ export class StoriesService {
       [stories.map((s) => s.id)],
     );
     const byStory = new Map(counts.map((c) => [c.story_id, c.n]));
+    const seen = await this.lastSeen(em, stories.map((s) => s.id), caller);
     const moderate = await this.canModerate(caller, run.organizationId);
-    return stories.map((s) => toStorySummary(s, byStory.get(s.id) ?? 0, caller, moderate));
+    const now = Date.now();
+    return stories.map((s) => toStorySummary(s, byStory.get(s.id) ?? 0, caller, moderate, isStoryUnread(s, seen.get(s.id) ?? null, caller, now)));
+  }
+
+  /**
+   * The caller's last look at each of these stories (`PUT /stories/:id/seen`). Empty for an API key:
+   * an agent has no unread state.
+   */
+  private async lastSeen(em: EntityManager, storyIds: string[], caller: CommentCaller): Promise<Map<string, Date>> {
+    if (storyIds.length === 0 || isKey(caller)) return new Map();
+    const rows: { story_id: string; last_seen_at: Date }[] = await em.query(
+      `SELECT story_id, last_seen_at FROM test_run_story_reads WHERE user_id = $1 AND story_id = ANY($2::uuid[])`,
+      [caller.userId, storyIds],
+    );
+    return new Map(rows.map((r) => [r.story_id, new Date(r.last_seen_at)]));
+  }
+
+  /**
+   * Mark a story read by the caller: the reader calls it when the story opens. 404 for a story the
+   * caller cannot read. The controller refuses API keys (an agent has no unread state).
+   */
+  // audit-skip: per-user read mark, not a resource change
+  async markSeen(id: string, caller: CommentCaller): Promise<void> {
+    await this.tx(async (em) => {
+      const story = await this.loadStory(id, caller, em);
+      await this.touchSeen(em, story, caller);
+    });
+  }
+
+  /**
+   * Upsert the caller's read mark at the transaction's `now()`, the same instant a bump of
+   * `activity_at` in this transaction wrote, so a person's own change never reads as unread to them.
+   */
+  private async touchSeen(em: EntityManager, story: TestRunStory, caller: CommentCaller): Promise<void> {
+    if (isKey(caller)) return;
+    await em.query(
+      `INSERT INTO test_run_story_reads (user_id, story_id, last_seen_at, organization_id)
+       VALUES ($1, $2, now(), $3)
+       ON CONFLICT (user_id, story_id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`,
+      [caller.userId, story.id, story.organizationId],
+    );
+  }
+
+  /** Move `activity_at` to the transaction's `now()`: the story is unread again for everyone else. */
+  private async bumpActivity(em: EntityManager, story: TestRunStory): Promise<void> {
+    const rows: { activity_at: Date }[] = await em.query(
+      `UPDATE test_run_stories SET activity_at = now() WHERE id = $1 RETURNING activity_at`,
+      [story.id],
+    );
+    if (rows[0]) story.activityAt = new Date(rows[0].activity_at);
   }
 
   /** One story with its steps, each joined to its comment as it reads now. */
@@ -131,7 +181,7 @@ export class StoriesService {
         );
         if (Number(counted[0]?.n ?? 0) >= AGENT_STORY_LIMIT) {
           throw new HttpException(
-            `This API key has reached its limit of ${AGENT_STORY_LIMIT} stories on this test run`,
+            `This API key has reached its limit of ${AGENT_STORY_LIMIT} investigations on this test run`,
             HttpStatus.TOO_MANY_REQUESTS,
           );
         }
@@ -157,6 +207,9 @@ export class StoriesService {
         }),
       );
       await this.insertSteps(em, story, steps);
+      // activity_at took its DEFAULT, the transaction's now(): new for everyone who can see it
+      // (an agent's draft), and read by its author.
+      await this.touchSeen(em, story, caller);
       return this.withSteps(story, caller, em);
     });
     this.emit(result.testRunId, result.id, result.organizationIdForEmit);
@@ -174,7 +227,7 @@ export class StoriesService {
       throw new BadRequestException('Send title, summary, status or a combination');
     }
     if (dto.status !== undefined && isKey(caller)) {
-      throw new ForbiddenException('An API key cannot publish or unpublish a story: a person reviews and publishes it');
+      throw new ForbiddenException('An API key cannot publish or unpublish an investigation: a person reviews and publishes it');
     }
     const result = await this.tx(async (em) => {
       const story = await this.loadStory(id, caller, em, true);
@@ -182,17 +235,23 @@ export class StoriesService {
       if (denial) throw new ForbiddenException(denial);
       if (dto.title !== undefined) story.title = normaliseTitle(dto.title);
       if (dto.summary !== undefined) story.summary = dto.summary;
+      // Unread again for the others: every publish, and an agent's own edit of its draft. A person's
+      // title or summary edit is a correction, not news.
+      let bump = isKey(caller) && (dto.title !== undefined || dto.summary !== undefined);
       if (dto.status !== undefined && dto.status !== story.status) {
         if (dto.status === 'published') {
           const steps = await em.getRepository(TestRunStoryStep).count({ where: { storyId: story.id } });
-          if (steps === 0) throw new BadRequestException('A story needs at least one step before it can be published');
+          if (steps === 0) throw new BadRequestException('An investigation needs at least one step before it can be published');
           story.publishedAt ??= new Date();
           story.publishedById = caller.userId;
           story.publishedByName = (caller.displayName || caller.userId).slice(0, 255);
+          bump = true;
         }
         story.status = dto.status;
       }
       const saved = await em.getRepository(TestRunStory).save(story);
+      if (bump) await this.bumpActivity(em, saved);
+      await this.touchSeen(em, saved, caller);
       return this.withSteps(saved, caller, em);
     });
     this.emit(result.testRunId, result.id, result.organizationIdForEmit);
@@ -210,7 +269,7 @@ export class StoriesService {
       const denial = editDenial(story, caller);
       if (denial) throw new ForbiddenException(denial);
       if (story.status === 'published' && steps.length === 0) {
-        throw new BadRequestException('A published story needs at least one step; unpublish it first');
+        throw new BadRequestException('A published investigation needs at least one step; unpublish it first');
       }
       const repo = em.getRepository(TestRunStoryStep);
       const existing = await repo.find({ where: { storyId: story.id } });
@@ -219,6 +278,9 @@ export class StoriesService {
       await this.insertSteps(em, story, steps);
       // Touch the story so `updatedAt` says the walk changed.
       const saved = await em.getRepository(TestRunStory).save({ ...story, updatedAt: new Date() });
+      // A changed walk is news on a published story, and on an agent's draft when the agent made it.
+      if (story.status === 'published' || isKey(caller)) await this.bumpActivity(em, saved);
+      await this.touchSeen(em, saved, caller);
       return this.withSteps(saved, caller, em);
     });
     this.emit(result.testRunId, result.id, result.organizationIdForEmit);
@@ -230,7 +292,7 @@ export class StoriesService {
     const story = await this.tx(async (em) => {
       const s = await this.loadStory(id, caller, em, true);
       const allowed = deletableByRule(s, caller) || (await this.canModerate(caller, s.organizationId));
-      if (!allowed) throw new ForbiddenException('Only the author or an organization admin can delete a story');
+      if (!allowed) throw new ForbiddenException('Only the author or an organization admin can delete an investigation');
       this.auditService.logDelete(s as unknown as OwnedResource, { organizationIdOverride: s.organizationId });
       await em.getRepository(TestRunStory).delete({ id: s.id });
       return s;
@@ -244,10 +306,10 @@ export class StoriesService {
    * delete of one waits for this transaction and then sees the step (and soft-deletes instead).
    */
   private async validateSteps(em: EntityManager, runId: string, steps: StoryStepInputDto[], alreadyIn: Set<string>): Promise<void> {
-    if (steps.length > STORY_MAX_STEPS) throw new BadRequestException(`A story holds at most ${STORY_MAX_STEPS} steps`);
+    if (steps.length > STORY_MAX_STEPS) throw new BadRequestException(`An investigation holds at most ${STORY_MAX_STEPS} steps`);
     const ids = steps.map((s) => s.commentId);
     if (ids.some((id) => !UUID_RE.test(id))) throw new BadRequestException('commentId must be a uuid');
-    if (new Set(ids).size !== ids.length) throw new BadRequestException('A comment can appear only once in a story');
+    if (new Set(ids).size !== ids.length) throw new BadRequestException('A comment can appear only once in an investigation');
     if (ids.length === 0) return;
     const rows: { id: string; test_run_id: string; parent_id: string | null; deleted_at: Date | null }[] = await em.query(
       `SELECT id, test_run_id, parent_id, deleted_at FROM test_run_comments WHERE id = ANY($1::uuid[]) FOR SHARE`,
@@ -257,7 +319,7 @@ export class StoriesService {
     for (const id of ids) {
       const c = byId.get(id);
       if (!c || c.test_run_id !== runId) throw new BadRequestException(`Comment ${id} is not a comment on this run`);
-      if (c.parent_id) throw new BadRequestException(`Comment ${id} is a reply; a story step is a root comment`);
+      if (c.parent_id) throw new BadRequestException(`Comment ${id} is a reply; an investigation step is a root comment`);
       if (c.deleted_at && !alreadyIn.has(id)) throw new BadRequestException(`Comment ${id} was deleted and cannot be added`);
     }
   }
@@ -302,8 +364,9 @@ export class StoriesService {
       stepResponses.push({ position: s.position, note: s.note ?? null, comment: { ...toResponse(c), replyCount: replyCount.get(c.id) ?? 0 } });
     }
     const moderate = deletableByRule(story, caller) ? true : await this.canModerate(caller, story.organizationId);
+    const seen = await this.lastSeen(em, [story.id], caller);
     return {
-      ...toStorySummary(story, stepResponses.length, caller, moderate),
+      ...toStorySummary(story, stepResponses.length, caller, moderate, isStoryUnread(story, seen.get(story.id) ?? null, caller, Date.now())),
       steps: stepResponses,
       organizationIdForEmit: story.organizationId,
     };
@@ -322,7 +385,7 @@ export class StoriesService {
 
 function normaliseTitle(raw: string): string {
   const title = raw.trim();
-  if (title.length === 0) throw new BadRequestException('A story needs a title');
+  if (title.length === 0) throw new BadRequestException('An investigation needs a title');
   return title;
 }
 
@@ -342,15 +405,15 @@ const isKey = (caller: Pick<CommentCaller, 'userId'>): boolean => caller.userId.
  */
 export function editDenial(s: TestRunStory, caller: CommentCaller): string | null {
   if (isKey(caller)) {
-    if (caller.authorKind !== 'agent' || s.authorId !== caller.userId) return 'An API key can edit only stories it created';
-    if (s.status !== 'draft') return 'This story was published by a person; an API key can no longer change it';
+    if (caller.authorKind !== 'agent' || s.authorId !== caller.userId) return 'An API key can edit only investigations it created';
+    if (s.status !== 'draft') return 'This investigation was published by a person; an API key can no longer change it';
     return null;
   }
   if (s.authorKind === 'agent') {
     if (s.status === 'draft' || s.publishedById === caller.userId) return null;
-    return 'Only the person who published this story can change it';
+    return 'Only the person who published this investigation can change it';
   }
-  return s.authorId === caller.userId ? null : 'Only the author can edit a story';
+  return s.authorId === caller.userId ? null : 'Only the author can edit an investigation';
 }
 
 /** Delete without moderator rights: a user's own story, or an agent's story the user may edit. Keys never. */
@@ -360,7 +423,29 @@ function deletableByRule(s: TestRunStory, caller: CommentCaller): boolean {
   return s.authorId === caller.userId;
 }
 
-export function toStorySummary(s: TestRunStory, stepCount: number, caller: CommentCaller, moderate: boolean): StorySummaryResponse {
+/**
+ * Whether a story is unread for the caller (PR7, "Investigation read state"):
+ * - never for an API key (an agent has no unread state) and never for the story's author;
+ * - only for a story others can see: published, or an AI agent's draft (a user's draft is seen by
+ *   its author alone, who is excluded above);
+ * - when its `activity_at` (every publish, a steps change while published, an agent's own writes
+ *   to its draft) is newer than the caller's last look, or they never looked;
+ * - and only within COMMENT_UNREAD_WINDOW_DAYS, like comments.
+ */
+export function isStoryUnread(
+  s: Pick<TestRunStory, 'authorId' | 'authorKind' | 'status' | 'activityAt' | 'createdAt'>,
+  lastSeenAt: Date | null,
+  caller: Pick<CommentCaller, 'userId'>,
+  now: number,
+): boolean {
+  if (isKey(caller) || s.authorId === caller.userId) return false;
+  if (s.status !== 'published' && s.authorKind !== 'agent') return false;
+  const activity = new Date(s.activityAt ?? s.createdAt).getTime();
+  if (!Number.isFinite(activity) || activity <= now - COMMENT_UNREAD_WINDOW_DAYS * 86_400_000) return false;
+  return lastSeenAt === null || activity > lastSeenAt.getTime();
+}
+
+export function toStorySummary(s: TestRunStory, stepCount: number, caller: CommentCaller, moderate: boolean, unread = false): StorySummaryResponse {
   return {
     id: s.id,
     testRunId: s.testRunId,
@@ -378,5 +463,6 @@ export function toStorySummary(s: TestRunStory, stepCount: number, caller: Comme
     stepCount,
     canEdit: editDenial(s, caller) === null,
     canDelete: !isKey(caller) && (deletableByRule(s, caller) || moderate),
+    unread,
   };
 }

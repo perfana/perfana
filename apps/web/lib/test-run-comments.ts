@@ -1,5 +1,5 @@
 import { authenticatedFetch } from '@/lib/api';
-import type { CommentAuthorKind, CommentCardKey, CommentTag, ConfigCommentView } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_UNREAD_WINDOW_DAYS, type CommentAuthorKind, type CommentCardKey, type CommentTag, type ConfigCommentView } from '@perfana/shared/constants/comment-cards';
 import type { SeriesConfig as PresetSeries } from '@/lib/graph-presets';
 
 /**
@@ -121,9 +121,12 @@ const send = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-/** One card's threads, or with no `card` every thread on the run (then `lastSeenAt` is null). */
+/**
+ * One card's threads, or with no `card` every thread on the run (then `lastSeenAt` is null and
+ * `lastSeenByCard` carries the caller's last look at every card; absent from an older API).
+ */
 export const fetchCommentThreads = async (runId: string, card?: CommentCardKey) =>
-  json<{ threads: RunCommentThread[]; lastSeenAt: string | null; canModerate?: boolean }>(
+  json<{ threads: RunCommentThread[]; lastSeenAt: string | null; lastSeenByCard?: Partial<Record<CommentCardKey, string | null>>; canModerate?: boolean }>(
     await authenticatedFetch(card ? `${base(runId)}?card=${encodeURIComponent(card)}` : base(runId)),
     'Loading comments',
   );
@@ -137,6 +140,38 @@ export type CardCommentCounts = Partial<Record<CommentCardKey, { total: number; 
 /** `5 unread`, or `5 unread (3 from AI)` when agents wrote some of them. */
 export function unreadCommentsLabel(unread: number, unreadFromAgents: number): string {
   return unreadFromAgents > 0 ? `${unread} unread (${unreadFromAgents} from AI)` : `${unread} unread`;
+}
+
+/**
+ * The counts' unread rule, client-side: by someone else, not deleted, within
+ * COMMENT_UNREAD_WINDOW_DAYS, and newer than the caller's last look at the comment's card (`null`:
+ * never looked). False while the caller is not known yet, so nothing flashes as unread.
+ */
+export function isUnreadComment(
+  c: Pick<RunComment, 'authorId' | 'deleted' | 'createdAt'>,
+  me: string,
+  lastSeen: string | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (!me || c.deleted || c.authorId === me) return false;
+  const t = Date.parse(c.createdAt);
+  if (!Number.isFinite(t) || t <= now - COMMENT_UNREAD_WINDOW_DAYS * 86_400_000) return false;
+  return !lastSeen || t > Date.parse(lastSeen);
+}
+
+/**
+ * A root is unread when it, or a reply under it, is unread for the caller. Without `lastSeenByCard`
+ * (an API older than this client) nothing is marked: guessing would mark everything.
+ */
+export function isUnreadThread(
+  t: RunCommentThread,
+  me: string,
+  lastSeenByCard: Partial<Record<CommentCardKey, string | null>> | undefined,
+  now = Date.now(),
+): boolean {
+  if (!lastSeenByCard) return false;
+  const seen = lastSeenByCard[t.cardKey] ?? null;
+  return isUnreadComment(t, me, seen, now) || t.replies.some((r) => isUnreadComment(r, me, seen, now));
 }
 
 export const fetchCommentCounts = async (runId: string) =>

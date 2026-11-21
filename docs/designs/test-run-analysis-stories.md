@@ -404,6 +404,48 @@ No delete or publish tools. The MCP README gets a worked example: diagnose a run
 9. **May an agent publish its own story**, for teams that want fully automated analysis (for example a CI step that runs an agent after every run)? Proposed no in v1: human publishing is what keeps an unreviewed root-cause claim out of the channel and the report. A later per-key `stories:publish` role could allow it, still labelled AI.
 10. **Should agent comments count as unread?** Proposed yes, labelled. If agents turn out to be chatty, the alternative is to count only published agent stories.
 
+## Revised: named "Investigation" in the UI, and investigation read state (PR7)
+
+**Revised 2026-11-21, after PR6b.** Users call a story an **investigation**, so every user-visible
+text says so: the dialog's **Investigations** tab, **Add to investigation**, **New investigation…**,
+the reader's *Investigation · step 3 of 6*, the report layout and heading, the channel post ("Daniel
+published an investigation on …"), API error messages and Swagger text, the user guide and the MCP
+tool descriptions. Nothing underneath changed name: tables, columns, `/stories` routes, code
+identifiers, `?story=`, `story:changed`, the MCP tool names and `layout: 'stories'` stay as they are.
+
+The comments overview also shows, on each root, an **In: <investigation>** chip per investigation it
+is a step of (from the `stories[]` the thread list already returned; two, then **+N**), which opens
+it in the reader, and a **Not in an investigation yet** filter. This answers Open Question 3 in part:
+reading an investigation still marks none of its comments seen.
+
+**Comment unread in the dialog.** The run-wide `GET /test-runs/:id/comments` returns
+`lastSeenByCard` (every card, `null` when never opened), and the dialog applies the counts' rule
+client-side (another author, not deleted, within `COMMENT_UNREAD_WINDOW_DAYS`, newer than that
+card's last look) to dot each unread root or root with an unread reply. The All comments tab badge is
+the server's per-card unread total. The dialog never marks anything seen.
+
+**Investigation read state** (migration 1834):
+
+- `test_run_story_reads (user_id, story_id, last_seen_at, organization_id)`, PK `(user_id, story_id)`,
+  FK to the story `ON DELETE CASCADE`, its own index on `story_id`, RLS as `test_run_comment_reads`
+  (own rows only). Not exported with a SUT.
+- `test_run_stories.activity_at timestamptz NOT NULL DEFAULT now()` is "when it became news": set on
+  every publish (including a republish), on a steps change while published, and on an AI agent's own
+  writes to its draft (create, title/summary, steps). A person's title or summary edit, an unpublish,
+  and a person's edit of an agent's draft leave it alone. Backfilled from `published_at` (published)
+  or `updated_at` (otherwise).
+- **Unread** for the caller: the story is visible to them (published, or an agent's draft), they are
+  not its author and not an API key, `activity_at` is within the 30-day window, and it is newer than
+  their `last_seen_at` (or they have none).
+- `PUT /stories/:id/seen` (API keys refused) is called by the reader when an unread investigation
+  opens. Every write by a person also marks the story seen for them, in the same transaction, so
+  `last_seen_at` and a bump of `activity_at` share one `now()` and a reviewer's own publish never
+  reads as unread to them.
+- The story list carries `unread` per story; the header already fetched that list once per page
+  load, so the badge costs no extra request. It refetches on `story:changed` and when the reader
+  marks one read. The header label reads e.g. *Comments: 12, 3 unread · Investigations: 1 unread*,
+  and the icon turns red when either is unread. The test-run list's badge stays comments-only.
+
 ## Out of Scope
 
 - Cross-run memory (surfacing earlier runs' root causes on a similar symptom). Tags are designed to make it possible; it gets its own design.

@@ -31,6 +31,12 @@ export interface RunStorySummary {
   canEdit: boolean;
   /** The caller may delete it (author, any user for an agent's draft, org admin, global admin). */
   canDelete: boolean;
+  /**
+   * New for the caller: someone else published it (or, an AI agent's draft, the agent wrote or changed
+   * it) since the caller last opened it, within the unread window. Absent from an API older than
+   * migration 1834, which reads as read.
+   */
+  unread?: boolean;
 }
 
 /** A step with its comment as it reads now; `comment.deleted` when it was deleted since. */
@@ -74,27 +80,31 @@ const storyUrl = (id: string) => `/stories/${encodeURIComponent(id)}`;
 
 /** Published stories of the run plus the caller's own drafts, oldest first. */
 export const fetchStories = async (runId: string) =>
-  json<RunStorySummary[]>(await authenticatedFetch(`/test-runs/${encodeURIComponent(runId)}/stories`), 'Loading stories');
+  json<RunStorySummary[]>(await authenticatedFetch(`/test-runs/${encodeURIComponent(runId)}/stories`), 'Loading investigations');
 
-export const fetchStory = async (id: string) => json<RunStory>(await authenticatedFetch(storyUrl(id)), 'Loading story');
+export const fetchStory = async (id: string) => json<RunStory>(await authenticatedFetch(storyUrl(id)), 'Loading the investigation');
 
 /** Start a draft; `steps` usually holds the comment it was started from. */
 export const createStory = async (runId: string, title: string, steps: StoryStepInput[] = []) =>
   json<RunStory>(
     await authenticatedFetch(`/test-runs/${encodeURIComponent(runId)}/stories`, send('POST', { title, steps })),
-    'Creating story',
+    'Creating the investigation',
   );
 
 /** Title, summary (null clears it) and status; an absent key is left alone. */
 export const updateStory = async (id: string, patch: { title?: string; summary?: string | null; status?: StoryStatus }) =>
-  json<RunStory>(await authenticatedFetch(storyUrl(id), send('PATCH', patch)), 'Saving story');
+  json<RunStory>(await authenticatedFetch(storyUrl(id), send('PATCH', patch)), 'Saving the investigation');
 
 /** The full ordered list; replaces every step. */
 export const replaceStorySteps = async (id: string, steps: StoryStepInput[]) =>
   json<RunStory>(await authenticatedFetch(`${storyUrl(id)}/steps`, send('PUT', { steps })), 'Saving steps');
 
+/** Mark an investigation read by the caller; the reader calls it when it opens one. */
+export const markStorySeen = async (id: string) =>
+  json<void>(await authenticatedFetch(`${storyUrl(id)}/seen`, { method: 'PUT' }), 'Marking the investigation read');
+
 export const deleteStory = async (id: string) =>
-  json<void>(await authenticatedFetch(storyUrl(id), { method: 'DELETE' }), 'Deleting story');
+  json<void>(await authenticatedFetch(storyUrl(id), { method: 'DELETE' }), 'Deleting the investigation');
 
 /** Append a comment to a story the caller edits, unless it is already a step. */
 export async function addCommentToStory(storyId: string, commentId: string): Promise<{ story: RunStory; added: boolean }> {

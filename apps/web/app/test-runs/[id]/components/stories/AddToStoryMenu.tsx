@@ -49,6 +49,7 @@ export function AddToStoryMenu({ commentId, label }: { commentId: string; label?
     setAnchor(null);
     try {
       const { added } = await addCommentToStory(story.id, commentId);
+      if (added) ctx.noteStoryChanged?.(story.id);
       setToast(added ? `Added to “${story.title}”` : `Already a step of “${story.title}”`);
     } catch (e) {
       setToast(message(e));
@@ -60,10 +61,11 @@ export function AddToStoryMenu({ commentId, label }: { commentId: string; label?
     setBusy(true);
     setDialogError(null);
     try {
-      await createStory(ctx.runId, t, [{ commentId }]);
+      const created = await createStory(ctx.runId, t, [{ commentId }]);
+      ctx.noteStoryChanged?.(created.id);
       setNaming(false);
       setTitle('');
-      setToast(`Started “${t}”: edit it under Comments (run header) › Stories`);
+      setToast(`Started “${t}”: edit it under Comments (run header) › Investigations`);
     } catch (e) {
       setDialogError(message(e));
     } finally {
@@ -78,16 +80,16 @@ export function AddToStoryMenu({ commentId, label }: { commentId: string; label?
         endIcon={<ArrowDropDownIcon />}
         aria-haspopup="menu"
         aria-expanded={anchor ? 'true' : undefined}
-        aria-label={label ?? 'Add to story'}
+        aria-label={label ?? 'Add to investigation'}
         onClick={(e) => open(e.currentTarget)}
         sx={{ textTransform: 'none', flexShrink: 0 }}
       >
-        Add to story
+        Add to investigation
       </Button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
         {!stories && !loadError && (
           <MenuItem disabled>
-            <CircularProgress size={16} sx={{ mr: 1 }} /> Loading stories…
+            <CircularProgress size={16} sx={{ mr: 1 }} /> Loading investigations…
           </MenuItem>
         )}
         {loadError && <MenuItem disabled>{loadError}</MenuItem>}
@@ -106,11 +108,11 @@ export function AddToStoryMenu({ commentId, label }: { commentId: string; label?
             setNaming(true);
           }}
         >
-          New story…
+          New investigation…
         </MenuItem>
       </Menu>
       <Dialog open={naming} onClose={() => !busy && setNaming(false)} fullWidth maxWidth="xs">
-        <DialogTitle>New story</DialogTitle>
+        <DialogTitle>New investigation</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
             Starts a draft only you can see, with this comment as its first step.

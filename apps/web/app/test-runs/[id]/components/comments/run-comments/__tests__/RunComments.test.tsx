@@ -27,6 +27,7 @@ jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush, replace: jest.fn() }),
   usePathname: () => '/test-runs/run',
 }));
+jest.mock('@/contexts/auth-context', () => ({ useAuth: () => ({ user: { id: 'me' } }) }));
 jest.mock('@/lib/test-run-comments', () => ({
   ...jest.requireActual('@/lib/test-run-comments'),
   fetchCommentCounts: jest.fn(),
@@ -96,14 +97,14 @@ it('is shown for a run with stories only, so they stay reachable', async () => {
   mocked.fetchCommentCounts.mockResolvedValue({});
   mockedStories.fetchStories.mockResolvedValue([{ id: 's1' } as never]);
   renderButton();
-  expect(await screen.findByTestId('run-comments-button')).toHaveAccessibleName('Comments: 1 story');
+  expect(await screen.findByTestId('run-comments-button')).toHaveAccessibleName('Comments: 1 investigation');
 });
 
 it("is shown when the run's only content is an AI agent's draft story (the API lists it to everyone)", async () => {
   mocked.fetchCommentCounts.mockResolvedValue({});
   mockedStories.fetchStories.mockResolvedValue([{ id: 's1', status: 'draft', authorKind: 'agent', authorId: 'api-key:k1' } as never]);
   renderButton();
-  expect(await screen.findByTestId('run-comments-button')).toHaveAccessibleName('Comments: 1 story');
+  expect(await screen.findByTestId('run-comments-button')).toHaveAccessibleName('Comments: 1 investigation');
 });
 
 it('badges the total, says how many are unread, and fetches threads only once opened', async () => {
@@ -238,17 +239,158 @@ it('applies live creates, updates and deletes from the run room', async () => {
   expect(rowIds()).toHaveLength(4);
 });
 
-it('Stories tab: Read closes the dialog and opens the story reader', async () => {
+it('Investigations tab: Read closes the dialog and opens the reader', async () => {
   mockedStories.fetchStories.mockResolvedValue([
     { id: 's1', testRunId: 'run', title: 'Checkout latency', summary: null, status: 'published', authorId: 'other', authorName: 'Anna', authorKind: 'user',
       publishedAt: '2026-11-19T10:00:00Z', createdAt: '2026-11-19T10:00:00Z', updatedAt: '2026-11-19T10:00:00Z', stepCount: 2, canEdit: false, canDelete: false },
   ]);
   await renderCard();
-  fireEvent.click(screen.getByRole('tab', { name: 'Stories' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Investigations' }));
   const row = await screen.findByTestId('story-row');
   expect(row).toHaveTextContent('Checkout latency');
   expect(within(row).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   fireEvent.click(within(row).getByRole('button', { name: 'Read' }));
   expect(mockPush).toHaveBeenCalledWith('/test-runs/run?story=s1', { scroll: false });
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Comments' })).not.toBeInTheDocument());
+});
+
+// --- PR7: investigations each comment is in, and unread state in the dialog ---
+
+const storySummary = (over: Partial<storiesApi.RunStorySummary>): storiesApi.RunStorySummary => ({
+  id: 's', testRunId: 'run', title: 'T', summary: null, status: 'published', authorId: 'other', authorName: 'Anna', authorKind: 'user',
+  publishedAt: '2026-11-19T10:00:00Z', publishedById: 'other', publishedByName: 'Anna', createdAt: '2026-11-19T10:00:00Z',
+  updatedAt: '2026-11-19T10:00:00Z', stepCount: 1, canEdit: false, canDelete: false, ...over,
+});
+const rowOf = (id: string) => rows().find((r) => r.getAttribute('data-comment-id') === id)!;
+
+describe('investigation chips', () => {
+  const withStories = (): api.RunCommentThread[] =>
+    THREADS.map((t) =>
+      t.id === 'mid'
+        ? { ...t, stories: [
+            { id: 's1', title: 'Checkout latency after the Tuesday deploy, part two', position: 3 },
+            { id: 's2', title: 'GC', position: 1 },
+            { id: 's3', title: 'Heap', position: 2 },
+            { id: 's4', title: 'Hosts', position: 4 },
+          ] }
+        : t.id === 'old' ? { ...t, stories: [{ id: 's2', title: 'GC', position: 2 }] } : { ...t },
+    );
+
+  it('shows "In: <title>" per investigation, truncated, two at most and then +N', async () => {
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: withStories(), lastSeenAt: null });
+    await renderCard();
+    await screen.findAllByTestId('run-comments-row');
+    const mid = within(rowOf('mid')).getByTestId('run-comments-row-stories');
+    expect(mid).toHaveTextContent('In: Checkout latency after the Tues…');
+    expect(mid).toHaveTextContent('In: GC');
+    expect(mid).not.toHaveTextContent('Heap');
+    expect(mid).toHaveTextContent('+2');
+    expect(within(rowOf('old')).getByTestId('run-comments-row-stories')).toHaveTextContent('In: GC');
+    expect(within(rowOf('new')).queryByTestId('run-comments-row-stories')).not.toBeInTheDocument();
+  });
+
+  it('a chip closes the dialog and opens that investigation in the reader', async () => {
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: withStories(), lastSeenAt: null });
+    await renderCard();
+    await screen.findAllByTestId('run-comments-row');
+    fireEvent.click(within(rowOf('old')).getByRole('button', { name: 'Read the investigation GC (step 2)' }));
+    expect(mockPush).toHaveBeenCalledWith('/test-runs/run?story=s2', { scroll: false });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Comments' })).not.toBeInTheDocument());
+  });
+
+  it('filters to comments not in an investigation yet', async () => {
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: withStories(), lastSeenAt: null });
+    await renderCard();
+    await screen.findAllByTestId('run-comments-row');
+    fireEvent.click(screen.getByLabelText('Not in an investigation yet'));
+    expect(rowIds()).toEqual(['new', 'gone']);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(rowIds()).toHaveLength(4);
+  });
+
+  it('refetches on story:changed so a new investigation shows up on its comment', async () => {
+    await renderCard();
+    await screen.findAllByTestId('run-comments-row');
+    expect(within(rowOf('new')).queryByTestId('run-comments-row-stories')).not.toBeInTheDocument();
+    mocked.fetchCommentThreads.mockResolvedValue({
+      threads: THREADS.map((t) => (t.id === 'new' ? { ...t, stories: [{ id: 's9', title: 'Fresh', position: 1 }] } : { ...t })),
+      lastSeenAt: null,
+    });
+    act(() => (handlers['story:changed'] as unknown as (e: unknown) => void)({ testRunId: 'run', storyId: 's9' }));
+    await waitFor(() => expect(within(rowOf('new')).getByTestId('run-comments-row-stories')).toHaveTextContent('In: Fresh'));
+    expect(mocked.fetchCommentThreads).toHaveBeenCalledTimes(2);
+    // The list stayed on screen while it refetched.
+    expect(rowIds()).toHaveLength(4);
+  });
+});
+
+describe('unread in the dialog', () => {
+  const recent = (minsAgo: number) => new Date(Date.now() - minsAgo * 60_000).toISOString();
+
+  it('dots a root that is unread, or has an unread reply, by the counts rule, and marks nothing seen', async () => {
+    mocked.fetchCommentThreads.mockResolvedValue({
+      threads: [
+        thread({ id: 'fresh', cardKey: 'graphs', createdAt: recent(5) }),
+        thread({ id: 'seen', cardKey: 'slo', createdAt: recent(30) }),
+        thread({ id: 'mine', cardKey: 'details', authorId: 'me', createdAt: recent(5) }),
+        thread({ id: 'reply', cardKey: 'slo', createdAt: recent(90) }, [comment({ id: 'rr', parentId: 'reply', cardKey: 'slo', createdAt: recent(2) })]),
+        thread({ id: 'stale', cardKey: 'config', createdAt: new Date(Date.now() - 40 * 86_400_000).toISOString() }),
+        thread({ id: 'deleted', cardKey: 'graphs', deleted: true, body: null, createdAt: recent(3) }),
+      ],
+      lastSeenAt: null,
+      lastSeenByCard: { graphs: recent(10), slo: recent(10), details: null, config: null },
+    });
+    await renderCard();
+    await screen.findAllByTestId('run-comments-row');
+    const dotted = rows().filter((r) => within(r).queryByTestId('run-comments-unread-dot')).map((r) => r.getAttribute('data-comment-id'));
+    expect(dotted.sort()).toEqual(['fresh', 'reply']);
+    expect(mocked.markCommentsSeen).not.toHaveBeenCalled();
+  });
+
+  it('marks nothing when the API sends no lastSeenByCard (an older API)', async () => {
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: [thread({ id: 'fresh', createdAt: recent(5) })], lastSeenAt: null });
+    await renderCard();
+    await screen.findAllByTestId('run-comments-row');
+    expect(screen.queryByTestId('run-comments-unread-dot')).not.toBeInTheDocument();
+  });
+
+  it('badges each tab with its unread count and dots each unread investigation', async () => {
+    mockedStories.fetchStories.mockResolvedValue([
+      storySummary({ id: 's1', title: 'Unread one', unread: true }),
+      storySummary({ id: 's2', title: 'Read one', unread: false }),
+    ]);
+    await renderCard();
+    expect(screen.getByRole('tab', { name: 'All comments, 1 unread' })).toBeInTheDocument();
+    expect(screen.getByTestId('run-comments-tab-all-unread')).toHaveTextContent('1');
+    const tab = await screen.findByRole('tab', { name: 'Investigations, 1 unread' });
+    fireEvent.click(tab);
+    const storyRows = await screen.findAllByTestId('story-row');
+    expect(within(storyRows[0]!).getByTestId('story-unread-dot')).toBeInTheDocument();
+    expect(within(storyRows[1]!).queryByTestId('story-unread-dot')).not.toBeInTheDocument();
+  });
+
+  it('shows plain tab names when nothing is unread', async () => {
+    mocked.fetchCommentCounts.mockResolvedValue({ slo: { total: 1, unread: 0 } });
+    mockedStories.fetchStories.mockResolvedValue([storySummary({ id: 's1', unread: false })]);
+    await renderCard();
+    expect(screen.getByRole('tab', { name: 'All comments' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Investigations' })).toBeInTheDocument();
+  });
+});
+
+describe('header icon with investigations', () => {
+  it.each([
+    ['comments unread only', { slo: { total: 2, unread: 1 } }, [storySummary({ unread: false })], 'Comments: 2, 1 unread', true],
+    ['an investigation unread only', { slo: { total: 2, unread: 0 } }, [storySummary({ unread: true })], 'Comments: 2 · Investigations: 1 unread', true],
+    ['both unread', { slo: { total: 12, unread: 3 } }, [storySummary({ id: 'a', unread: true }), storySummary({ id: 'b', unread: false })], 'Comments: 12, 3 unread · Investigations: 1 unread', true],
+    ['nothing unread', { slo: { total: 2, unread: 0 } }, [storySummary({ unread: false })], 'Comments: 2', false],
+    ['investigations only, one unread', {}, [storySummary({ unread: true })], 'Comments: 1 investigation · Investigations: 1 unread', true],
+  ] as const)('%s', async (_n, counts, stories, label, red) => {
+    mocked.fetchCommentCounts.mockResolvedValue(counts as never);
+    mockedStories.fetchStories.mockResolvedValue([...stories]);
+    renderButton();
+    const button = await screen.findByTestId('run-comments-button');
+    await waitFor(() => expect(button).toHaveAccessibleName(label));
+    expect(button.className.includes('MuiIconButton-colorError')).toBe(red);
+  });
 });

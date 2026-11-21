@@ -16,7 +16,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import type { CommentCardKey } from '@perfana/shared/constants/comment-cards';
 import type { CommentView } from '@/lib/test-run-comments';
 import { formatCommentTime } from '@/lib/test-run-comments';
-import { fetchStory, storyHref, type RunStory, type RunStoryStep } from '@/lib/test-run-stories';
+import { fetchStory, markStorySeen, storyHref, type RunStory, type RunStoryStep } from '@/lib/test-run-stories';
 import { expansionKeyOf, useComments } from '../comments/CommentsContext';
 import { CommentTagChip } from '../comments/CommentTagChip';
 import { firstLine, isTypingTarget, stepWhere, tagOf } from './story-format';
@@ -43,7 +43,8 @@ export function readerScreen(stepParam: string | null, stepCount: number): { kin
  * View preservation: the first time a step replays a view on a card, that card's current view is
  * captured (`captureView`); the per-replay "Showing the comment's view · Undo" toasts are
  * suppressed (`silent`), and leaving the story (Exit, Esc, or the URL losing `story`) puts every
- * captured card back. Reading marks nothing seen.
+ * captured card back. Opening it marks the investigation itself read (`PUT /stories/:id/seen`), never
+ * the comments in it: those stay unread until their card's drawer is open.
  */
 export default function StoryReader() {
   const ctx = useComments();
@@ -109,12 +110,26 @@ export default function StoryReader() {
       .catch((e: unknown) => {
         if (!live) return;
         const status = (e as { status?: number })?.status;
-        setLoadError(status === 404 ? 'This story is not available: it was deleted, unpublished, or is not yours to read.' : e instanceof Error ? e.message : 'Loading the story failed');
+        setLoadError(status === 404 ? 'This investigation is not available: it was deleted, unpublished, or is not yours to read.' : e instanceof Error ? e.message : 'Loading the investigation failed');
       });
     return () => {
       live = false;
     };
   }, [storyId, storyEventSeq, commentSeq]);
+
+  // Opening an investigation marks it read for the caller (PR7), once per story per visit and only
+  // when the API says it is unread, so a refetch does not write again. This is the one place it is
+  // marked read; the Comments dialog never does.
+  const markedSeen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!story || story.id !== storyId || !story.unread || markedSeen.current === story.id) return;
+    markedSeen.current = story.id;
+    markStorySeen(story.id)
+      .then(() => ctxRef.current?.noteStoryRead?.())
+      .catch(() => {
+        markedSeen.current = null;
+      });
+  }, [story, storyId]);
 
   // Leaving the story (or switching to another one) puts back every card it replaced a view on.
   // One card at a time: the page keeps a single view request, which each card consumes on its own
@@ -210,7 +225,7 @@ export default function StoryReader() {
         <DialogTitle id="story-intro-title">{story.title}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            {story.authorKind === 'agent' && story.status === 'published' ? <StoryAuthorLine story={story} /> : <>A story by <StoryAuthorLine story={story} /></>}
+            {story.authorKind === 'agent' && story.status === 'published' ? <StoryAuthorLine story={story} /> : <>An investigation by <StoryAuthorLine story={story} /></>}
             {story.status === 'draft'
               ? story.authorKind === 'agent'
                 ? ` · ${AI_DRAFT_LABEL}, visible to everyone who can see this run`
@@ -242,7 +257,7 @@ export default function StoryReader() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => go(count)} disabled={count === 0}>‹ Last step</Button>
-          <Button variant="contained" onClick={exit}>Exit story</Button>
+          <Button variant="contained" onClick={exit}>Exit investigation</Button>
         </DialogActions>
       </Dialog>
       {step && screen?.kind === 'step' && (
@@ -279,7 +294,7 @@ function StoryBarFrame({ barRef, barHeight, children }: { barRef: (el: HTMLDivEl
         ref={barRef}
         elevation={8}
         role="region"
-        aria-label="Story"
+        aria-label="Investigation"
         data-testid="story-bar"
         sx={{
           position: 'fixed',
@@ -338,7 +353,7 @@ function StepBar({
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
         <Button size="small" onClick={onPrev} aria-label={index === 0 ? 'Back to the introduction' : 'Previous step'}>‹ Prev</Button>
         <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }} aria-live="polite">
-          Step {index + 1} of {count}
+          Investigation · step {index + 1} of {count}
         </Typography>
       </Box>
       <Box sx={{ flex: '1 1 320px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -389,7 +404,7 @@ function StepBar({
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, ml: 'auto' }}>
         <Button size="small" variant="contained" onClick={onNext}>{index + 1 === count ? 'Conclusion ›' : 'Next ›'}</Button>
-        <IconButton size="small" onClick={onExit} aria-label="Exit story">
+        <IconButton size="small" onClick={onExit} aria-label="Exit investigation">
           <CloseIcon fontSize="small" />
         </IconButton>
       </Box>

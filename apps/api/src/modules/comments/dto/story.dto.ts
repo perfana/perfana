@@ -18,7 +18,7 @@ export class StoryStepInputDto {
   @IsUUID()
   commentId!: string;
 
-  @ApiPropertyOptional({ type: String, nullable: true, maxLength: STORY_STEP_NOTE_MAX_LENGTH, description: "The story author's words for this step" })
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: STORY_STEP_NOTE_MAX_LENGTH, description: "The investigation author's words for this step" })
   @ValidateIf((o: StoryStepInputDto) => o.note !== undefined && o.note !== null)
   @IsString()
   @MaxLength(STORY_STEP_NOTE_MAX_LENGTH)
@@ -99,6 +99,12 @@ export interface StorySummaryResponse {
   canEdit: boolean;
   /** The caller may delete it: its author, any user for an agent's draft, an org admin, or a global admin. Never an API key. */
   canDelete: boolean;
+  /**
+   * New for the caller: published, or an AI agent's draft, by someone else, and published or changed
+   * (republished, steps changed while published, or edited by the agent) since the caller last opened
+   * it, within the last 30 days. Always false for the author and for an API key.
+   */
+  unread: boolean;
 }
 
 /** A step with its comment as it reads now: the redacted shape when the comment was deleted. */

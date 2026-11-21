@@ -266,7 +266,9 @@ describe('CommentsRenderer stories layout', () => {
     expect(dataFetcher.getPublishedStories).toHaveBeenCalledWith(testRun, 'u1', ['r']);
     expect(dataFetcher.getTestRunComments).not.toHaveBeenCalled();
     expect(html).not.toContain('not in a story');
-    expect(html).toContain('2 analysis stories');
+    expect(html).toContain('2 investigations');
+    // Untitled, the stories layout is headed with the app's name for it (PR7).
+    expect(html).toMatch(/>Investigations</);
     expect(html).toContain('>Checkout latency after deploy</h3>');
     expect(html).toContain('2 steps');
     expect(html).toContain('>Daniel</strong>');
@@ -321,6 +323,6 @@ describe('CommentsRenderer stories layout', () => {
   it('says so when the run has no published story', async () => {
     const { renderer } = setup([row()], [], []);
     const html = await renderer.renderCommentsSection(section({ layout: 'stories' }), testRun);
-    expect(html).toContain('No published analysis stories for this run.');
+    expect(html).toContain('No published investigations for this run.');
   });
 });

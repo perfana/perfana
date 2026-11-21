@@ -29,6 +29,7 @@ import {
 import { commentCountsByCard, type CommentCounts } from './comment-unread.sql';
 import {
   AGENT_COMMENT_LIMITS,
+  COMMENT_CARD_KEYS,
   COMMENT_ITEM_KEY_MAX_LENGTH,
   COMMENT_UNREAD_WINDOW_DAYS,
   type CommentAuthorKind,
@@ -145,7 +146,7 @@ export class CommentsService {
     runIdOrTestRunId: string,
     card: string | undefined,
     caller: CommentCaller,
-  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; canModerate: boolean }> {
+  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; lastSeenByCard?: Record<string, string | null>; canModerate: boolean }> {
     const run = await this.resolveRun(runIdOrTestRunId, caller);
     const where: Record<string, unknown> = { testRunId: run.id };
     if (card) where.cardKey = card;
@@ -180,7 +181,14 @@ export class CommentsService {
     const canModerate =
       !caller.userId.startsWith('api-key:') &&
       (caller.orgIds === null || (await this.authzService.isOrganizationAdmin(caller.userId, run.organizationId)));
-    return { threads: [...threads.values()], lastSeenAt: read ? new Date(read.lastSeenAt).toISOString() : null, canModerate };
+    const lastSeenAt = read ? new Date(read.lastSeenAt).toISOString() : null;
+    if (card) return { threads: [...threads.values()], lastSeenAt, canModerate };
+    // The whole run: the caller's look at every card, so the Comments dialog can mark unread
+    // threads by the counts' rule without marking anything seen itself.
+    const reads = await em.getRepository(TestRunCommentRead).find({ where: { userId: caller.userId, testRunId: run.id } });
+    const lastSeenByCard: Record<string, string | null> = Object.fromEntries(COMMENT_CARD_KEYS.map((k) => [k, null]));
+    for (const r of reads) lastSeenByCard[r.cardKey] = new Date(r.lastSeenAt).toISOString();
+    return { threads: [...threads.values()], lastSeenAt, lastSeenByCard, canModerate };
   }
 
   // audit-skip: user discussion, not configuration; the row records its author and time itself

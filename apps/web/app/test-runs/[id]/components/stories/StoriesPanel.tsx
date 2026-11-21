@@ -37,6 +37,7 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
   const ctx = useComments();
   const runId = ctx?.runId;
   const storyEvent = ctx?.storyEvent?.seq ?? 0;
+  const storyRead = ctx?.storyReadSeq ?? 0;
   const [stories, setStories] = useState<RunStorySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -59,43 +60,53 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
         setStories(s);
         setError(null);
       })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Loading stories failed'));
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Loading investigations failed'));
     return () => {
       live = false;
     };
-  }, [runId, storyEvent, editing]);
+  }, [runId, storyEvent, storyRead, editing]);
 
   if (editing) return <StoryEditor storyId={editing} onClose={() => setEditing(null)} onRead={openStory} />;
 
   return (
     <Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-        A story walks a reader through comments in your order: each step opens the card, row or chart view the comment is
-        about. Start one with “Add to story” on a comment.
+        An investigation walks a reader through comments in your order: each step opens the card, row or chart view the
+        comment is about. Start one with “Add to investigation” on a comment.
       </Typography>
       {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
       {!stories && !error && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-          <CircularProgress size={24} aria-label="Loading stories" />
+          <CircularProgress size={24} aria-label="Loading investigations" />
         </Box>
       )}
       {stories && stories.length === 0 && (
         <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-          No stories on this run yet.
+          No investigations on this run yet.
         </Typography>
       )}
       {stories && stories.length > 0 && (
-        <Box component="ul" aria-label="Stories" sx={{ listStyle: 'none', p: 0, m: 0 }}>
+        <Box component="ul" aria-label="Investigations" sx={{ listStyle: 'none', p: 0, m: 0 }}>
           {stories.map((s) => (
             <Box
               component="li"
               key={s.id}
               data-testid="story-row"
+              data-unread={s.unread ? 'true' : undefined}
               sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, py: 1.25, borderTop: 1, borderColor: 'divider' }}
             >
               <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{s.title}</Typography>
+                  {s.unread && (
+                    <Box
+                      component="span"
+                      role="img"
+                      aria-label="Unread"
+                      data-testid="story-unread-dot"
+                      sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'error.main', flexShrink: 0 }}
+                    />
+                  )}
+                  <Typography variant="body2" sx={{ fontWeight: s.unread ? 700 : 600, overflowWrap: 'anywhere' }}>{s.title}</Typography>
                   <Chip
                     size="small"
                     variant="outlined"

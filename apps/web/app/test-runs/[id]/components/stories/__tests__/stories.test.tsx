@@ -33,6 +33,7 @@ jest.mock('@/lib/test-run-stories', () => ({
   replaceStorySteps: jest.fn(),
   updateStory: jest.fn(),
   deleteStory: jest.fn(),
+  markStorySeen: jest.fn(),
 }));
 const api = storiesApi as jest.Mocked<typeof storiesApi>;
 
@@ -87,9 +88,13 @@ beforeEach(() => {
     openDrawer: jest.fn(),
     applyView: jest.fn(),
     setActiveThreadId: jest.fn(),
+    noteStoryRead: jest.fn(),
+    noteStoryChanged: jest.fn(),
+    storyReadSeq: 0,
     captureView: jest.fn(() => ({ kind: 'graphs', series: [{ dashboardId: 'mine', panelId: 9, metricName: 'before' }] })),
   });
   api.fetchStory.mockResolvedValue(clone(STORY));
+  api.markStorySeen.mockResolvedValue(undefined);
   document.body.innerHTML = '';
 });
 
@@ -109,6 +114,8 @@ describe('StoryReader', () => {
     render(<StoryReader />);
     const dialog = await screen.findByRole('dialog', { name: 'Checkout latency' });
     expect(within(dialog).getByText('Configuration › heap.max')).toBeInTheDocument();
+    // Named "investigation" in the UI (PR7); stored and routed as a story.
+    expect(dialog).toHaveTextContent('An investigation by Anna');
     expect(within(dialog).getByText('Comment deleted')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Start' }));
     expect(lastReplace()).toBe('/test-runs/run-1?tab=x&story=s1&step=1');
@@ -119,7 +126,7 @@ describe('StoryReader', () => {
     setUrl('story=s1&step=1');
     render(<StoryReader />);
     await screen.findByTestId('story-bar');
-    expect(screen.getByText('Step 1 of 4')).toBeInTheDocument();
+    expect(screen.getByText('Investigation · step 1 of 4')).toBeInTheDocument();
     expect(ctx.captureView).toHaveBeenCalledWith('graphs', null);
     expect(ctx.reveal).toHaveBeenCalledWith('graphsExpanded');
     expect(ctx.restoreView).toHaveBeenCalledWith(expect.objectContaining({ id: 'm1' }), { silent: true });
@@ -223,11 +230,31 @@ describe('StoryReader', () => {
     expect(within(dialog).getByText('Heap too small.')).toBeInTheDocument();
   });
 
+  // PR7: opening an investigation marks it read, once, and only when the API says it is unread.
+  it('marks an unread investigation read when it opens, once, and tells the page', async () => {
+    api.fetchStory.mockResolvedValue({ ...clone(STORY), unread: true });
+    setUrl('story=s1');
+    const { rerender } = render(<StoryReader />);
+    await screen.findByRole('dialog', { name: 'Checkout latency' });
+    await waitFor(() => expect(api.markStorySeen).toHaveBeenCalledWith('s1'));
+    await waitFor(() => expect(ctx.noteStoryRead).toHaveBeenCalledTimes(1));
+    rerender(<StoryReader />);
+    expect(api.markStorySeen).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes nothing for an investigation that is already read', async () => {
+    api.fetchStory.mockResolvedValue({ ...clone(STORY), unread: false });
+    setUrl('story=s1&step=2');
+    render(<StoryReader />);
+    await screen.findByTestId('story-bar');
+    expect(api.markStorySeen).not.toHaveBeenCalled();
+  });
+
   it('says a story it cannot read is not available', async () => {
     api.fetchStory.mockRejectedValue(Object.assign(new Error('Loading story failed (404)'), { status: 404 }));
     setUrl('story=nope');
     render(<StoryReader />);
-    expect(await screen.findByText(/This story is not available/)).toBeInTheDocument();
+    expect(await screen.findByText(/This investigation is not available/)).toBeInTheDocument();
   });
 });
 
@@ -306,13 +333,16 @@ describe('AddToStoryMenu', () => {
     ]);
     api.createStory.mockResolvedValue(clone(STORY));
     render(<AddToStoryMenu commentId="c42" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to story' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to investigation' }));
     expect(await screen.findByText('Mine')).toBeInTheDocument();
     expect(screen.queryByText('Theirs')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('New story…'));
+    fireEvent.click(screen.getByText('New investigation…'));
+    expect(await screen.findByRole('dialog', { name: 'New investigation' })).toBeInTheDocument();
     fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'GC pauses' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(api.createStory).toHaveBeenCalledWith('run-1', 'GC pauses', [{ commentId: 'c42' }]));
+    // The comment's "In: …" chips refetch even with the socket down.
+    await waitFor(() => expect(ctx.noteStoryChanged).toHaveBeenCalledWith('s1'));
   });
 });
 
@@ -370,14 +400,14 @@ describe('agent stories', () => {
     expect(within(screen.getByTestId('story-editor-author')).getByTestId('comment-author-ai')).toBeInTheDocument();
     expect(screen.getByTestId('story-agent-review')).toHaveTextContent(/nobody has reviewed it yet/);
     expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Delete story' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete investigation' })).toBeInTheDocument();
   });
 
   it('hides Delete in the editor when the caller may not delete', async () => {
     api.fetchStory.mockResolvedValue({ ...clone(STORY), canDelete: false });
     render(<StoryEditor storyId="s1" onClose={jest.fn()} onRead={jest.fn()} />);
     await screen.findByTestId('story-editor');
-    expect(screen.queryByRole('button', { name: 'Delete story' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete investigation' })).not.toBeInTheDocument();
   });
 
   it("introduces an agent draft as an unreviewed AI draft everyone can see, and a published one with its reviewer", async () => {

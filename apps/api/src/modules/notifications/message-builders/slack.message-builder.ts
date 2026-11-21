@@ -149,7 +149,7 @@ export class SlackMessageBuilder {
       blocks: [
         { type: 'section', text: { type: 'mrkdwn', text: `:books: *${headline}*` } },
         { type: 'context', elements: [{ type: 'mrkdwn', text: storyDetail(story) }] },
-        { type: 'section', text: { type: 'mrkdwn', text: `<${story.link}|Read the analysis in Perfana>` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `<${story.link}|Read the investigation in Perfana>` } },
       ],
     };
   }
