@@ -161,13 +161,14 @@ export class CommentsService {
       ? await em.getRepository(TestRunCommentRead).findOne({ where: { userId: caller.userId, testRunId: run.id, cardKey: card } })
       : null;
     // The stories each root is a step of, as far as the caller can see them (published, or their
-    // own drafts), so the drawer's delete confirmation can name them.
+    // own drafts, or an AI agent's draft, which everyone who can see the run sees), so the drawer's
+    // delete confirmation can name them.
     if (threads.size > 0) {
       const steps: { comment_id: string; story_id: string; title: string; position: number }[] = await em.query(
         `SELECT st.comment_id, s.id AS story_id, s.title, st.position
            FROM test_run_story_steps st
            JOIN test_run_stories s ON s.id = st.story_id
-          WHERE s.test_run_id = $1 AND (s.status = 'published' OR s.author_id = $2)
+          WHERE s.test_run_id = $1 AND (s.status = 'published' OR s.author_kind = 'agent' OR s.author_id = $2)
           ORDER BY s.created_at, s.id`,
         [run.id, caller.userId],
       );

@@ -31,7 +31,7 @@ export class CommentsController {
   private async caller(ctx: UserContext, write: boolean | 'agent' = false): Promise<CommentCaller> {
     const isKey = ctx.userId.startsWith('api-key:');
     if (isKey && write === true) {
-      throw new ForbiddenException('API keys cannot do this: they never delete comments, mark them seen or write stories');
+      throw new ForbiddenException('API keys cannot do this: they never delete comments or stories, mark comments seen or publish a story');
     }
     if (isKey && write === 'agent' && !ctx.roles.includes(API_KEY_COMMENTS_WRITE_ROLE)) {
       throw new ForbiddenException(
@@ -153,7 +153,7 @@ export class CommentsController {
   @ApiTags('Test Run Stories')
   @ApiOperation({
     summary: "List a test run's analysis stories",
-    description: "`:id` is the run uuid or its test_run_id. Published stories plus the caller's own drafts, oldest first, without steps. `canEdit` / `canDelete` say what the caller may do with each.",
+    description: "`:id` is the run uuid or its test_run_id. Published stories, AI agents' drafts (`authorKind: 'agent'`, visible to everyone who can see the run) and the caller's own drafts, oldest first, without steps. `canEdit` / `canDelete` say what the caller may do with each; `publishedByName` names who published it.",
   })
   @ApiResponse({ status: 404, description: 'Run not found or outside your organizations' })
   async listStories(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<StorySummaryResponse[]> {
@@ -175,45 +175,54 @@ export class CommentsController {
   @ApiTags('Test Run Stories')
   @ApiOperation({
     summary: 'Start a story (a draft)',
-    description: 'Optionally with initial steps. Each step is a live root comment on the same run, at most once; at most 50 steps.',
+    description:
+      'Optionally with initial steps. Each step is a live root comment on the same run (any author), at most once; at most 50 steps. ' +
+      `An API key needs the ${API_KEY_COMMENTS_WRITE_ROLE} role; its story is an AI draft, visible to everyone who can see the run, ` +
+      'which any user may edit, publish or delete. A key may create at most 10 stories per run.',
   })
   @ApiResponse({ status: 400, description: 'Empty title, more than 50 steps, or a step that is a reply, on another run, deleted or repeated' })
-  @ApiResponse({ status: 403, description: 'API keys cannot write stories' })
+  @ApiResponse({ status: 403, description: `An API key without the ${API_KEY_COMMENTS_WRITE_ROLE} role` })
   @ApiResponse({ status: 404, description: 'Run not found or outside your organizations' })
+  @ApiResponse({ status: 429, description: 'The API key reached its limit of 10 stories on this run' })
   async createStory(@Param('id') id: string, @Body() dto: CreateStoryDto, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
-    return this.stories.create(id, dto, await this.caller(ctx, true));
+    return this.stories.create(id, dto, await this.caller(ctx, 'agent'));
   }
 
   @Patch('stories/:id')
   @ApiTags('Test Run Stories')
   @ApiOperation({
-    summary: "Edit a story's title, summary or status (author only)",
-    description: "An absent field is left alone; `summary: null` clears it. `status: 'published'` publishes (refused with no steps; `publishedAt` is set on the first publish and kept on unpublish), `status: 'draft'` unpublishes.",
+    summary: "Edit a story's title, summary or status",
+    description:
+      "An absent field is left alone; `summary: null` clears it. `status: 'published'` publishes (refused with no steps; `publishedAt` is set on the first publish and kept on unpublish, `publishedBy*` on every publish), `status: 'draft'` unpublishes. " +
+      "The author may edit; any user may edit and publish an AI agent's draft, and its publisher keeps it after publishing. " +
+      `An API key with ${API_KEY_COMMENTS_WRITE_ROLE} may change the title and summary of its own draft only, and never sends status.`,
   })
   @ApiResponse({ status: 400, description: 'Nothing sent, an empty title, or publishing a story with no steps' })
-  @ApiResponse({ status: 403, description: 'Not the author, or an API key' })
+  @ApiResponse({ status: 403, description: 'Not allowed to edit it, an API key sending status or editing a published story, or a key without the role' })
   @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
   async updateStory(@Param('id') id: string, @Body() dto: UpdateStoryDto, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
-    return this.stories.update(id, dto, await this.caller(ctx, true));
+    return this.stories.update(id, dto, await this.caller(ctx, 'agent'));
   }
 
   @Put('stories/:id/steps')
   @ApiTags('Test Run Stories')
   @ApiOperation({
-    summary: "Replace a story's steps (author only)",
-    description: '`{ steps: [{ commentId, note? }] }` is the full ordered list and replaces every step in one transaction: reorder, add and remove are all this call. A comment already in the story may stay after it was deleted; a newly added one must be live.',
+    summary: "Replace a story's steps",
+    description:
+      '`{ steps: [{ commentId, note? }] }` is the full ordered list and replaces every step in one transaction: reorder, add and remove are all this call. A comment already in the story may stay after it was deleted; a newly added one must be live. ' +
+      `Who may: as for PATCH; an API key with ${API_KEY_COMMENTS_WRITE_ROLE} only on its own draft.`,
   })
   @ApiResponse({ status: 400, description: 'More than 50 steps, a step that is a reply, on another run, newly added but deleted, or repeated, or emptying a published story' })
-  @ApiResponse({ status: 403, description: 'Not the author, or an API key' })
+  @ApiResponse({ status: 403, description: 'Not allowed to edit it, an API key editing a published story, or a key without the role' })
   @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
   async replaceStorySteps(@Param('id') id: string, @Body() dto: ReplaceStoryStepsDto, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
-    return this.stories.replaceSteps(id, dto.steps, await this.caller(ctx, true));
+    return this.stories.replaceSteps(id, dto.steps, await this.caller(ctx, 'agent'));
   }
 
   @Delete('stories/:id')
   @ApiTags('Test Run Stories')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a story (author, org admin of its organization, or global admin)', description: 'Its steps go with it; the comments are never touched.' })
+  @ApiOperation({ summary: "Delete a story (author, any user for an AI agent's draft, org admin of its organization, or global admin)", description: 'Its steps go with it; the comments are never touched. API keys never delete.' })
   @ApiResponse({ status: 403, description: 'Not allowed, or an API key' })
   @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
   async removeStory(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<void> {

@@ -85,12 +85,19 @@ export interface StorySummaryResponse {
   authorName: string;
   authorKind: StoryAuthorKind;
   publishedAt: string | null;
+  /** Who published it last (kept on unpublish); for an agent's story, the person who reviewed it. */
+  publishedById: string | null;
+  publishedByName: string | null;
   createdAt: string;
   updatedAt: string;
   stepCount: number;
-  /** The caller wrote it, so may edit, reorder, publish and unpublish it. */
+  /**
+   * The caller may edit, reorder, publish and unpublish it: its author; any user for an agent's
+   * draft; the publisher for an agent's published story. For an API key: its own draft (title,
+   * summary and steps only — a key never publishes).
+   */
   canEdit: boolean;
-  /** The caller may delete it: its author, an org admin of its organization, or a global admin. */
+  /** The caller may delete it: its author, any user for an agent's draft, an org admin, or a global admin. Never an API key. */
   canDelete: boolean;
 }
 
