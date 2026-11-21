@@ -29,6 +29,24 @@ Some cards take comments on a single row or section as well as on the whole card
 
 A row with threads shows a filled comment icon, with a dot when someone else wrote there since you last looked. To comment on the whole card instead, click the close icon next to the row name in the composer.
 
+## Tag a thread
+
+A tag says what a thread is in an analysis, so a reader can tell the symptom from the cause at a glance. Tags go on the first comment of a thread; replies are never tagged.
+
+| Tag | Use it for |
+|---|---|
+| **Symptom** | what was observed, for example "p95 jumps at 14:32" |
+| **Hypothesis** | a possible explanation that is still being checked |
+| **Evidence** | something that supports or narrows down a hypothesis |
+| **Ruled out** | an explanation that was checked and does not hold |
+| **Root cause** | the explanation you settle on |
+| **Action** | what to do about it: a fix, a re-run, a follow-up |
+
+- **When you write it**: pick a tag in **Add tag** next to the **Comment** (or **Place marker**) button. A thread can have one tag, or none.
+- **Later**: click **Edit** under your own first comment and change or remove the tag. Only the author can change a tag. Changing only the tag does not mark the comment **(edited)**.
+
+The tag is shown above the thread's text in the panel, and before the comment in the report's Comments section. A deleted comment keeps its tag.
+
 ## Reply, edit and delete
 
 - **Reply**: click a thread to expand it, then type in **Reply…** and click **Reply**. Threads are one level deep: every reply belongs to the thread's first comment.
