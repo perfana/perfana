@@ -51,15 +51,28 @@ export interface StoryAnnouncement {
   testRunId: string;
   /** The story author. */
   authorName: string;
+  /** `agent` for a story an AI agent proposed through the MCP server (analysis stories, PR6). */
+  authorKind?: 'user' | 'agent';
+  /** Who published it; for an agent's story, the person who reviewed it. */
+  publishedByName?: string | null;
   title: string;
   stepCount: number;
   /** `/test-runs/<uuid>?story=<id>` on `PERFANA_URL`: the reader's intro screen. */
   link: string;
 }
 
-/** "<author> published an analysis on <SUT> run <id>" */
+/**
+ * "<author> published an analysis on <SUT> run <id>", or for an agent's story "<reviewer>
+ * published an analysis proposed by <agent> (AI) on <SUT> run <id>": a channel reader must never
+ * take an agent's root-cause claim for a colleague's.
+ */
 export function storyHeadline(s: StoryAnnouncement): string {
-  return `${plainText(s.authorName)} published an analysis on ${plainText(s.systemName)} run ${plainText(s.testRunId, 120)}`;
+  const where = `on ${plainText(s.systemName)} run ${plainText(s.testRunId, 120)}`;
+  if (s.authorKind === 'agent') {
+    const reviewer = s.publishedByName ? plainText(s.publishedByName) : 'A reviewer';
+    return `${reviewer} published an analysis proposed by ${plainText(s.authorName)} (AI) ${where}`;
+  }
+  return `${plainText(s.authorName)} published an analysis ${where}`;
 }
 
 /** "<title> (N steps)" */

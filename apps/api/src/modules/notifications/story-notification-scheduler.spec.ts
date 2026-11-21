@@ -182,6 +182,13 @@ describe('story message builders', () => {
     expect(all).toContain('<https://perfana.example/test-runs/u?story=s|Read the analysis in Perfana>');
   });
 
+  it('names the AI agent and the person who reviewed and published its story', () => {
+    const msg = new SlackMessageBuilder().buildStoryMessage({
+      ...story, authorName: 'Claude analysis agent', authorKind: 'agent', publishedByName: '@here Anna',
+    });
+    expect(msg.text).toBe('here Anna published an analysis proposed by Claude analysis agent (AI) on Shop run run-7: Checkout latency after deploy (1 step)');
+  });
+
   it('Teams carries an OpenUri action to the reader', () => {
     const msg = new TeamsMessageBuilder().buildStoryMessage({ ...story, stepCount: 6 });
     expect(msg.potentialAction?.[0]).toMatchObject({ targets: [{ uri: story.link }] });

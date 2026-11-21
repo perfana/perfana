@@ -6,8 +6,9 @@ import type { StoryAuthorKind, StoryStatus } from '../constants/comment-cards';
  * "Stories"): an ordered walk over the run's root comments, with a title and a conclusion. Steps
  * live in `test_run_story_steps` and reference comments; a story never copies a comment.
  *
- * A draft is visible to its author only; a published story to anyone who can see the run.
- * `publishedAt` is set on the first publish and kept on unpublish.
+ * A user's draft is visible to its author only; an agent's draft (migration 1833) and a published
+ * story to anyone who can see the run. `publishedAt` is set on the first publish and kept on
+ * unpublish; `publishedById` / `publishedByName` name whoever published it last.
  */
 @Entity('test_run_stories')
 @Index('idx_test_run_stories_run_created', ['testRunId', 'createdAt'])
@@ -41,7 +42,7 @@ export class TestRunStory {
   @Column({ name: 'author_name', type: 'varchar', length: 255 })
   authorName!: string;
 
-  /** 'user' until agent authoring ships; never read from a request. */
+  /** 'agent' when an API key with `comments:write` created it (PR6b); never read from a request. */
   @Column({ name: 'author_kind', type: 'varchar', length: 16, default: 'user' })
   authorKind!: StoryAuthorKind;
 
@@ -59,6 +60,16 @@ export class TestRunStory {
   /** Retry backoff after a released announcement (migration 1832). Written by the sweep only. */
   @Column({ name: 'notify_after', type: 'timestamptz', nullable: true, select: false })
   notifyAfter?: Date | null;
+
+  /**
+   * Who published it last (migration 1833): set on every publish, kept on unpublish. For an
+   * agent's story this is the person who reviewed it ("reviewed and published by").
+   */
+  @Column({ name: 'published_by_id', type: 'varchar', length: 255, nullable: true })
+  publishedById!: string | null;
+
+  @Column({ name: 'published_by_name', type: 'varchar', length: 255, nullable: true })
+  publishedByName!: string | null;
 
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;

@@ -112,7 +112,7 @@ Click **Save** to keep your changes. A story holds at most 50 steps, and each co
 
 ### Publish
 
-Click **Publish** to let everyone who can see the run read the story; **Unpublish** makes it a draft again. A story needs at least one step before it can be published. Only the author edits, publishes or unpublishes a story. The author, an organization admin and a global admin can delete it; deleting a story never deletes its comments.
+Click **Publish** to let everyone who can see the run read the story; **Unpublish** makes it a draft again. A story needs at least one step before it can be published. Only the author edits, publishes or unpublishes a story (an AI agent's draft is the exception, see [Review an agent's story](#review-an-agents-story)). The author, an organization admin and a global admin can delete it; deleting a story never deletes its comments.
 
 ### Read a story
 
@@ -195,6 +195,16 @@ An AI agent connected through the Perfana MCP server can leave its analysis on a
 - They count as unread like other comments, and the unread button in the run header says how many came from agents, for example *5 unread (3 from AI)*.
 
 An agent pins each comment to what it is about, in the same places you can: a transaction row on **Performance analysis**, a configuration item (with the comparison it was looking at), a tile on **Dashboards**, an SLO row, or a numbered marker on a **Graphs** series. Perfana checks the thing exists in the run before it accepts the comment. You can reply to an agent's comment, and the agent can answer. It cannot delete anything; an organization admin can delete an agent's comment as for any other author. The **Comments** report section prints the AI chip too.
+
+### Review an agent's story
+
+An agent can also assemble its comments into a story and hand its user a link to it. Such a story is a proposal, and a person decides whether the team gets to see it as a finding:
+
+- It starts as a draft labelled **AI draft · not reviewed**, with the **AI** chip next to the agent's name. Unlike your own drafts, everyone who can see the run sees it on the **Stories** tab of the run's **Comments** dialog, otherwise nobody could review it.
+- Anyone who can comment on the run can open it with **Edit**, then reword the title, conclusion and step notes, reorder or remove steps, or **Delete story** if the proposal is wrong. Check each step against the run before you publish: the agent's comments are pinned to things that exist in the run, but the claims in them are not checked.
+- **Publish** makes it a story like any other, and names you as its reviewer: it then reads *Proposed by Claude analysis agent · reviewed and published by Anna*. After that only you can edit or unpublish it (an organization admin can still delete it), and the agent can no longer change it.
+
+The agent cannot publish its own story or delete one, and it may create at most 10 stories per run.
 
 ## Related
 

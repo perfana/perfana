@@ -24,6 +24,8 @@ interface ClaimedStory {
   test_run_id: string;
   title: string;
   author_name: string;
+  author_kind: 'user' | 'agent';
+  published_by_name: string | null;
   updated_at: Date;
   /** `count(*)` arrives as a string from node-postgres. */
   step_count: string | number;
@@ -270,6 +272,8 @@ export class CommentNotificationScheduler {
       systemName: run.system_name,
       testRunId: run.test_run_id,
       authorName: story.author_name,
+      authorKind: story.author_kind,
+      publishedByName: story.published_by_name,
       title: story.title,
       stepCount: Number(story.step_count),
       link:
@@ -326,7 +330,7 @@ export class CommentNotificationScheduler {
       );
       if (!ok) return null;
       const [row]: ClaimedStory[] = await em.query(
-        `SELECT s.id, s.test_run_id, s.title, s.author_name, s.updated_at,
+        `SELECT s.id, s.test_run_id, s.title, s.author_name, s.author_kind, s.published_by_name, s.updated_at,
                 (SELECT count(*) FROM test_run_story_steps st WHERE st.story_id = s.id) AS step_count
            FROM test_run_stories s
           WHERE s.id = $1 AND s.status = 'published' AND s.notified_at IS NULL

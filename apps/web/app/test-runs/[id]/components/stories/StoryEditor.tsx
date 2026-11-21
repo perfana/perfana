@@ -42,6 +42,8 @@ import {
 } from '@/lib/test-run-stories';
 import { CommentTagChip } from '../comments/CommentTagChip';
 import { firstLine, stepWhere, tagOf } from './story-format';
+import { StoryAuthorLine, storyStatusLabel } from './StoryAuthorLine';
+import CommentAuthor from '../comments/CommentAuthor';
 
 interface DraftStep {
   commentId: string;
@@ -175,13 +177,23 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
   }
 
   const published = story.status === 'published';
+  const agentStory = story.authorKind === 'agent';
   return (
     <Box data-testid="story-editor" sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Button size="small" onClick={onClose}>‹ Stories</Button>
-        <Chip size="small" label={published ? 'Published' : 'Draft'} color={published ? 'success' : 'default'} variant="outlined" />
+        <Chip size="small" label={storyStatusLabel(story)} color={published ? 'success' : agentStory ? 'info' : 'default'} variant="outlined" />
         {dirty && <Typography variant="caption" color="text.secondary">Unsaved changes</Typography>}
       </Box>
+      <Typography variant="caption" color="text.secondary" data-testid="story-editor-author">
+        <StoryAuthorLine story={story} />
+      </Typography>
+      {agentStory && !published && (
+        <Alert severity="info" data-testid="story-agent-review">
+          An AI agent proposed this story and nobody has reviewed it yet. Check each step against the run before you publish it:
+          publishing names you as the reviewer.
+        </Alert>
+      )}
       {error && <Alert severity="error">{error}</Alert>}
       <TextField
         size="small"
@@ -254,7 +266,15 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
             Unpublish
           </Button>
         ) : (
-          <Tooltip title={steps.length === 0 ? 'Add at least one step before publishing' : 'Everyone who can see this run can read it'}>
+          <Tooltip
+            title={
+              steps.length === 0
+                ? 'Add at least one step before publishing'
+                : agentStory
+                  ? 'Publishing names you as its reviewer; everyone who can see this run can read it'
+                  : 'Everyone who can see this run can read it'
+            }
+          >
             <span>
               <Button size="small" variant="outlined" disabled={busy || steps.length === 0 || !title.trim()} onClick={() => void setStatus('published')}>
                 {dirty ? 'Save and publish' : 'Publish'}
@@ -266,7 +286,7 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
           Read
         </Button>
         <Box sx={{ flex: 1 }} />
-        {confirmDelete ? (
+        {!story.canDelete ? null : confirmDelete ? (
           <>
             <Typography variant="caption">Delete this story? Its comments stay.</Typography>
             <Button size="small" color="error" disabled={busy} onClick={() => void remove()}>Delete</Button>
@@ -336,7 +356,7 @@ function SortableStep({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
           {tag && <CommentTagChip tag={tag} />}
           <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{where}</Typography>
-          <Typography variant="caption" color="text.secondary">{step.comment.authorName}</Typography>
+          <CommentAuthor name={step.comment.authorName} kind={step.comment.authorKind} variant="caption" sx={{ color: 'text.secondary' }} />
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere', fontStyle: step.comment.deleted ? 'italic' : 'normal' }}>
           {firstLine(step.comment)}

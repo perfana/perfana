@@ -105,17 +105,37 @@ describe('CommentsController', () => {
     expect(service.update).toHaveBeenCalledWith('c', { tag: null }, { userId: 'sub-1', displayName: 'Ada', orgIds: ['org-a'] });
   });
 
-  // Stories inherit the R3 rule: an API key may read them, never write (PR6 adds an opt-in role).
+  // A key without comments:write may read stories and write none of them.
   it.each([
     ['createStory', () => controller.createStory('run', { title: 't' }, key)],
-    ['updateStory', () => controller.updateStory('s', { status: 'published' }, key)],
+    ['updateStory', () => controller.updateStory('s', { title: 't' }, key)],
     ['replaceStorySteps', () => controller.replaceStorySteps('s', { steps: [] }, key)],
     ['removeStory', () => controller.removeStory('s', key)],
-  ])('refuses %s from an API key with 403', async (_name, call) => {
+  ])('refuses %s from an API key without comments:write with 403', async (_name, call) => {
     await expect(call()).rejects.toBeInstanceOf(ForbiddenException);
     expect(stories.create).not.toHaveBeenCalled();
     expect(stories.update).not.toHaveBeenCalled();
     expect(stories.replaceSteps).not.toHaveBeenCalled();
+    expect(stories.remove).not.toHaveBeenCalled();
+  });
+
+  it('names the missing role when a key without it creates a story', async () => {
+    await expect(controller.createStory('run', { title: 't' }, key)).rejects.toThrow(/comments:write/);
+  });
+
+  // PR6b: with the role a key proposes stories as an agent; it still never deletes one.
+  it('lets a comments:write key create, edit and reorder stories as an agent', async () => {
+    const agent = { userId: 'api-key:456', displayName: 'Claude analysis agent', orgIds: ['org-a'], authorKind: 'agent' };
+    await controller.createStory('run', { title: 't' }, agentKey);
+    expect(stories.create).toHaveBeenCalledWith('run', { title: 't' }, agent);
+    await controller.updateStory('s', { summary: 'why' }, agentKey);
+    expect(stories.update).toHaveBeenCalledWith('s', { summary: 'why' }, agent);
+    await controller.replaceStorySteps('s', { steps: [{ commentId: 'c1' }] }, agentKey);
+    expect(stories.replaceSteps).toHaveBeenCalledWith('s', [{ commentId: 'c1' }], agent);
+  });
+
+  it('refuses a story delete from a comments:write key with 403', async () => {
+    await expect(controller.removeStory('s', agentKey)).rejects.toBeInstanceOf(ForbiddenException);
     expect(stories.remove).not.toHaveBeenCalled();
   });
 

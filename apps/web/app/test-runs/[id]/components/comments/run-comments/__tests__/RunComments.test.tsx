@@ -99,6 +99,13 @@ it('is shown for a run with stories only, so they stay reachable', async () => {
   expect(await screen.findByTestId('run-comments-button')).toHaveAccessibleName('Comments: 1 story');
 });
 
+it("is shown when the run's only content is an AI agent's draft story (the API lists it to everyone)", async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({});
+  mockedStories.fetchStories.mockResolvedValue([{ id: 's1', status: 'draft', authorKind: 'agent', authorId: 'api-key:k1' } as never]);
+  renderButton();
+  expect(await screen.findByTestId('run-comments-button')).toHaveAccessibleName('Comments: 1 story');
+});
+
 it('badges the total, says how many are unread, and fetches threads only once opened', async () => {
   renderButton();
   const button = await screen.findByTestId('run-comments-button');

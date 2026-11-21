@@ -1,9 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { TestRunComment, TestRunStory, TestRunStoryStep } from '@perfana/shared/entities';
 import type { OwnedResource } from '@perfana/shared';
-import { STORY_MAX_STEPS } from '@perfana/shared/constants/comment-cards';
+import { AGENT_STORY_LIMIT, STORY_MAX_STEPS } from '@perfana/shared/constants/comment-cards';
 import { getRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { TestRunsGateway } from '../test-runs/gateways/test-runs.gateway';
@@ -27,6 +27,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * a draft is readable by its author only — to everyone else, admins included, it is the same 404,
  * so nobody learns a draft exists. Edit, reorder, publish and unpublish are the author's; delete is
  * the author's, an org admin's of the story's organization, or a global admin's.
+ *
+ * Agent stories (PR6b, "Agent stories are proposals, and a human publishes them"): an API key with
+ * `comments:write` creates a story as an agent. Its draft is readable by everyone who can see the
+ * run (the RLS SELECT rule of migration 1833 says the same), and the key may change its title,
+ * summary and steps only while it is a draft. Any user who may comment on the run (who can see it)
+ * may edit, reorder, publish and delete an agent's draft; once a person published it, that person
+ * owns it (moderators may still delete) until it is unpublished. A key never publishes,
+ * unpublishes or deletes; every publish records who did it (`published_by_*`).
  */
 @Injectable()
 export class StoriesService {
@@ -69,11 +77,11 @@ export class StoriesService {
     await this.comments.resolveRun(story.testRunId, caller, em).catch((e: unknown) => {
       throw e instanceof NotFoundException ? notFound : e;
     });
-    if (story.status !== 'published' && story.authorId !== caller.userId) throw notFound;
+    if (story.status !== 'published' && story.authorKind !== 'agent' && story.authorId !== caller.userId) throw notFound;
     return story;
   }
 
-  /** Published stories of a run plus the caller's own drafts, oldest first, without steps. */
+  /** Published stories of a run, agents' drafts and the caller's own drafts, oldest first, without steps. */
   async list(runIdOrTestRunId: string, caller: CommentCaller): Promise<StorySummaryResponse[]> {
     const run = await this.comments.resolveRun(runIdOrTestRunId, caller);
     const em = this.em();
@@ -81,7 +89,7 @@ export class StoriesService {
       .getRepository(TestRunStory)
       .createQueryBuilder('s')
       .where('s.testRunId = :run', { run: run.id })
-      .andWhere(`(s.status = 'published' OR s.authorId = :me)`, { me: caller.userId })
+      .andWhere(`(s.status = 'published' OR s.authorKind = 'agent' OR s.authorId = :me)`, { me: caller.userId })
       .orderBy('s.createdAt', 'ASC')
       .getMany();
     if (stories.length === 0) return [];
@@ -101,11 +109,33 @@ export class StoriesService {
     return this.withSteps(story, caller, em);
   }
 
+  /**
+   * Start a draft. An agent's story is stamped `author_kind = 'agent'` (from the principal, never the
+   * request) and capped at `AGENT_STORY_LIMIT` per key per run.
+   */
   // audit-skip: user discussion, not configuration; the row records its author and time itself
   async create(runIdOrTestRunId: string, dto: CreateStoryDto, caller: CommentCaller): Promise<StoryResponse> {
     const title = normaliseTitle(dto.title);
+    const isAgent = caller.authorKind === 'agent';
     const result = await this.tx(async (em) => {
       const run = await this.comments.resolveRun(runIdOrTestRunId, caller, em);
+      if (isAgent) {
+        // One writer per (run, key): the count and the insert cannot interleave with a retry.
+        await em.query(`SELECT pg_advisory_xact_lock(hashtextextended('test_run_stories:agent:' || $1 || ':' || $2, 0))`, [
+          run.id,
+          caller.userId,
+        ]);
+        const counted: { n: number }[] = await em.query(
+          `SELECT count(*)::int AS n FROM test_run_stories WHERE test_run_id = $1 AND author_id = $2`,
+          [run.id, caller.userId],
+        );
+        if (Number(counted[0]?.n ?? 0) >= AGENT_STORY_LIMIT) {
+          throw new HttpException(
+            `This API key has reached its limit of ${AGENT_STORY_LIMIT} stories on this test run`,
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+      }
       const steps = dto.steps ?? [];
       await this.validateSteps(em, run.id, steps, new Set());
       const repo = em.getRepository(TestRunStory);
@@ -117,9 +147,11 @@ export class StoriesService {
           status: 'draft',
           authorId: caller.userId,
           authorName: (caller.displayName || caller.userId).slice(0, 255),
-          // Never from the request: agent authoring is a later design step (PR6).
-          authorKind: 'user',
+          // Never from the request: the principal decides.
+          authorKind: isAgent ? 'agent' : 'user',
           publishedAt: null,
+          publishedById: null,
+          publishedByName: null,
           organizationId: run.organizationId,
           teamId: run.teamId,
         }),
@@ -132,17 +164,22 @@ export class StoriesService {
   }
 
   /**
-   * Author-only edit of title, summary and status. Publishing a story with no steps is refused;
-   * `publishedAt` is set on the first publish and kept on unpublish.
+   * Edit of title, summary and status by whoever may edit the story (`editDenial`). Publishing a
+   * story with no steps is refused; `publishedAt` is set on the first publish and kept on unpublish,
+   * and every publish records who did it. An agent never sends `status`.
    */
-  // audit-skip: author-only edit of their own story; the row carries updated_at
+  // audit-skip: edit of a story the caller may edit; the row carries updated_at and published_by
   async update(id: string, dto: UpdateStoryDto, caller: CommentCaller): Promise<StoryResponse> {
     if (dto.title === undefined && dto.summary === undefined && dto.status === undefined) {
       throw new BadRequestException('Send title, summary, status or a combination');
     }
+    if (dto.status !== undefined && isKey(caller)) {
+      throw new ForbiddenException('An API key cannot publish or unpublish a story: a person reviews and publishes it');
+    }
     const result = await this.tx(async (em) => {
       const story = await this.loadStory(id, caller, em, true);
-      if (story.authorId !== caller.userId) throw new ForbiddenException('Only the author can edit a story');
+      const denial = editDenial(story, caller);
+      if (denial) throw new ForbiddenException(denial);
       if (dto.title !== undefined) story.title = normaliseTitle(dto.title);
       if (dto.summary !== undefined) story.summary = dto.summary;
       if (dto.status !== undefined && dto.status !== story.status) {
@@ -150,6 +187,8 @@ export class StoriesService {
           const steps = await em.getRepository(TestRunStoryStep).count({ where: { storyId: story.id } });
           if (steps === 0) throw new BadRequestException('A story needs at least one step before it can be published');
           story.publishedAt ??= new Date();
+          story.publishedById = caller.userId;
+          story.publishedByName = (caller.displayName || caller.userId).slice(0, 255);
         }
         story.status = dto.status;
       }
@@ -164,11 +203,12 @@ export class StoriesService {
    * Replace every step in one transaction (delete + insert): reorder, add and remove are all this
    * call. A comment already in the story may stay after it was deleted; a new one must be live.
    */
-  // audit-skip: author-only edit of their own story
+  // audit-skip: edit of a story the caller may edit (editDenial)
   async replaceSteps(id: string, steps: StoryStepInputDto[], caller: CommentCaller): Promise<StoryResponse> {
     const result = await this.tx(async (em) => {
       const story = await this.loadStory(id, caller, em, true);
-      if (story.authorId !== caller.userId) throw new ForbiddenException('Only the author can change a story\'s steps');
+      const denial = editDenial(story, caller);
+      if (denial) throw new ForbiddenException(denial);
       if (story.status === 'published' && steps.length === 0) {
         throw new BadRequestException('A published story needs at least one step; unpublish it first');
       }
@@ -189,7 +229,7 @@ export class StoriesService {
   async remove(id: string, caller: CommentCaller): Promise<void> {
     const story = await this.tx(async (em) => {
       const s = await this.loadStory(id, caller, em, true);
-      const allowed = s.authorId === caller.userId || (await this.canModerate(caller, s.organizationId));
+      const allowed = deletableByRule(s, caller) || (await this.canModerate(caller, s.organizationId));
       if (!allowed) throw new ForbiddenException('Only the author or an organization admin can delete a story');
       this.auditService.logDelete(s as unknown as OwnedResource, { organizationIdOverride: s.organizationId });
       await em.getRepository(TestRunStory).delete({ id: s.id });
@@ -261,7 +301,7 @@ export class StoriesService {
       if (!c) continue; // FK makes this unreachable; never render a step pointing at nothing.
       stepResponses.push({ position: s.position, note: s.note ?? null, comment: { ...toResponse(c), replyCount: replyCount.get(c.id) ?? 0 } });
     }
-    const moderate = story.authorId === caller.userId ? true : await this.canModerate(caller, story.organizationId);
+    const moderate = deletableByRule(story, caller) ? true : await this.canModerate(caller, story.organizationId);
     return {
       ...toStorySummary(story, stepResponses.length, caller, moderate),
       steps: stepResponses,
@@ -291,8 +331,36 @@ function stripEmitOwner(r: StoryResponse & { organizationIdForEmit: string }): S
   return rest;
 }
 
+const isKey = (caller: Pick<CommentCaller, 'userId'>): boolean => caller.userId.startsWith('api-key:');
+
+/**
+ * Why the caller may not change this story's title, summary, steps or status, or null when it may.
+ * - An agent (key): its own story, and only while it is a draft.
+ * - A user: their own story; an agent's draft (any user who can see the run may review it); or an
+ *   agent's story they published themselves, until it is unpublished.
+ * The story is already known to be readable by the caller (`loadStory`).
+ */
+export function editDenial(s: TestRunStory, caller: CommentCaller): string | null {
+  if (isKey(caller)) {
+    if (caller.authorKind !== 'agent' || s.authorId !== caller.userId) return 'An API key can edit only stories it created';
+    if (s.status !== 'draft') return 'This story was published by a person; an API key can no longer change it';
+    return null;
+  }
+  if (s.authorKind === 'agent') {
+    if (s.status === 'draft' || s.publishedById === caller.userId) return null;
+    return 'Only the person who published this story can change it';
+  }
+  return s.authorId === caller.userId ? null : 'Only the author can edit a story';
+}
+
+/** Delete without moderator rights: a user's own story, or an agent's story the user may edit. Keys never. */
+function deletableByRule(s: TestRunStory, caller: CommentCaller): boolean {
+  if (isKey(caller)) return false;
+  if (s.authorKind === 'agent') return editDenial(s, caller) === null;
+  return s.authorId === caller.userId;
+}
+
 export function toStorySummary(s: TestRunStory, stepCount: number, caller: CommentCaller, moderate: boolean): StorySummaryResponse {
-  const isAuthor = s.authorId === caller.userId && !caller.userId.startsWith('api-key:');
   return {
     id: s.id,
     testRunId: s.testRunId,
@@ -303,10 +371,12 @@ export function toStorySummary(s: TestRunStory, stepCount: number, caller: Comme
     authorName: s.authorName,
     authorKind: s.authorKind ?? 'user',
     publishedAt: s.publishedAt ? new Date(s.publishedAt).toISOString() : null,
+    publishedById: s.publishedById ?? null,
+    publishedByName: s.publishedByName ?? null,
     createdAt: new Date(s.createdAt).toISOString(),
     updatedAt: new Date(s.updatedAt).toISOString(),
     stepCount,
-    canEdit: isAuthor,
-    canDelete: isAuthor || moderate,
+    canEdit: editDenial(s, caller) === null,
+    canDelete: !isKey(caller) && (deletableByRule(s, caller) || moderate),
   };
 }

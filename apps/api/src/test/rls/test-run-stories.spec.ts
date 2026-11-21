@@ -271,6 +271,67 @@ describe('StoriesService against a real database', () => {
     await expect(ins('t', 'draft', 'robot')).rejects.toThrow(/ck_test_run_stories_author_kind/);
   });
 
+  // PR6b: an API key with comments:write proposes a story; a person reviews and publishes it.
+  describe('agent stories', () => {
+    const agent: CommentCaller = { userId: `api-key:stories-spec-${suffix}`, displayName: 'Claude analysis agent', orgIds: [orgA], authorKind: 'agent' };
+    const outsiderAgent: CommentCaller = { userId: `api-key:stories-spec-b-${suffix}`, displayName: 'Other agent', orgIds: [orgB], authorKind: 'agent' };
+
+    it('lets another org member read, edit, publish an agent draft, records the publisher, and keeps the key out afterwards', async () => {
+      const c = await root('p95 doubles at 14:32', 'symptom');
+      const s = await stories.create(runHuman, { title: 'Agent walk', steps: [{ commentId: c.id }] }, agent);
+      expect(s).toMatchObject({ authorKind: 'agent', authorId: agent.userId, authorName: 'Claude analysis agent', status: 'draft', canEdit: true, canDelete: false });
+      expect((await ds.query(`SELECT author_kind FROM test_run_stories WHERE id = $1`, [s.id]))[0].author_kind).toBe('agent');
+
+      // Visible to every org member who can see the run, named in the thread list too.
+      expect((await stories.list(runUuid, mark)).find((x) => x.id === s.id)).toMatchObject({ canEdit: true, canDelete: true });
+      const thread = (await comments.listThreads(runUuid, 'performance', mark)).threads.find((t) => t.id === c.id)!;
+      expect(thread.stories!.map((x) => x.title)).toContain('Agent walk');
+      for (const who of [outsider, tom]) await expect(stories.get(s.id, who)).rejects.toBeInstanceOf(NotFoundException);
+
+      // The key may refine its own draft, referencing any author's comments, but never publish it.
+      const marks = await comments.create(runUuid, { card: 'performance', body: 'Mark saw GC' } as never, mark);
+      await stories.replaceSteps(s.id, [{ commentId: c.id }, { commentId: marks.id, note: 'then GC' }], agent);
+      await expect(stories.update(s.id, { status: 'published' }, agent)).rejects.toBeInstanceOf(ForbiddenException);
+
+      // Mark reviews: edits, reorders and publishes.
+      await stories.replaceSteps(s.id, [{ commentId: marks.id }, { commentId: c.id }], mark);
+      const published = await stories.update(s.id, { status: 'published', summary: 'GC pauses' }, mark);
+      expect(published).toMatchObject({ status: 'published', publishedById: mark.userId, publishedByName: 'Mark', authorName: 'Claude analysis agent' });
+      const [row] = await ds.query(`SELECT published_by_id, published_by_name, published_at FROM test_run_stories WHERE id = $1`, [s.id]);
+      expect(row).toMatchObject({ published_by_id: mark.userId, published_by_name: 'Mark' });
+      expect(row.published_at).not.toBeNull();
+
+      // Published: the key can no longer touch it; another user cannot either; Mark still can.
+      await expect(stories.update(s.id, { title: 'x' }, agent)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(stories.replaceSteps(s.id, [{ commentId: c.id }], agent)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(stories.update(s.id, { title: 'x' }, anna)).rejects.toBeInstanceOf(ForbiddenException);
+      expect((await stories.get(s.id, mark)).canEdit).toBe(true);
+    });
+
+    it("lets any user delete an agent's draft, and keeps a key's story on another org's run at 404", async () => {
+      const s = await stories.create(runUuid, { title: 'Bad proposal' }, agent);
+      await stories.remove(s.id, anna);
+      expect(await ds.query(`SELECT 1 FROM test_run_stories WHERE id = $1`, [s.id])).toHaveLength(0);
+      await expect(stories.create(runUuid, { title: 'x' }, outsiderAgent)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("answers a key's 11th story on one run with 429", async () => {
+      const run = (await ds.query(
+        `INSERT INTO test_runs (test_run_id, system_under_test_id, test_environment, workload, organization_id, start_time, end_time)
+         VALUES ($1, $2, 'acc', 'load', $3, now(), now()) RETURNING id`,
+        [`${runHuman}-limit`, sutA, orgA],
+      ))[0].id as string;
+      try {
+        for (let i = 0; i < 10; i++) await stories.create(run, { title: `p${i}` }, agent);
+        await expect(stories.create(run, { title: 'p10' }, agent)).rejects.toMatchObject({ status: 429 });
+        // Another key, and a person, are not counted against this key.
+        await expect(stories.create(run, { title: 'mine' }, anna)).resolves.toBeDefined();
+      } finally {
+        await ds.query(`DELETE FROM test_runs WHERE id = $1`, [run]);
+      }
+    });
+  });
+
   // RLS: the policies themselves, as perfana_app with the request GUCs the interceptor sets.
   describe('row-level security', () => {
     const asUser = async <T>(userId: string, orgs: string[], fn: (em: EntityManager) => Promise<T>): Promise<T> => {
@@ -305,6 +366,21 @@ describe('StoriesService against a real database', () => {
       // The delete rule must see every story a comment is in, drafts included.
       expect(await asUser(mark.userId, [orgA], async (em) => (await em.query(`SELECT 1 FROM test_run_story_steps WHERE comment_id = $1`, [c.id])).length)).toBe(2);
       expect(await asUser(outsider.userId, [orgB], async (em) => (await em.query(`SELECT 1 FROM test_run_story_steps WHERE comment_id = $1`, [c.id])).length)).toBe(0);
+    });
+
+    // Migration 1833: an agent's draft is visible to everyone who can see the run, still not cross-org.
+    it("shows an agent's draft to another member of the organization and hides it from another organization", async () => {
+      const agentKey = `api-key:stories-spec-rls-${suffix}`;
+      const s = await stories.create(runUuid, { title: 'RLS agent draft' }, { userId: agentKey, displayName: 'Agent', orgIds: [orgA], authorKind: 'agent' });
+      const userDraft = await stories.create(runUuid, { title: 'RLS user draft' }, anna);
+      const visible = (userId: string, orgs: string[]) =>
+        asUser(userId, orgs, async (em) =>
+          (await em.query(`SELECT title FROM test_run_stories WHERE id = ANY($1) ORDER BY title`, [[s.id, userDraft.id]])).map((r: { title: string }) => r.title),
+        );
+      expect(await visible(mark.userId, [orgA])).toEqual(['RLS agent draft']);
+      expect(await visible(anna.userId, [orgA])).toEqual(['RLS agent draft', 'RLS user draft']);
+      expect(await visible(agentKey, [orgA])).toEqual(['RLS agent draft']);
+      expect(await visible(outsider.userId, [orgB])).toEqual([]);
     });
   });
 });
