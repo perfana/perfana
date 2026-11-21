@@ -1,6 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { TestRunComment, TestRunCommentRead, TestRunStory, TestRunStoryStep } from '@perfana/shared/entities';
+import { TestRunComment, TestRunCommentRead, TestRunStory, TestRunStoryRead, TestRunStoryStep } from '@perfana/shared/entities';
 import { AuditModule } from '../audit/audit.module';
 import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 import { CommonModule } from '../../common/common.module';
@@ -11,7 +11,7 @@ import { StoriesService } from './stories.service';
 
 @Module({
   // autoLoadEntities: an entity no module declares here has no metadata at runtime.
-  imports: [TypeOrmModule.forFeature([TestRunComment, TestRunCommentRead, TestRunStory, TestRunStoryStep]), CommonModule, TestRunsModule, AuditModule],
+  imports: [TypeOrmModule.forFeature([TestRunComment, TestRunCommentRead, TestRunStory, TestRunStoryStep, TestRunStoryRead]), CommonModule, TestRunsModule, AuditModule],
   controllers: [CommentsController],
   providers: [CommentsService, StoriesService],
 })

@@ -63,6 +63,7 @@ export * from './test-run-comment.entity';
 export * from './test-run-comment-read.entity';
 export * from './test-run-story.entity';
 export * from './test-run-story-step.entity';
+export * from './test-run-story-read.entity';
 export * from './test-run.entity';
 export * from './tracing-instance.entity';
 export * from './tracing-service.entity';

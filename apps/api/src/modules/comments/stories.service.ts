@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { TestRunComment, TestRunStory, TestRunStoryStep } from '@perfana/shared/entities';
 import type { OwnedResource } from '@perfana/shared';
-import { AGENT_STORY_LIMIT, STORY_MAX_STEPS } from '@perfana/shared/constants/comment-cards';
+import { AGENT_STORY_LIMIT, COMMENT_UNREAD_WINDOW_DAYS, STORY_MAX_STEPS } from '@perfana/shared/constants/comment-cards';
 import { getRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { TestRunsGateway } from '../test-runs/gateways/test-runs.gateway';
@@ -98,8 +98,58 @@ export class StoriesService {
       [stories.map((s) => s.id)],
     );
     const byStory = new Map(counts.map((c) => [c.story_id, c.n]));
+    const seen = await this.lastSeen(em, stories.map((s) => s.id), caller);
     const moderate = await this.canModerate(caller, run.organizationId);
-    return stories.map((s) => toStorySummary(s, byStory.get(s.id) ?? 0, caller, moderate));
+    const now = Date.now();
+    return stories.map((s) => toStorySummary(s, byStory.get(s.id) ?? 0, caller, moderate, isStoryUnread(s, seen.get(s.id) ?? null, caller, now)));
+  }
+
+  /**
+   * The caller's last look at each of these stories (`PUT /stories/:id/seen`). Empty for an API key:
+   * an agent has no unread state.
+   */
+  private async lastSeen(em: EntityManager, storyIds: string[], caller: CommentCaller): Promise<Map<string, Date>> {
+    if (storyIds.length === 0 || isKey(caller)) return new Map();
+    const rows: { story_id: string; last_seen_at: Date }[] = await em.query(
+      `SELECT story_id, last_seen_at FROM test_run_story_reads WHERE user_id = $1 AND story_id = ANY($2::uuid[])`,
+      [caller.userId, storyIds],
+    );
+    return new Map(rows.map((r) => [r.story_id, new Date(r.last_seen_at)]));
+  }
+
+  /**
+   * Mark a story read by the caller: the reader calls it when the story opens. 404 for a story the
+   * caller cannot read. The controller refuses API keys (an agent has no unread state).
+   */
+  // audit-skip: per-user read mark, not a resource change
+  async markSeen(id: string, caller: CommentCaller): Promise<void> {
+    await this.tx(async (em) => {
+      const story = await this.loadStory(id, caller, em);
+      await this.touchSeen(em, story, caller);
+    });
+  }
+
+  /**
+   * Upsert the caller's read mark at the transaction's `now()`, the same instant a bump of
+   * `activity_at` in this transaction wrote, so a person's own change never reads as unread to them.
+   */
+  private async touchSeen(em: EntityManager, story: TestRunStory, caller: CommentCaller): Promise<void> {
+    if (isKey(caller)) return;
+    await em.query(
+      `INSERT INTO test_run_story_reads (user_id, story_id, last_seen_at, organization_id)
+       VALUES ($1, $2, now(), $3)
+       ON CONFLICT (user_id, story_id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`,
+      [caller.userId, story.id, story.organizationId],
+    );
+  }
+
+  /** Move `activity_at` to the transaction's `now()`: the story is unread again for everyone else. */
+  private async bumpActivity(em: EntityManager, story: TestRunStory): Promise<void> {
+    const rows: { activity_at: Date }[] = await em.query(
+      `UPDATE test_run_stories SET activity_at = now() WHERE id = $1 RETURNING activity_at`,
+      [story.id],
+    );
+    if (rows[0]) story.activityAt = new Date(rows[0].activity_at);
   }
 
   /** One story with its steps, each joined to its comment as it reads now. */
@@ -157,6 +207,9 @@ export class StoriesService {
         }),
       );
       await this.insertSteps(em, story, steps);
+      // activity_at took its DEFAULT, the transaction's now(): new for everyone who can see it
+      // (an agent's draft), and read by its author.
+      await this.touchSeen(em, story, caller);
       return this.withSteps(story, caller, em);
     });
     this.emit(result.testRunId, result.id, result.organizationIdForEmit);
@@ -182,6 +235,9 @@ export class StoriesService {
       if (denial) throw new ForbiddenException(denial);
       if (dto.title !== undefined) story.title = normaliseTitle(dto.title);
       if (dto.summary !== undefined) story.summary = dto.summary;
+      // Unread again for the others: every publish, and an agent's own edit of its draft. A person's
+      // title or summary edit is a correction, not news.
+      let bump = isKey(caller) && (dto.title !== undefined || dto.summary !== undefined);
       if (dto.status !== undefined && dto.status !== story.status) {
         if (dto.status === 'published') {
           const steps = await em.getRepository(TestRunStoryStep).count({ where: { storyId: story.id } });
@@ -189,10 +245,13 @@ export class StoriesService {
           story.publishedAt ??= new Date();
           story.publishedById = caller.userId;
           story.publishedByName = (caller.displayName || caller.userId).slice(0, 255);
+          bump = true;
         }
         story.status = dto.status;
       }
       const saved = await em.getRepository(TestRunStory).save(story);
+      if (bump) await this.bumpActivity(em, saved);
+      await this.touchSeen(em, saved, caller);
       return this.withSteps(saved, caller, em);
     });
     this.emit(result.testRunId, result.id, result.organizationIdForEmit);
@@ -219,6 +278,9 @@ export class StoriesService {
       await this.insertSteps(em, story, steps);
       // Touch the story so `updatedAt` says the walk changed.
       const saved = await em.getRepository(TestRunStory).save({ ...story, updatedAt: new Date() });
+      // A changed walk is news on a published story, and on an agent's draft when the agent made it.
+      if (story.status === 'published' || isKey(caller)) await this.bumpActivity(em, saved);
+      await this.touchSeen(em, saved, caller);
       return this.withSteps(saved, caller, em);
     });
     this.emit(result.testRunId, result.id, result.organizationIdForEmit);
@@ -302,8 +364,9 @@ export class StoriesService {
       stepResponses.push({ position: s.position, note: s.note ?? null, comment: { ...toResponse(c), replyCount: replyCount.get(c.id) ?? 0 } });
     }
     const moderate = deletableByRule(story, caller) ? true : await this.canModerate(caller, story.organizationId);
+    const seen = await this.lastSeen(em, [story.id], caller);
     return {
-      ...toStorySummary(story, stepResponses.length, caller, moderate),
+      ...toStorySummary(story, stepResponses.length, caller, moderate, isStoryUnread(story, seen.get(story.id) ?? null, caller, Date.now())),
       steps: stepResponses,
       organizationIdForEmit: story.organizationId,
     };
@@ -360,7 +423,29 @@ function deletableByRule(s: TestRunStory, caller: CommentCaller): boolean {
   return s.authorId === caller.userId;
 }
 
-export function toStorySummary(s: TestRunStory, stepCount: number, caller: CommentCaller, moderate: boolean): StorySummaryResponse {
+/**
+ * Whether a story is unread for the caller (PR7, "Investigation read state"):
+ * - never for an API key (an agent has no unread state) and never for the story's author;
+ * - only for a story others can see: published, or an AI agent's draft (a user's draft is seen by
+ *   its author alone, who is excluded above);
+ * - when its `activity_at` (every publish, a steps change while published, an agent's own writes
+ *   to its draft) is newer than the caller's last look, or they never looked;
+ * - and only within COMMENT_UNREAD_WINDOW_DAYS, like comments.
+ */
+export function isStoryUnread(
+  s: Pick<TestRunStory, 'authorId' | 'authorKind' | 'status' | 'activityAt' | 'createdAt'>,
+  lastSeenAt: Date | null,
+  caller: Pick<CommentCaller, 'userId'>,
+  now: number,
+): boolean {
+  if (isKey(caller) || s.authorId === caller.userId) return false;
+  if (s.status !== 'published' && s.authorKind !== 'agent') return false;
+  const activity = new Date(s.activityAt ?? s.createdAt).getTime();
+  if (!Number.isFinite(activity) || activity <= now - COMMENT_UNREAD_WINDOW_DAYS * 86_400_000) return false;
+  return lastSeenAt === null || activity > lastSeenAt.getTime();
+}
+
+export function toStorySummary(s: TestRunStory, stepCount: number, caller: CommentCaller, moderate: boolean, unread = false): StorySummaryResponse {
   return {
     id: s.id,
     testRunId: s.testRunId,
@@ -378,5 +463,6 @@ export function toStorySummary(s: TestRunStory, stepCount: number, caller: Comme
     stepCount,
     canEdit: editDenial(s, caller) === null,
     canDelete: !isKey(caller) && (deletableByRule(s, caller) || moderate),
+    unread,
   };
 }

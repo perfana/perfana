@@ -71,6 +71,14 @@ export class TestRunStory {
   @Column({ name: 'published_by_name', type: 'varchar', length: 255, nullable: true })
   publishedByName!: string | null;
 
+  /**
+   * When the story last changed in a way that makes it unread for the people who can see it
+   * (migration 1834): every publish, a steps change while published, and an AI agent's own writes
+   * to its draft. A person's title or summary edit leaves it alone. Set by the API only.
+   */
+  @Column({ name: 'activity_at', type: 'timestamptz', default: () => 'now()' })
+  activityAt!: Date;
+
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;
 

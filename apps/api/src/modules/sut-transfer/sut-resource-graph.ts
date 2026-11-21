@@ -153,6 +153,9 @@ export const SUT_RESOURCES: SutResource[] = [
   // run, and a draft stays its author's in the target (author_id is kept). Steps have no run
   // column of their own, so they are selected through their story (byStoryOfTestRun), and the
   // importer drops a step whose comment or story did not land rather than abort the import.
+  // test_run_story_reads (migration 1834) is deliberately NOT exported, like
+  // test_run_comment_reads: read state is per user and per environment. A story's activity_at
+  // travels with it; a bundle from before 1834 imports with the column DEFAULT (now()).
   { table: 'test_run_stories', filter: 'byTestRunUuid', group: 'core' },
   { table: 'test_run_story_steps', filter: 'byStoryOfTestRun', group: 'core',
     orderBy: 't.story_id, t.position' },

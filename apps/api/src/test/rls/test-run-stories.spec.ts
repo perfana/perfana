@@ -332,6 +332,104 @@ describe('StoriesService against a real database', () => {
     });
   });
 
+  // PR7: an investigation's per-user read state (migration 1834).
+  describe('read state', () => {
+    const unreadOf = async (id: string, who: CommentCaller) => (await stories.list(runUuid, who)).find((x) => x.id === id)?.unread;
+
+    it('is unread for others after a publish, read once opened, and unread again on a republish or steps change', async () => {
+      const c = await root('read-state step');
+      const c2 = await root('read-state second step');
+      const s = await stories.create(runUuid, { title: 'Read state', steps: [{ commentId: c.id }] }, anna);
+      expect(await unreadOf(s.id, anna)).toBe(false); // the author, never
+      expect(await unreadOf(s.id, mark)).toBeUndefined(); // a user's draft is not visible to Mark at all
+
+      await stories.update(s.id, { status: 'published' }, anna);
+      expect(await unreadOf(s.id, anna)).toBe(false);
+      expect(await unreadOf(s.id, mark)).toBe(true);
+
+      await stories.markSeen(s.id, mark);
+      expect(await unreadOf(s.id, mark)).toBe(false);
+      expect((await stories.get(s.id, mark)).unread).toBe(false);
+
+      // A title fix by the author is a correction, not news.
+      await stories.update(s.id, { title: 'Read state, fixed' }, anna);
+      expect(await unreadOf(s.id, mark)).toBe(false);
+
+      // A steps change while published is.
+      await stories.replaceSteps(s.id, [{ commentId: c.id }, { commentId: c2.id }], anna);
+      expect(await unreadOf(s.id, mark)).toBe(true);
+      await stories.markSeen(s.id, mark);
+
+      // So is a republish.
+      await stories.update(s.id, { status: 'draft' }, anna);
+      await stories.update(s.id, { status: 'published' }, anna);
+      expect(await unreadOf(s.id, mark)).toBe(true);
+    });
+
+    it("counts an agent's draft as unread until opened, and again when the agent changes it, not when a person edits it", async () => {
+      const agent: CommentCaller = { userId: `api-key:stories-spec-read-${suffix}`, displayName: 'Agent', orgIds: [orgA], authorKind: 'agent' };
+      const c = await root('agent read step');
+      const s = await stories.create(runUuid, { title: 'Agent read state', steps: [{ commentId: c.id }] }, agent);
+      expect(await unreadOf(s.id, mark)).toBe(true);
+      expect((await stories.list(runUuid, agent)).find((x) => x.id === s.id)?.unread).toBe(false); // keys have no unread state
+      await stories.markSeen(s.id, mark);
+      expect(await unreadOf(s.id, mark)).toBe(false);
+
+      // Anna reviews the draft without publishing: read for her (her own write), still read for Mark.
+      await stories.update(s.id, { summary: 'reviewed' }, anna);
+      expect(await unreadOf(s.id, anna)).toBe(false);
+      expect(await unreadOf(s.id, mark)).toBe(false);
+
+      // The agent changes it: unread again for both.
+      await stories.update(s.id, { summary: 'agent revised' }, agent);
+      expect(await unreadOf(s.id, mark)).toBe(true);
+      expect(await unreadOf(s.id, anna)).toBe(true);
+    });
+
+    it('stops counting a story whose last activity is older than the 30-day window', async () => {
+      const c = await root('old story step');
+      const s = await stories.create(runUuid, { title: 'Old news', steps: [{ commentId: c.id }] }, anna);
+      await stories.update(s.id, { status: 'published' }, anna);
+      expect(await unreadOf(s.id, mark)).toBe(true);
+      await ds.query(`UPDATE test_run_stories SET activity_at = now() - interval '31 days' WHERE id = $1`, [s.id]);
+      expect(await unreadOf(s.id, mark)).toBe(false);
+    });
+
+    it("answers 404 marking someone else's draft or another organization's story seen, and writes nothing", async () => {
+      const draft = await stories.create(runUuid, { title: 'Seen draft' }, anna);
+      await expect(stories.markSeen(draft.id, mark)).rejects.toBeInstanceOf(NotFoundException);
+      const c = await root('seen cross-org');
+      const pub = await stories.create(runUuid, { title: 'Seen published', steps: [{ commentId: c.id }] }, anna);
+      await stories.update(pub.id, { status: 'published' }, anna);
+      await expect(stories.markSeen(pub.id, outsider)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(stories.markSeen('not-a-uuid', mark)).rejects.toBeInstanceOf(NotFoundException);
+      const rows = await ds.query(`SELECT user_id FROM test_run_story_reads WHERE story_id = ANY($1)`, [[draft.id, pub.id]]);
+      expect(rows.map((r: { user_id: string }) => r.user_id)).toEqual([anna.userId, anna.userId]);
+    });
+
+    it("returns every card with the caller's last look in the run-wide thread list, and nothing per card", async () => {
+      const c = await root('last seen by card');
+      await comments.markSeen(runUuid, 'performance', mark);
+      const all = await comments.listThreads(runUuid, undefined, mark);
+      expect(all.lastSeenByCard).toBeDefined();
+      expect(typeof all.lastSeenByCard!.performance).toBe('string');
+      expect(all.lastSeenByCard!.graphs).toBeNull();
+      expect(all.threads.some((t) => t.id === c.id)).toBe(true);
+      const forAnna = await comments.listThreads(runUuid, undefined, anna);
+      expect(forAnna.lastSeenByCard!.performance).toBeNull();
+      expect((await comments.listThreads(runUuid, 'performance', mark)).lastSeenByCard).toBeUndefined();
+    });
+
+    it('removes read marks with their story', async () => {
+      const c = await root('cascade read');
+      const s = await stories.create(runUuid, { title: 'Cascade read', steps: [{ commentId: c.id }] }, anna);
+      await stories.update(s.id, { status: 'published' }, anna);
+      await stories.markSeen(s.id, mark);
+      await stories.remove(s.id, anna);
+      expect(await ds.query(`SELECT 1 FROM test_run_story_reads WHERE story_id = $1`, [s.id])).toHaveLength(0);
+    });
+  });
+
   // RLS: the policies themselves, as perfana_app with the request GUCs the interceptor sets.
   describe('row-level security', () => {
     const asUser = async <T>(userId: string, orgs: string[], fn: (em: EntityManager) => Promise<T>): Promise<T> => {
@@ -381,6 +479,37 @@ describe('StoriesService against a real database', () => {
       expect(await visible(anna.userId, [orgA])).toEqual(['RLS agent draft', 'RLS user draft']);
       expect(await visible(agentKey, [orgA])).toEqual(['RLS agent draft']);
       expect(await visible(outsider.userId, [orgB])).toEqual([]);
+    });
+
+    // Migration 1834: a read mark is its own user's, like test_run_comment_reads.
+    it('shows and lets a user write only their own investigation read marks', async () => {
+      const c = await root('rls reads');
+      const s = await stories.create(runUuid, { title: 'RLS reads', steps: [{ commentId: c.id }] }, anna);
+      await stories.update(s.id, { status: 'published' }, anna);
+      await stories.markSeen(s.id, mark);
+      const seenBy = (userId: string, orgs: string[]) =>
+        asUser(userId, orgs, async (em) =>
+          (await em.query(`SELECT user_id FROM test_run_story_reads WHERE story_id = $1 ORDER BY user_id`, [s.id])).map((r: { user_id: string }) => r.user_id),
+        );
+      expect(await seenBy(mark.userId, [orgA])).toEqual([mark.userId]);
+      expect(await seenBy(anna.userId, [orgA])).toEqual([anna.userId]);
+      expect(await seenBy(outsider.userId, [orgB])).toEqual([]);
+      // Writing someone else's mark, or a mark in another organization, is refused by the policy.
+      await expect(
+        asUser(mark.userId, [orgA], (em) =>
+          em.query(`INSERT INTO test_run_story_reads (user_id, story_id, last_seen_at, organization_id) VALUES ($1, $2, now(), $3)`, [tom.userId, s.id, orgA]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      await expect(
+        asUser(outsider.userId, [orgB], (em) =>
+          em.query(`INSERT INTO test_run_story_reads (user_id, story_id, last_seen_at, organization_id) VALUES ($1, $2, now(), $3)`, [outsider.userId, s.id, orgA]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      // Another user's mark cannot be moved either: the UPDATE sees no row.
+      const moved = await asUser(anna.userId, [orgA], (em) =>
+        em.query(`UPDATE test_run_story_reads SET last_seen_at = now() WHERE user_id = $1 AND story_id = $2 RETURNING 1`, [mark.userId, s.id]),
+      );
+      expect(moved[0] ?? []).toHaveLength(0);
     });
   });
 });

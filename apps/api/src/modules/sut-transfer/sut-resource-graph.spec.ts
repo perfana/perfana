@@ -124,6 +124,10 @@ describe('SUT_RESOURCES', () => {
     it('does not export test_run_comment_reads', () => {
       expect(SUT_RESOURCES.map((r) => r.table)).not.toContain('test_run_comment_reads');
     });
+
+    it('does not export test_run_story_reads', () => {
+      expect(SUT_RESOURCES.map((r) => r.table)).not.toContain('test_run_story_reads');
+    });
   });
 
   it('raw tables are excluded unless includeRaw', () => {

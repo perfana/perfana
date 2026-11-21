@@ -47,10 +47,14 @@ export class CommentsController {
   }
 
   @Get('test-runs/:id/comments')
-  @ApiOperation({ summary: 'List comment threads on a test run', description: '`:id` is the run uuid or its test_run_id. Threads are roots with their replies, oldest first. With `card`, `lastSeenAt` is the caller\'s previous look at that card. `canModerate`: the caller may delete other people\'s comments here (organization admin or global admin).' })
+  @ApiOperation({ summary: 'List comment threads on a test run', description: '`:id` is the run uuid or its test_run_id. Threads are roots with their replies, oldest first; each root carries `stories`, the investigations it is a step of that the caller can see. With `card`, `lastSeenAt` is the caller\'s previous look at that card. Without `card` (the whole run), `lastSeenByCard` maps every card to the caller\'s previous look at it (null: never), so a client can mark unread threads with the same rule as the counts. `canModerate`: the caller may delete other people\'s comments here (organization admin or global admin).' })
   @ApiQuery({ name: 'card', required: false, enum: COMMENT_CARD_KEYS })
   @ApiResponse({ status: 404, description: 'Run not found or outside your organizations' })
-  async list(@Param('id') id: string, @UserCtx() ctx: UserContext, @Query('card') card?: string): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; canModerate: boolean }> {
+  async list(
+    @Param('id') id: string,
+    @UserCtx() ctx: UserContext,
+    @Query('card') card?: string,
+  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; lastSeenByCard?: Record<string, string | null>; canModerate: boolean }> {
     return this.comments.listThreads(id, card, await this.caller(ctx));
   }
 
@@ -169,6 +173,19 @@ export class CommentsController {
   @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
   async getStory(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
     return this.stories.get(id, await this.caller(ctx));
+  }
+
+  @Put('stories/:id/seen')
+  @ApiTags('Test Run Stories')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Mark an investigation as read by the caller',
+    description: 'The reader calls it when the investigation opens. It is then read until it is published again, its steps change while published, or (an AI agent\'s draft) the agent changes it.',
+  })
+  @ApiResponse({ status: 403, description: 'An API key: an agent has no unread state' })
+  @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
+  async storySeen(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<void> {
+    return this.stories.markSeen(id, await this.caller(ctx, true));
   }
 
   @Post('test-runs/:id/stories')
