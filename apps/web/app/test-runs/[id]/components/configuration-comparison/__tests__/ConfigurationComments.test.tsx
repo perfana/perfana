@@ -181,10 +181,12 @@ describe('Configuration card comment filter', () => {
   });
 });
 
+const commentKey = (id: string) => `comment:${id}:1`;
+
 describe('Configuration comment view', () => {
   const request = (view: Record<string, unknown>, id = 'c1') => ({
     card: 'config',
-    key: `comment:${id}:1`,
+    key: commentKey(id),
     comment: { id, cardKey: 'config', itemKey: 'config:heap.max', chartContext: { kind: 'config', status: 'changed', ...view } } as unknown as RunComment,
   });
 

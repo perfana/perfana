@@ -12,7 +12,7 @@ import * as apiKeys from '@/lib/api-keys';
 jest.mock('@/lib/api-keys', () => ({
   ...jest.requireActual('@/lib/api-keys'),
   fetchApiKeys: jest.fn().mockResolvedValue([]),
-  createApiKey: jest.fn().mockResolvedValue({ apiKey: { id: 'k1', description: 'Agent', roles: ['comments:write'] }, token: 't' }),
+  createApiKey: jest.fn(),
 }));
 jest.mock('@/lib/contexts/organization-context', () => ({
   useOrganizationContext: () => ({ currentOrganizationId: null, organizations: [] }),
@@ -21,7 +21,10 @@ jest.mock('@/lib/contexts/organization-context', () => ({
 const mocked = apiKeys as jest.Mocked<typeof apiKeys>;
 
 describe('API key comments:write option', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mocked.createApiKey.mockResolvedValue({ apiKey: { id: 'k1', description: 'Agent', roles: ['comments:write'] }, token: 't' } as never);
+  });
 
   it('sends the comments:write role only when the box is ticked', async () => {
     const { result } = renderHook(() => useApiKeys({ onSnackbar: jest.fn() } as never));

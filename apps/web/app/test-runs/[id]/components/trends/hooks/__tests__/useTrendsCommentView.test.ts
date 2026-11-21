@@ -15,6 +15,7 @@ jest.mock('../../../comments/CommentsContext', () => ({ useComments: () => ctx }
 const series = (id: string) => ({ id, dashboardId: 'd', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: id, source: 'grafana' as const });
 const week = TIME_RANGE_OPTIONS[3];
 const requestKey = (id: string) => `comment:${id}:1`;
+const restoreKey = (n: number) => `restore:trends:${n}`;
 const custom = TIME_RANGE_OPTIONS.find((o) => o.label === 'Custom')!;
 
 function trendsData(over: Record<string, unknown> = {}) {
@@ -118,7 +119,7 @@ describe('useTrendsCommentView', () => {
     const showToast = jest.fn();
     ctx.viewRequest = {
       card: 'trends',
-      key: 'comment:c3:1',
+      key: requestKey('c3'),
       silent: true,
       comment: { id: 'c3', cardKey: 'trends', chartContext: { kind: 'trends', series: [series('rt')], timeRange: 'Last month', evaluateType: 'p99' } } as unknown as RunComment,
     };
@@ -129,7 +130,7 @@ describe('useTrendsCommentView', () => {
 
     ctx.viewRequest = {
       card: 'trends',
-      key: 'restore:trends:2',
+      key: restoreKey(2),
       silent: true,
       comment: { id: 'restore-2', cardKey: 'trends', chartContext: { kind: 'trends', series: [], timeRange: '', evaluateType: '' } } as unknown as RunComment,
     };
