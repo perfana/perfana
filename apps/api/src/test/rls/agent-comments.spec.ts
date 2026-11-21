@@ -278,4 +278,35 @@ describe('Agent comments against a real database', () => {
       service.create(runUuid, { body: 'x', anchor: { type: 'pyroscope', application: 'shop', profiler: 'memory:alloc', view: 'single' } } as never, agent),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  // Value: protects=diff baseline excludes the run itself and incomplete runs; fails_when=`id <> $4` or `completed` dropped from the SQL; why_new=mock em ignores predicates; seam=none; no_claim=card's baseline pick
+  it('refuses a pyroscope diff anchor when the only completed run is the run itself', async () => {
+    const diff = { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds', view: 'diff' };
+    await ds.query(`UPDATE test_runs SET completed = (id = $1) WHERE id = ANY($2)`, [runUuid, [runUuid, prevUuid]]);
+    try {
+      await expect(service.create(runUuid, { body: 'x', anchor: diff } as never, agent)).rejects.toThrow(/diff view needs a completed earlier run/);
+    } finally {
+      await ds.query(`UPDATE test_runs SET completed = (id = $1) WHERE id = ANY($2)`, [prevUuid, [runUuid, prevUuid]]);
+    }
+  });
+
+  // Value: protects=workload-level tracing service wins over environment level (real SQL); fails_when=level CASE/ORDER or scope predicate breaks; why_new=unit test feeds pre-levelled rows; seam=none; no_claim=system-only level
+  it('resolves a tracing anchor through a workload-level service ahead of the environment-level one', async () => {
+    const workloadService = randomUUID();
+    await ds.query(
+      `INSERT INTO tracing_services (id, system_under_test_id, test_environment, workload, tracing_instance_id, service_names, organization_id)
+       VALUES ($1, $2, 'acc', 'load', $3, ARRAY['payments'], $4)`,
+      [workloadService, sutA, tracingInstance, orgA],
+    );
+    try {
+      const c = await service.create(runUuid, { body: 'p', anchor: { type: 'tracing', serviceName: 'payments' } } as never, agent);
+      expect(c.itemKey).toBe(JSON.stringify([workloadService, 'payments', null, null, null]));
+      await expect(
+        service.create(runUuid, { body: 'x', anchor: { type: 'tracing', serviceName: 'orders' } } as never, agent),
+      ).rejects.toThrow(/Service "orders" is not configured.*it traces: payments/);
+    } finally {
+      await ds.query(`DELETE FROM test_run_comments WHERE test_run_id = $1 AND card_key = 'distributed-tracing' AND item_key LIKE $2`, [runUuid, `%${workloadService}%`]);
+      await ds.query(`DELETE FROM tracing_services WHERE id = $1`, [workloadService]);
+    }
+  });
 });

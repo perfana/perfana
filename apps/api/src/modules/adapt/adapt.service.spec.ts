@@ -1513,6 +1513,31 @@ describe('AdaptService', () => {
     });
   });
 
+  describe('getEnrichedConclusion', () => {
+    // Value: protects=adapt-anchor ids (applicationDashboardId/panelId) on enriched results; fails_when=columns dropped from select or mapping; why_new=method untested; seam=none; no_claim=RLS/org filter
+    it('carries application_dashboard_id and panel_id through, loading only the selected columns', async () => {
+      const adaptResultsRepo: MockRepository<DsAdaptResults> = (service as any).adaptResultsRepo;
+      const fullRow = {
+        id: 'r1', application_dashboard_id: 'ad-1', panel_id: 7, metric_name: 'pdf_gen',
+        dashboard_label: 'JVM', panel_title: 'Heap', unit: 'ms',
+        mean: { test: 2, control: 1, pctDiff: 1 }, statistic: {}, conclusion: { label: 'regression' },
+      } as Record<string, unknown>;
+      // Like TypeORM, return only the columns the query selects.
+      adaptResultsRepo.find.mockImplementation(async (opts: any) => [
+        Object.fromEntries((opts.select as string[]).map((k) => [k, fullRow[k]])),
+      ] as any);
+      conclusionRepo.findOne.mockResolvedValue({
+        test_run_id: 'test-123', conclusion: 'REGRESSION', control_group_id: 'cg',
+        updated_at: new Date(), regressions: ['r1'], improvements: [], differences: [],
+      } as any);
+
+      const result = await service.getEnrichedConclusion('test-123', 'u', ['admin']);
+
+      expect(result?.regressions).toHaveLength(1);
+      expect(result!.regressions[0]).toMatchObject({ applicationDashboardId: 'ad-1', panelId: 7, metric_name: 'pdf_gen' });
+    });
+  });
+
   describe('Edge Cases and Complex Scenarios', () => {
     describe('mapEntityToDatabase', () => {
       it('should handle panel_id conversion to string', async () => {
