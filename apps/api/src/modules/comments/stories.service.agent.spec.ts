@@ -165,6 +165,34 @@ describe('StoriesService agent stories', () => {
     await expect(setup({ story: userDraft }).service.get(STORY, ada)).resolves.toMatchObject({ canEdit: true });
   });
 
+  /*
+   * Value: protects=a published investigation can never be emptied by a step replace, so a reader
+   * never opens a published story with no steps; fails_when=the published-and-empty guard in
+   * replaceSteps is removed or moved after the delete; why_new=only publish-without-steps is tested
+   * (test-run-stories.spec.ts), not emptying an already published story; seam=none;
+   * no_claim=the transaction rollback against Postgres (mocked repositories; unit only).
+   */
+  it('refuses to empty a published investigation, before touching its steps', async () => {
+    const published = storyRow({ authorId: 'sub-1', authorName: 'Ada', authorKind: 'user', status: 'published', publishedAt: new Date() });
+    const { service, stories } = setup({ story: published });
+    await expect(service.replaceSteps(STORY, [], ada)).rejects.toThrow(/unpublish it first/);
+    expect(stories.save).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Value: protects=the service itself refuses a story delete from an API key, even on the key's own
+   * draft, and never offers it (canDelete false); fails_when=the isKey guard in deletableByRule or
+   * canModerate is dropped (the controller gate would be the only layer left); why_new=only the
+   * controller's 403 is tested for a key delete; seam=none; no_claim=the controller role gate
+   * (comments.controller.spec.ts) and RLS (mocked repositories; unit only).
+   */
+  it("refuses a delete from a key at the service, even its own draft, and an admin key's org is no exemption", async () => {
+    const own = setup({ admin: true });
+    await expect(own.service.remove(STORY, agent)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(own.stories.delete).not.toHaveBeenCalled();
+    await expect(own.service.get(STORY, agent)).resolves.toMatchObject({ canEdit: true, canDelete: false });
+  });
+
   it('never lets a key edit a user story, published or not', () => {
     const published = storyRow({ authorId: 'sub-1', authorKind: 'user', status: 'published' }) as unknown as TestRunStory;
     expect(editDenial(published, agent)).toMatch(/only investigations it created/);

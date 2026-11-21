@@ -7,7 +7,7 @@
  * (no request EM, so tx() falls back to dataSource.transaction); no_claim=SQL against Postgres
  * (src/test/rls/agent-comments.spec.ts), the anchor resolvers (comment-anchor.resolver.spec.ts).
  */
-import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus } from '@nestjs/common';
 import { CommentsService, isClientRefConflict } from './comments.service';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -120,6 +120,54 @@ describe('CommentsService agent comments', () => {
     await expect(
       service.createOrReplay('run-1', { card: 'graphs', body: 'x', anchor: { type: 'transaction', name: 't' } } as never, agent),
     ).rejects.toThrow(/belongs to the performance card/);
+  });
+
+  /*
+   * Value: protects=a clientRef insert that loses the unique-index race is answered with the row
+   * that won (200, nothing emitted), and with a 409 when that row is not yet visible, never a 500
+   * or a second comment; fails_when=the null-row branch after the transaction is dropped, emits, or
+   * throws the raw 23505; why_new=agent-comments.spec.ts settles a real race only on the success arm
+   * and cannot force the invisible-winner arm; seam=none; no_claim=Postgres index and lock behaviour
+   * (mocked EntityManager; unit only).
+   */
+  it('answers a lost clientRef race with the winning comment, and a 409 while the winner is invisible', async () => {
+    const winner = {
+      id: '66666666-6666-4666-8666-666666666666', testRunId: RUN, cardKey: 'graphs', parentId: null, body: 'won',
+      authorId: 'api-key:k1', authorName: 'Claude analysis agent', authorKind: 'agent', tag: null,
+      createdAt: new Date('2026-11-20T09:00:00Z'), deletedAt: null, editedAt: null,
+    };
+    const conflict = Object.assign(new Error('duplicate key'), { code: '23505', constraint: 'uq_test_run_comments_client_ref' });
+
+    const won = setup();
+    won.repo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(winner as never);
+    won.repo.save.mockRejectedValueOnce(conflict);
+    const replay = await won.service.createOrReplay('run-1', { card: 'graphs', body: 'race', clientRef: 'r3' } as never, agent);
+    expect(replay).toMatchObject({ created: false, comment: { id: winner.id, body: 'won' } });
+    expect(won.gateway.emitCommentEvent).not.toHaveBeenCalled();
+    expect(won.em.query.mock.calls.map(([sql]) => String(sql))).toContain('ROLLBACK TO SAVEPOINT comment_client_ref');
+
+    const invisible = setup();
+    invisible.repo.findOne.mockResolvedValue(null);
+    invisible.repo.save.mockRejectedValueOnce(conflict);
+    const err = await invisible.service
+      .createOrReplay('run-1', { card: 'graphs', body: 'race', clientRef: 'r3' } as never, agent)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(invisible.gateway.emitCommentEvent).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Value: protects=an insert failure that is not the idempotency conflict still fails the request
+   * after rolling back to the savepoint; fails_when=the catch swallows every error as a replay;
+   * why_new=no test drives a non-conflict save failure on the clientRef path; seam=none;
+   * no_claim=which Postgres errors occur in practice (mocked EntityManager; unit only).
+   */
+  it('rethrows a non-conflict failure on a clientRef insert after rolling back to the savepoint', async () => {
+    const { service, repo, em, gateway } = setup();
+    repo.save.mockRejectedValueOnce(Object.assign(new Error('boom'), { code: '23503' }));
+    await expect(service.createOrReplay('run-1', { card: 'graphs', body: 'x', clientRef: 'r4' } as never, agent)).rejects.toThrow('boom');
+    expect(em.query.mock.calls.map(([sql]) => String(sql))).toContain('ROLLBACK TO SAVEPOINT comment_client_ref');
+    expect(gateway.emitCommentEvent).not.toHaveBeenCalled();
   });
 
   it('recognises only the idempotency index as a clientRef conflict', () => {
