@@ -112,7 +112,7 @@ it('lists unread threads first, expands the oldest unread one, and marks seen on
 
   const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
   await within(drawer).findAllByText('fresh one');
-  const rows = [...drawer.querySelectorAll('[aria-expanded]')];
+  const rows = [...drawer.querySelectorAll('button[aria-expanded]')];
   expect(rows[0]).toHaveTextContent('fresh one');
   expect(rows[0]).toHaveAttribute('aria-expanded', 'true');
   expect(within(drawer).getByText('unread reply')).toBeInTheDocument();
@@ -129,7 +129,7 @@ it("offers Delete, but not Edit, on someone else's comment only when the API say
   let drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
   await within(drawer).findAllByText('by someone else');
   const expand = (d: HTMLElement) => {
-    const row = d.querySelector('[aria-expanded]');
+    const row = d.querySelector('button[aria-expanded]');
     if (row?.getAttribute('aria-expanded') === 'false') fireEvent.click(row);
   };
   expand(drawer);
@@ -210,7 +210,7 @@ it('a comment started from a row is posted with that row as its anchor', async (
   expect(screen.getByText('Heap Usage SLO', { selector: 'span' })).toBeInTheDocument();
   fireEvent.change(box, { target: { value: 'margin is 8%' } });
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Comment' })));
-  expect(mocked.postComment).toHaveBeenCalledWith('run', 'slo', 'margin is 8%', undefined, { itemKey: 'row-7', itemLabel: 'Heap Usage SLO' }, undefined);
+  expect(mocked.postComment).toHaveBeenCalledWith('run', 'slo', 'margin is 8%', undefined, { itemKey: 'row-7', itemLabel: 'Heap Usage SLO' }, undefined, null);
   // The author is already at the row: posting must not yank the page to it again.
   expect(onFocus).not.toHaveBeenCalled();
 });
@@ -498,7 +498,7 @@ describe('placing a graph marker', () => {
     setView(view);
     fireEvent.change(screen.getByLabelText(/^Describe what happens at .*\(\+0:00\)/), { target: { value: 'GC pause' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Place marker' })));
-    expect(mocked.postMarker).toHaveBeenCalledWith('run', 'GC pause', steps[0], view);
+    expect(mocked.postMarker).toHaveBeenCalledWith('run', 'GC pause', steps[0], view, null);
     expect(screen.getByTestId('draft')).toHaveTextContent('none');
     expect(screen.getByLabelText('New comment on this card…')).toBeInTheDocument();
   });
@@ -706,7 +706,7 @@ describe('collapsed thread row', () => {
     fireEvent.click(screen.getByText('open'));
     const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
     await within(drawer).findByText('GC pause');
-    const rows = [...drawer.querySelectorAll('[aria-expanded]')];
+    const rows = [...drawer.querySelectorAll('button[aria-expanded]')];
     const marker = rows.find((r) => r.textContent?.includes('GC pause'))!;
     const anchored = rows.find((r) => r.textContent?.includes('noisy'))!;
     expect(marker).toHaveAttribute('aria-expanded', 'false');
@@ -755,19 +755,19 @@ describe('comment views on Graphs, Trends and Compare', () => {
 
   it("posts a root comment with its card's current view", async () => {
     await post('trends', trendsView);
-    expect(mocked.postComment).toHaveBeenCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, trendsView);
+    expect(mocked.postComment).toHaveBeenCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, trendsView, null);
   });
 
   it('posts the comment without its view when the server refuses the view', async () => {
     mocked.postComment.mockRejectedValueOnce(new Error('Posting comment failed (400): chartContext.customRange must run forwards'));
     await post('trends', trendsView);
     expect(mocked.postComment).toHaveBeenCalledTimes(2);
-    expect(mocked.postComment).toHaveBeenLastCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined);
+    expect(mocked.postComment).toHaveBeenLastCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, undefined, null);
   });
 
   it('posts no view when the card has nothing to record', async () => {
     await post('compare', null);
-    expect(mocked.postComment).toHaveBeenCalledWith('run', 'compare', 'p95 creeping up', undefined, undefined, undefined);
+    expect(mocked.postComment).toHaveBeenCalledWith('run', 'compare', 'p95 creeping up', undefined, undefined, undefined, null);
   });
 
   it('describes each kind of view', () => {
