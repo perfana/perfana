@@ -91,6 +91,20 @@ describe('CommentsRenderer', () => {
     expect(html).toContain('&lt;b&gt;Mallory&lt;/b&gt;');
   });
 
+  it('marks an agent author with an AI chip, escaped like any author name, and a person without one', async () => {
+    const { renderer } = setup([
+      row({ id: 'a1', authorName: '<b>Claude</b> agent', authorKind: 'agent', body: 'root cause' }),
+      row({ id: 'p1', authorName: 'Ada', authorKind: 'user', body: 'agreed' }),
+    ]);
+    const html = await renderer.renderCommentsSection(section(), testRun);
+    expect(html).toContain('&lt;b&gt;Claude&lt;/b&gt; agent');
+    expect(html).not.toContain('<b>Claude');
+    const agentPart = html.slice(html.indexOf('Claude'), html.indexOf('root cause'));
+    const personPart = html.slice(html.indexOf('Ada'), html.indexOf('agreed'));
+    expect(agentPart).toMatch(/>AI</);
+    expect(personPart).not.toMatch(/>AI</);
+  });
+
   it('groups threads by card in page order with replies under their root, and marks edits', async () => {
     const root = row({ cardKey: 'slo', body: 'SLO root' });
     const { renderer } = setup([

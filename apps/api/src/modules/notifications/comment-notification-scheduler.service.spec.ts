@@ -147,6 +147,15 @@ describe('CommentNotificationScheduler', () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining('Giving up'));
   });
 
+  it('never claims or finds an agent comment, which is stamped announced on insert', async () => {
+    await scheduler.announceRun(RUN);
+    const claimSql = txQuery.mock.calls.find((c) => String(c[0]).includes('SKIP LOCKED'))![0];
+    expect(claimSql).toContain("author_kind = 'user'");
+    await scheduler.sweep();
+    const finderSql = String(query.mock.calls.find((c) => String(c[0]).includes('GROUP BY test_run_id'))![0]);
+    expect(finderSql).toContain("author_kind = 'user'");
+  });
+
   it('never claims or finds a comment whose retry backoff has not elapsed', async () => {
     await scheduler.announceRun(RUN);
     const claimSql = txQuery.mock.calls.find((c) => String(c[0]).includes('SKIP LOCKED'))![0];

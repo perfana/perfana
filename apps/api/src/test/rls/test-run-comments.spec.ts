@@ -209,13 +209,13 @@ describe('CommentsService against a real database', () => {
     );
 
     // total: mine + theirs + the ancient one (all live); unread: only theirs within the window.
-    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 1 });
+    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 1, unreadAgent: 0 });
     expect((await commentCountsByRun(ds, [runUuid], anna.userId)).get(runUuid)?.unread).toBeGreaterThanOrEqual(1);
 
     await service.markSeen(runUuid, card, anna);
     expect((await service.listThreads(runUuid, card, anna)).lastSeenAt).not.toBeNull();
     // Seen: nothing unread, but the comments are still there to show on the collapsed card.
-    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 0 });
+    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 0, unreadAgent: 0 });
 
     await service.markSeen(runUuid, card, anna); // upsert, not a duplicate-key error
   });

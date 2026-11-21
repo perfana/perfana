@@ -194,6 +194,8 @@ export class CommentsRenderer {
       meta.push(`<span style="font-weight:700; color:${REPORT_COLORS.ink};">Marker ${escapeHtml(markerGlyph(c.markerSeq))}</span>`);
     }
     meta.push(`<strong style="color:${REPORT_COLORS.ink};">${escapeHtml(c.authorName || 'Unknown')}</strong>`);
+    // A reader must never mistake an agent's claim for a colleague's (design: "Marking agent content").
+    if (c.authorKind === 'agent') meta.push(chip('AI', 'info'));
     meta.push(`<span>${escapeHtml(formatTimestamp(c.createdAt))}</span>`);
     if (c.editedAt && c.deletedAt === null) meta.push('<span>(edited)</span>');
     if (c.itemLabel) meta.push(`<span style="color:${REPORT_COLORS.secondaryInk};">on ${escapeHtml(c.itemLabel)}</span>`);

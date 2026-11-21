@@ -22,7 +22,7 @@ export class CreateApiKeyDto {
   ttl!: string;
 
   @ApiProperty({
-    description: 'Array of role identifiers assigned to this API key. Controls access permissions. Common roles: perfana-admin (full access), perfana-user (standard access), read-only (view-only access). Defaults to empty array (minimal permissions) if not specified.',
+    description: 'Array of role identifiers assigned to this API key. Controls access permissions. Common roles: perfana-admin (full access), perfana-user (standard access), read-only (view-only access). `comments:write` is an opt-in scope any key creator may add: it lets the key post and edit its own test-run comments (for an AI agent through the MCP server) and grants nothing else. Defaults to empty array (minimal permissions) if not specified.',
     example: ['perfana-user'],
     required: false,
     type: [String],

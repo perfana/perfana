@@ -15,7 +15,7 @@ import {
 } from '@mui/icons-material';
 import { Dashboard } from '../types';
 import { filterSystemTags } from '@perfana/shared/utils';
-import { dashboardCommentItemKey } from '@perfana/shared/constants/comment-cards';
+import { dashboardCommentAnchor as sharedDashboardCommentAnchor } from '@perfana/shared/constants/comment-cards';
 import type { CommentItemCounts } from '@/lib/test-run-comments';
 import RowCommentButton from '../../comments/RowCommentButton';
 
@@ -30,8 +30,8 @@ interface DashboardCardProps {
 /** What a dashboard comment is anchored to and called (design: test-run-analysis-stories.md). */
 export function dashboardCommentAnchor(dashboard: Dashboard): { itemKey: string; itemLabel: string } {
   // The application dashboard id, never the Grafana uid: a uid is unique only within one Grafana.
-  const label = dashboard.dashboard_label || dashboard.dashboard_name || dashboard.id;
-  return { itemKey: dashboardCommentItemKey(dashboard.id), itemLabel: Array.from(label).slice(0, 255).join('') };
+  // One definition in the shared package, so the API's agent anchors build the same key.
+  return sharedDashboardCommentAnchor(dashboard);
 }
 
 export function DashboardCard({

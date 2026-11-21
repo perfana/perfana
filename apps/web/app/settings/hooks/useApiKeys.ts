@@ -1,5 +1,6 @@
 'use client';
 
+import { API_KEY_COMMENTS_WRITE_ROLE } from '@perfana/shared/constants/comment-cards';
 import { useState, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -35,6 +36,7 @@ export function useApiKeys({ onSnackbar }: UseApiKeysProps) {
       description: '',
       ttl: '30d',
       organizationId: currentOrganizationId || undefined,
+      commentsWrite: false,
     },
   });
 
@@ -72,6 +74,7 @@ export function useApiKeys({ onSnackbar }: UseApiKeysProps) {
         description: data.description || '',
         ttl: data.ttl || '30d',
         organizationId: currentOrganizationId || data.organizationId,
+        ...(data.commentsWrite ? { roles: [API_KEY_COMMENTS_WRITE_ROLE] } : {}),
       };
       const result = await createApiKey(requestData);
       setApiKeys([result.apiKey, ...apiKeys]);

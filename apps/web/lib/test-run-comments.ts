@@ -1,5 +1,5 @@
 import { authenticatedFetch } from '@/lib/api';
-import type { CommentCardKey, CommentTag, ConfigCommentView } from '@perfana/shared/constants/comment-cards';
+import type { CommentAuthorKind, CommentCardKey, CommentTag, ConfigCommentView } from '@perfana/shared/constants/comment-cards';
 import type { SeriesConfig as PresetSeries } from '@/lib/graph-presets';
 
 /**
@@ -79,6 +79,11 @@ export interface RunComment {
   deleted: boolean;
   authorId: string;
   authorName: string;
+  /**
+   * `agent` when an AI agent wrote it through an API key with the comments:write role; shown with
+   * an AI chip. Absent from an API older than migration 1831, which reads as a person.
+   */
+  authorKind?: CommentAuthorKind;
   markerSeq: number | null;
   markerTime: string | null;
   /** The card's view when the root was written (Graphs, Trends, Compare); null once deleted and elsewhere. */
@@ -123,8 +128,16 @@ export const fetchCommentThreads = async (runId: string, card?: CommentCardKey) 
     'Loading comments',
   );
 
-/** Per card: comments that are not deleted, and how many of those are unread for the caller. */
-export type CardCommentCounts = Partial<Record<CommentCardKey, { total: number; unread: number }>>;
+/**
+ * Per card: comments that are not deleted, how many of those are unread for the caller, and how
+ * many of the unread an AI agent wrote (`unreadAgent`, absent from an API older than 1831).
+ */
+export type CardCommentCounts = Partial<Record<CommentCardKey, { total: number; unread: number; unreadAgent?: number }>>;
+
+/** `5 unread`, or `5 unread (3 from AI)` when agents wrote some of them. */
+export function unreadCommentsLabel(unread: number, unreadFromAgents: number): string {
+  return unreadFromAgents > 0 ? `${unread} unread (${unreadFromAgents} from AI)` : `${unread} unread`;
+}
 
 export const fetchCommentCounts = async (runId: string) =>
   json<CardCommentCounts>(await authenticatedFetch(`${base(runId)}/counts`), 'Loading comment counts');

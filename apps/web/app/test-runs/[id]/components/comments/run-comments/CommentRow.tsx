@@ -8,6 +8,7 @@ import { isCommentTag, type CommentTag } from '@perfana/shared/constants/comment
 import { formatCommentTime, type RunCommentThread } from '@/lib/test-run-comments';
 import { CARD_LABELS } from '../CommentsContext';
 import { CommentTagChip } from '../CommentTagChip';
+import CommentAuthor from '../CommentAuthor';
 import { AddToStoryMenu } from '../../stories/AddToStoryMenu';
 
 export const tagOf = (t: { tag?: unknown }): CommentTag | null => (isCommentTag(t.tag) ? t.tag : null);
@@ -15,11 +16,11 @@ export const tagOf = (t: { tag?: unknown }): CommentTag | null => (isCommentTag(
 export const anchorOf = (t: RunCommentThread): string | null =>
   t.itemLabel ?? (t.markerSeq != null ? `Marker ${t.markerSeq}` : null);
 
-/** "Anna · 12 min ago": who wrote a root and when. One place, so an author marker lands once. */
+/** "Anna · 12 min ago" (with an AI chip for an agent): who wrote a root and when. One place, so an author marker lands once. */
 export function CommentAuthorLine({ thread: t }: { thread: RunCommentThread }) {
   return (
     <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
-      {t.authorName} · {formatCommentTime(t.createdAt)}
+      <CommentAuthor name={t.authorName} kind={t.authorKind} variant="caption" /> · {formatCommentTime(t.createdAt)}
     </Typography>
   );
 }

@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
-import type { CommentTag } from '../constants/comment-cards';
+import type { CommentAuthorKind, CommentTag } from '../constants/comment-cards';
 
 /**
  * A comment on a card of the test-run details page (migration 1827; design:
@@ -66,6 +66,20 @@ export class TestRunComment {
    */
   @Column({ name: 'tag', type: 'varchar', length: 32, nullable: true })
   tag!: CommentTag | null;
+
+  /**
+   * `agent` when an API key with the `comments:write` role wrote it (migration 1831), else
+   * `user`. Set by the API from the principal, never from the request.
+   */
+  @Column({ name: 'author_kind', type: 'varchar', length: 16, default: 'user' })
+  authorKind!: CommentAuthorKind;
+
+  /**
+   * An agent's idempotency key: a repeated create with the same (run, author, client_ref)
+   * returns the first comment. Unique per (test_run_id, author_id) where set (migration 1831).
+   */
+  @Column({ name: 'client_ref', type: 'varchar', length: 64, nullable: true })
+  clientRef!: string | null;
 
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;

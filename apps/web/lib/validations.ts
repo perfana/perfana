@@ -18,6 +18,8 @@ export const createApiKeySchema = z.object({
   description: z.string().min(1, 'Description is required').max(255, 'Description must be less than 255 characters'),
   ttl: z.string().min(1, 'Time to live is required'),
   organizationId: z.string().uuid('Invalid organization ID').optional(),
+  /** Adds the `comments:write` role: the key may post and edit its own test-run comments (an AI agent through MCP). */
+  commentsWrite: z.boolean().optional(),
 })
 
 // Grafana Instance schemas

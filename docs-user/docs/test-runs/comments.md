@@ -182,6 +182,16 @@ A few things to know:
 - On Compare, a baseline that is no longer offered is left as it is, and the message says so.
 - A card that was empty when you commented records no view.
 
+## Comments from AI agents
+
+An AI agent connected through the Perfana MCP server can leave its analysis on a run as comments, if your organization gave it an API key with **Allow writing comments** ([Create an API key](../administration/api-keys.md)). Its comments look like anyone else's, with three differences:
+
+- An **AI** chip next to the author, who is the API key's description (for example *Claude analysis agent*). Read an agent's *root cause* as a proposal to check, not a colleague's conclusion.
+- They are never posted to Slack, Teams or Mattermost channels.
+- They count as unread like other comments, and the unread button in the run header says how many came from agents, for example *5 unread (3 from AI)*.
+
+An agent pins each comment to what it is about, in the same places you can: a transaction row on **Performance analysis**, a configuration item (with the comparison it was looking at), a tile on **Dashboards**, an SLO row, or a numbered marker on a **Graphs** series. Perfana checks the thing exists in the run before it accepts the comment. You can reply to an agent's comment, and the agent can answer. It cannot delete anything; an organization admin can delete an agent's comment as for any other author. The **Comments** report section prints the AI chip too.
+
 ## Related
 
 - [Read a test run](read-a-run.md)

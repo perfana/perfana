@@ -1,5 +1,6 @@
 'use client';
 
+import { sloCommentItemLabel } from '@perfana/shared/constants/comment-cards';
 import React from 'react';
 import {
   Box,
@@ -41,8 +42,7 @@ import { useCommentItemCounts } from '../../comments/CommentsContext';
 
 /** What a comment anchored to this SLO row is shown as in the drawer. */
 function sloItemLabel(result: CheckResult): string {
-  if (isApdexResult(result)) return result.panel_title && result.panel_title !== 'Workload Apdex' ? `Apdex SLO · ${result.panel_title}` : 'Apdex SLO';
-  return [result.dashboard_label, result.panel_title, result.metric_name].filter(Boolean).join(' · ').slice(0, 255) || 'SLO';
+  return sloCommentItemLabel(result);
 }
 
 interface SLOListProps {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { runCommentsLabel } from '../run-comments/RunCommentsButton';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { COMMENT_CARD_BY_EXPANSION_KEY } from '@perfana/shared/constants/comment-cards';
 import { TAB_CARDS } from '../../../hooks/useExpansionState';
@@ -113,6 +114,32 @@ it('next unread jumps to the first unread card in page order and opens its drawe
   expect(reveal).toHaveBeenCalledWith('sloExpanded'); // Results tab comes before Reporting
   expect(await screen.findByRole('complementary', { name: 'Comments on Service level objectives' })).toBeInTheDocument();
   await waitFor(() => expect(mocked.markCommentsSeen).toHaveBeenCalledWith('run', 'slo'));
+});
+
+it('says how many unread an AI agent wrote in the header comments label', () => {
+  expect(runCommentsLabel(5, 5, 0, 3)).toBe('Comments: 5, 5 unread (3 from AI)');
+  expect(runCommentsLabel(5, 5, 0, 0)).toBe('Comments: 5, 5 unread');
+  expect(runCommentsLabel(5, 0, 0, 0)).toBe('Comments: 5');
+});
+
+it('marks an agent author with an AI chip in the drawer, and a person without one', async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 2, unread: 0 } });
+  mocked.fetchCommentThreads.mockResolvedValue({
+    lastSeenAt: '2999-01-01T00:00:00Z',
+    threads: [
+      { ...comment({ id: 'ai', body: 'agent finding', authorName: 'Claude analysis agent', authorKind: 'agent' }), replies: [] },
+      { ...comment({ id: 'hu', body: 'human note', authorName: 'Anna', authorKind: 'user' }), replies: [] },
+    ],
+  });
+  renderPage();
+  fireEvent.click(await screen.findByTestId('card-comments-graphs'));
+  const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
+  await within(drawer).findAllByText('agent finding');
+  const rows = [...drawer.querySelectorAll('button[aria-expanded]')];
+  const agentRow = rows.find((r) => r.textContent?.includes('Claude analysis agent'))!;
+  const humanRow = rows.find((r) => r.textContent?.includes('human note'))!;
+  expect(within(agentRow as HTMLElement).getByTestId('comment-author-ai')).toHaveTextContent('AI');
+  expect(within(humanRow as HTMLElement).queryByTestId('comment-author-ai')).toBeNull();
 });
 
 it('lists unread threads first, expands the oldest unread one, and marks seen only after loading', async () => {

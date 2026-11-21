@@ -8,11 +8,15 @@ import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import { fetchStories } from '@/lib/test-run-stories';
 import { useComments } from '../CommentsContext';
 import { RunCommentsDialog } from './RunCommentsDialog';
+import { unreadCommentsLabel } from '@/lib/test-run-comments';
 
-/** "Comments: 12, 3 unread" (or "Comments: 2 stories" on a run whose comments were all deleted). */
-export function runCommentsLabel(total: number, unread: number, stories: number): string {
+/**
+ * "Comments: 12, 3 unread (1 from AI)" (or "Comments: 2 stories" on a run whose comments were all
+ * deleted).
+ */
+export function runCommentsLabel(total: number, unread: number, stories: number, unreadFromAgents = 0): string {
   const parts = [`${total}`];
-  if (unread > 0) parts.push(`${unread} unread`);
+  if (unread > 0) parts.push(unreadCommentsLabel(unread, unreadFromAgents));
   if (total === 0 && stories > 0) return `Comments: ${stories} ${stories === 1 ? 'story' : 'stories'}`;
   return `Comments: ${parts.join(', ')}`;
 }
@@ -44,7 +48,7 @@ export default function RunCommentsButton() {
   const total = Object.values(ctx.counts).reduce((a, c) => a + (c?.total ?? 0), 0);
   const unread = ctx.totalUnread;
   if (total === 0 && stories === 0 && !open) return null;
-  const label = runCommentsLabel(total, unread, stories);
+  const label = runCommentsLabel(total, unread, stories, ctx.totalUnreadAgent);
   return (
     <>
       <Tooltip title={label}>

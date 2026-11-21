@@ -1,3 +1,4 @@
+import { sloCommentItemKey } from '@perfana/shared/constants/comment-cards';
 import type { Theme } from '@mui/material/styles';
 import { readableShade } from './metric-series-table-utils';
 
@@ -199,12 +200,7 @@ export function getCheckResultKey(
     'panel_type' | 'evaluate_type' | 'benchmark_id' | 'panel_title' | 'application_dashboard_id' | 'panel_id' | 'metric_name'
   >,
 ): string {
-  const benchmarkId = result.benchmark_id || 'unknown';
-  if (isApdexResult(result)) {
-    return `apdex_${benchmarkId}_${result.panel_title || 'unknown'}`;
-  }
-  const dashboardId = result.application_dashboard_id || benchmarkId;
-  const panelId = result.panel_id ?? 'unknown';
-  const metricName = result.metric_name || 'unknown';
-  return `${dashboardId}_${panelId}_${metricName}_${benchmarkId}`;
+  // One definition, in the shared package: it is also a comment's item key, which the API's
+  // agent anchors build server-side and must match exactly.
+  return sloCommentItemKey(result);
 }
