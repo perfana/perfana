@@ -56,18 +56,83 @@ The tag is shown above the thread's text in the panel, and before the comment in
 **Edit** appears on your own comments only, so nobody can change what someone else wrote. What deleting leaves behind depends on the comment:
 
 - A reply, or a thread with no replies, disappears completely.
-- The first comment of a thread that has replies, and every graph marker, is replaced by **Comment deleted**. The replies stay readable, and a deleted marker keeps its number on the chart, greyed out. Nobody can reply to a deleted thread.
+- The first comment of a thread that has replies, every graph marker, and every comment that is a step of a [story](#tell-the-story-of-an-analysis) is replaced by **Comment deleted**. The replies stay readable, and a deleted marker keeps its number on the chart, greyed out. Nobody can reply to a deleted thread. When the comment is in a story you can see, the delete confirmation names the story and the step.
 
 ## See what is new
 
 Perfana keeps track, per card, of which comments you have seen.
 
 - **On a card**: a red badge with a number means that many comments by others are unread. A grey badge shows the total when you have read them all. A card with no comments shows no badge.
-- **In the run header**: a red button shows the run's total unread count. Each click opens the next card, in page order, that still has unread comments, so you can work through them one card at a time. The button disappears when nothing is unread.
+- **In the run header**: the comments icon next to the tabs shows the run's comment total, in red while comments by others are unread. Click it to open the [Comments dialog](#see-every-comment-on-the-run), where **Next unread** opens the next card, in page order, that still has unread comments, so you can work through them one card at a time.
 - **In the test-run list**: a run with comments shows a comment badge. Clicking it opens the run at the first card with unread comments, or at the first card with comments when you have read them all.
 - **In the panel**: unread threads are tinted and marked with a dot, and listed first.
 
 A comment counts as seen once you open the comments panel of its card. Loading the page or expanding a card does not mark anything as read. Only comments from the last 30 days count as unread, and your own comments never do.
+
+## See every comment on the run
+
+The comments icon in the run header, next to the **Results**, **Root Cause Analysis** and **Reporting** tabs, opens the **Comments** dialog. The icon shows the run's comment total, turns red while there are unread comments by others, and only appears once the run has comments or stories. On a phone the dialog fills the screen.
+
+The dialog has two tabs:
+
+- **All comments**: the first comment of every thread on the run, newest first, with its tag, card, row or marker, author, time, the first two lines of its text and its number of replies. Narrow the list by tag (click a tag chip; pick several to see any of them), by card, by author, or to **Markers only**.
+- **Stories**: the run's [stories](#tell-the-story-of-an-analysis).
+
+On each comment:
+
+- **Show in context** closes the dialog, opens the card, scrolls to the row, shows the recorded chart view and opens the thread, exactly as a [link to the comment](#link-to-a-comment) does.
+- **Add to story** adds the comment to one of your stories, or starts a new one.
+
+**Next unread (n)**, at the top of the dialog while anything is unread, closes the dialog and opens the next card with unread comments. Opening the dialog itself marks nothing as read.
+
+## Tell the story of an analysis
+
+An analysis usually spans several cards: a symptom on **Performance analysis**, evidence on **Graphs**, a host checked on **Dynatrace**, the cause in **Configuration**. A story puts those comments in the order that makes sense, so a reviewer can follow your reasoning from one link, seeing each comment's evidence on the page, instead of searching the cards for it.
+
+A story never copies a comment: each step points at a thread, so the reader always sees the comment's current text.
+
+### Start a story
+
+1. On a thread's first comment, click **Add to story**: in the **All comments** tab, or under the thread in a card's comments panel.
+2. Pick one of your stories to add the comment as its last step, or click **New story…**, type a title and click **Create**.
+
+A new story is a **draft**: only you can see it.
+
+### Edit a story
+
+Open the run's **Comments** dialog, go to **Stories** and click **Edit** on one of your stories. You can:
+
+- change the **Title** and the **Conclusion**, the last thing a reader sees;
+- reorder the steps by dragging the handle, or with the up and down arrows;
+- add a **Note** to a step, your connecting words such as "so I looked at the hosts…";
+- remove a step (the comment itself stays);
+- click **Suggest order** to sort the steps by tag, from **Symptom** to **Action**, and then by when each comment was written. It sorts once; you can reorder afterwards.
+
+Click **Save** to keep your changes. A story holds at most 50 steps, and each comment appears in it once.
+
+### Publish
+
+Click **Publish** to let everyone who can see the run read the story; **Unpublish** makes it a draft again. A story needs at least one step before it can be published. Only the author edits, publishes or unpublishes a story. The author, an organization admin and a global admin can delete it; deleting a story never deletes its comments.
+
+### Read a story
+
+Click **Read** on a story in the **Stories** tab. The dialog closes and the story opens:
+
+1. **Introduction**: the title, the author and the list of steps. Click **Start**, or a step to begin there.
+2. **Steps**: a bar at the bottom of the screen shows the step number, the tag, the card and row, the comment (click **more** for a long one), its author and the author's note for the step. Behind it, the page opens the card, scrolls to the row and shows the recorded chart view. The comments panel stays closed; click **Open thread** to read the replies.
+3. **Conclusion**: the story's conclusion, with links back to any step.
+
+Use **‹ Prev** and **Next ›**, or the left and right arrow keys, to move through the steps. Press <kbd>Esc</kbd> or click the close icon to leave the story. Leaving puts every chart card the story changed back to the view you had before, so no single step needs an undo. A row filter that a step applied on **Configuration** or **Dashboards** stays until you click **Show all**.
+
+A step whose comment was deleted shows **Comment deleted**, with its tag and note, and does not move the page. A step on a card this run no longer shows (for example, after an integration was removed) says **card not available on this run**.
+
+Reading a story marks nothing as read. The address of each step is shareable:
+
+```
+/test-runs/[id]?story=<story id>&step=<n>
+```
+
+Without `step`, the link opens the introduction.
 
 ## Link to a comment
 
