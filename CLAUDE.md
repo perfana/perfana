@@ -460,7 +460,6 @@ Symptom index. Each entry names the cause and points at the file that explains i
 
 81. **With the analysis time range on, a Top 10 list's throughput reads lower than the throughput graph for the same transaction** → the list divided the window's executions by the whole run's length, so a run with a long ramp-down read about a third too low; the report's Top 10 Lists section and the MCP `get_performance_rankings` tool did the same, and `ANALYSED_SECONDS_SQL` (report throughput columns, URL metric statistics) subtracted the ramp-up only. Fixed in v0.2.97.91: every analysis-window rate divides by duration − ramp-up − ramp-down, through `analysedSeconds` / `rateSecondsFromEntity` in `packages/shared/src/database/run-window.ts`, falling back to the whole run when the offsets do not fit or nothing would be left. `apps/mcp` cannot import the shared package, so `analysisWindowSeconds` in `apps/mcp/src/helpers.ts` is a hand copy of that rule and has to change with it. A report generated earlier keeps its old numbers until it is regenerated.
 
-
 ## Health Stack
 
 - typecheck: turbo run type-check
