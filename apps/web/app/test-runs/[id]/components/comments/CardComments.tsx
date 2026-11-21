@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Box, useMediaQuery } from '@mui/material';
 import CommentCountBadge from './CommentCountBadge';
 import { CARD_LABELS, cardKeyOf, useComments, type CommentableExpansionKey } from './CommentsContext';
@@ -40,6 +40,22 @@ export default function CardComments({
     if (!expanded && openCard === key) closeDrawer?.();
   }, [expanded, openCard, key, closeDrawer]);
 
+  // A card that renders nothing (Dynatrace, tracing, Splunk when not configured) must not keep
+  // its 293px grid cell and badge behind as an empty slot. Observed rather than checked per
+  // render: the card flips from its loading state to null without this wrapper re-rendering.
+  // ponytail: not `:has(:empty)` in CSS, which jsdom 20's nwsapi cannot parse (every test throws).
+  const slotRef = useRef<HTMLDivElement>(null);
+  const [empty, setEmpty] = useState(false);
+  useLayoutEffect(() => {
+    const slot = slotRef.current;
+    if (!slot) return;
+    const check = () => setEmpty(slot.childNodes.length === 0);
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(slot, { childList: true });
+    return () => observer.disconnect();
+  }, []);
+
   // Charts inside the card that only listen to window resizes relayout to the narrower width.
   useEffect(() => {
     const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
@@ -52,7 +68,7 @@ export default function CardComments({
       sx={{
         gridColumn: expanded ? '1 / -1' : 'auto',
         height: expanded ? 'auto' : '293px',
-        display: 'flex',
+        display: empty ? 'none' : 'flex',
         flexDirection: 'column',
         position: 'relative',
         // A card without comments shows its (empty) badge on hover or keyboard focus only; this
@@ -69,7 +85,7 @@ export default function CardComments({
             : { display: 'contents' }
         }
       >
-        <Box sx={panelOpen ? { flex: 1, minWidth: 0 } : { display: 'contents' }}>{children}</Box>
+        <Box ref={slotRef} sx={panelOpen ? { flex: 1, minWidth: 0 } : { display: 'contents' }}>{children}</Box>
         {panelOpen && (
           <Box
             sx={{
