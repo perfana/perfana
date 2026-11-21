@@ -62,6 +62,11 @@ export function useTrendsCommentView(trends: TrendsData, showToast: (message: st
     if (!request || !view || consumed.current.has(request.key)) return;
     consumed.current.add(request.key);
     const t = latest.current;
+    // The story reader's Exit puts back an empty chart: clear the series and leave the rest.
+    if (view.series.length === 0 && !view.evaluateType) {
+      t.setAddedSeries([]);
+      return;
+    }
     const previous = {
       series: t.addedSeries,
       timeRange: t.timeRange,
@@ -96,6 +101,6 @@ export function useTrendsCommentView(trends: TrendsData, showToast: (message: st
         : t.customTimeRange,
       evaluateType: view.evaluateType,
     });
-    showToast("Showing the comment's view", { label: 'Undo', onClick: () => apply(previous) });
+    if (!request.silent) showToast("Showing the comment's view", { label: 'Undo', onClick: () => apply(previous) });
   }, [request, showToast]);
 }

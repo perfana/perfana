@@ -384,6 +384,8 @@ describe('SutImportService (integration)', () => {
     const commentRunKey = 'comments-run-1';
     const cleanup = async (): Promise<void> => {
       await dataSource.query(`DELETE FROM test_run_comment_reads WHERE test_run_id = $1`, [c.run]);
+      // Stories first: their steps reference the comments (a deferred NO ACTION FK).
+      await dataSource.query(`DELETE FROM test_run_stories WHERE test_run_id = $1`, [c.run]);
       await dataSource.query(`DELETE FROM test_run_comments WHERE test_run_id = $1`, [c.run]);
       await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [c.run]);
       await dataSource.query(`DELETE FROM systems_under_test WHERE id = $1`, [c.sut]);
@@ -512,6 +514,86 @@ describe('SutImportService (integration)', () => {
       const ids = (await dataSource.query(`SELECT id FROM test_run_comments WHERE test_run_id = $1`, [c.run]))
         .map((r: { id: string }) => r.id);
       expect(ids).toEqual([c.root]);
+    });
+
+    // Stories (migration 1830) travel with the comments their steps reference, ids kept.
+    const story = { pub: '13131313-0000-0000-0000-000000000021', draft: '13131313-0000-0000-0000-000000000022' };
+    const insertStory = (id: string, status: 'draft' | 'published', steps: [string, number, string | null][]): Promise<unknown> =>
+      dataSource
+        .query(
+          `INSERT INTO test_run_stories (id, test_run_id, title, summary, status, author_id, author_name, published_at, organization_id, team_id)
+           VALUES ($1,$2,$3,'conclusion',$4,'user-a','User A',$5,$6,$7)`,
+          [id, c.run, `story ${status}`, status, status === 'published' ? '2026-11-01T12:00:00Z' : null, srcOrg, c.team],
+        )
+        .then(() =>
+          Promise.all(
+            steps.map(([comment, position, note]) =>
+              dataSource.query(
+                `INSERT INTO test_run_story_steps (story_id, comment_id, position, note, organization_id) VALUES ($1,$2,$3,$4,$5)`,
+                [id, comment, position, note, srcOrg],
+              ),
+            ),
+          ),
+        );
+
+    it('round-trips stories and their steps, ids and order kept, a deleted step comment included', async () => {
+      await seedSutAndRun(srcOrg);
+      await insertComment(c.root, { body: 'root cause', createdAt: '2026-11-01T10:10:00Z' });
+      await insertComment(c.marker, { markerSeq: 1, deleted: true, createdAt: '2026-11-01T10:00:00Z' });
+      await insertStory(story.pub, 'published', [[c.marker, 1, 'first the spike'], [c.root, 2, null]]);
+      await insertStory(story.draft, 'draft', [[c.root, 1, null]]);
+
+      const bundle = await exportBundle();
+      await cleanup();
+      const summary = await importService.import(bundle, targetOrg);
+      expect(summary.rowCounts['test_run_stories']).toBe(2);
+      expect(summary.rowCounts['test_run_story_steps']).toBe(3);
+      expect(summary.droppedCounts['test_run_story_steps']).toBeUndefined();
+
+      const stories: Array<Record<string, any>> = await dataSource.query(
+        `SELECT id, status, author_id, author_kind, organization_id, team_id, published_at FROM test_run_stories WHERE test_run_id = $1 ORDER BY id`,
+        [c.run],
+      );
+      expect(stories.map((r) => [r.id, r.status, r.author_id, r.author_kind, r.organization_id, r.team_id])).toEqual([
+        [story.pub, 'published', 'user-a', 'user', targetOrg, null],
+        [story.draft, 'draft', 'user-a', 'user', targetOrg, null],
+      ]);
+      expect(stories[0]!.published_at).not.toBeNull();
+      const steps: Array<Record<string, any>> = await dataSource.query(
+        `SELECT story_id, comment_id, position, note, organization_id FROM test_run_story_steps WHERE story_id = ANY($1) ORDER BY story_id, position`,
+        [[story.pub, story.draft]],
+      );
+      expect(steps.map((r) => [r.story_id, r.comment_id, r.position, r.note, r.organization_id])).toEqual([
+        [story.pub, c.marker, 1, 'first the spike', targetOrg],
+        [story.pub, c.root, 2, null, targetOrg],
+        [story.draft, c.root, 1, null, targetOrg],
+      ]);
+
+      const replay = await importService.import(bundle, targetOrg);
+      expect(replay.rowCounts['test_run_stories']).toBe(0);
+      expect(replay.skippedCounts['test_run_story_steps']).toBe(3);
+    });
+
+    it('drops a step whose comment lost its marker number to a comment already here, instead of aborting', async () => {
+      await seedSutAndRun(srcOrg);
+      await insertComment(c.marker, { markerSeq: 1, body: 'source marker', createdAt: '2026-11-01T10:00:00Z' });
+      await insertComment(c.reply, { body: 'plain root', createdAt: '2026-11-01T10:01:00Z' });
+      await insertStory(story.pub, 'published', [[c.marker, 1, null], [c.reply, 2, null]]);
+      const bundle = await exportBundle();
+      await cleanup();
+
+      await seedSutAndRun(targetOrg);
+      await dataSource.query(
+        `INSERT INTO test_run_comments (id, test_run_id, card_key, body, author_id, author_name, marker_seq, marker_time, organization_id)
+         VALUES ($1,$2,'graphs','target marker','user-t','User T',1,now(),$3)`,
+        [c.root, c.run, targetOrg],
+      );
+      const summary = await importService.import(bundle, targetOrg);
+      expect(summary.rowCounts['test_run_stories']).toBe(1);
+      expect(summary.rowCounts['test_run_story_steps']).toBe(1);
+      expect(summary.droppedCounts['test_run_story_steps']).toBe(1);
+      const kept = await dataSource.query(`SELECT comment_id FROM test_run_story_steps WHERE story_id = $1`, [story.pub]);
+      expect(kept).toEqual([{ comment_id: c.reply }]);
     });
 
     it('still imports a bundle exported before comments travelled', async () => {

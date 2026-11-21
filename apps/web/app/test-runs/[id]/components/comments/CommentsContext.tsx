@@ -15,16 +15,12 @@ export type CommentEvent =
   | { type: 'comment:created' | 'comment:updated'; comment: RunComment; seq: number }
   | { type: 'comment:deleted'; comment: RunComment & { hardDeleted?: boolean }; seq: number };
 
-/** An expansion key whose card takes comments. */
-export type CommentableExpansionKey = keyof typeof COMMENT_CARD_BY_EXPANSION_KEY;
-
 /**
- * The page's cards that take no comments of their own. Every other expansion key must have a
- * stored card key in COMMENT_CARD_BY_EXPANSION_KEY (the comments test asserts it).
+ * An expansion key whose card takes comments. Every card on the page does (the comments test
+ * asserts each expansion key has a stored card key); the run-wide list lives in the header's
+ * Comments dialog, not in a card.
  */
-export const NON_COMMENTABLE_EXPANSION_KEYS: readonly Exclude<keyof ExpansionState, CommentableExpansionKey>[] = Object.freeze([
-  'commentsExpanded', // the run-wide Comments card lists the other cards' comments
-]);
+export type CommentableExpansionKey = keyof typeof COMMENT_CARD_BY_EXPANSION_KEY;
 
 export const CARD_LABELS: Readonly<Record<CommentCardKey, string>> = COMMENT_CARD_LABELS;
 
@@ -35,8 +31,8 @@ export function cardKeyOf(expansionKey: keyof ExpansionState): CommentCardKey | 
 }
 
 /**
- * Every commentable card in page order (Results, then RCA, then Reporting), for the header's
- * next-unread jump. Cards without a comment card key (the Comments card) are skipped.
+ * Every commentable card in page order (Results, then RCA, then Reporting), for the Comments
+ * dialog's next-unread jump. A key without a comment card key would be skipped, not crash.
  */
 export const PAGE_ORDER: CommentCardKey[] = Object.values(TAB_CARDS)
   .flat()
@@ -107,9 +103,21 @@ interface CommentsContextValue {
   /** The thread expanded in the drawer, so the chart can show its pin as selected. */
   activeThreadId: string | null;
   setActiveThreadId: (id: string | null) => void;
-  /** The latest "show this comment's view" request; the card it names consumes each key once. */
-  viewRequest: { card: CommentCardKey; key: string; comment: RunComment } | null;
-  restoreView: (comment: RunComment) => void;
+  /**
+   * The latest "show this comment's view" request; the card it names consumes each key once.
+   * `silent`: apply it without the card's "Showing the comment's view · Undo" toast (a story walk
+   * owns the one undo for the whole walk).
+   */
+  viewRequest: ViewRequest | null;
+  restoreView: (comment: RunComment, opts?: { silent?: boolean }) => void;
+  /**
+   * Put a card back to a view captured earlier (`captureView`), without revealing the card and
+   * without a toast. `null` clears a chart card back to no series (what an empty chart captures).
+   * Used by the story reader's Exit.
+   */
+  applyView: (card: CommentCardKey, view: CommentView | null) => void;
+  /** The last `story:changed` for this run; consumers refetch through the access-checked GET. */
+  storyEvent: { storyId: string; seq: number } | null;
   /**
    * A card (Graphs, Trends, Compare, Configuration) registers how to read its current view;
    * returns the unregister. `itemKey` is the item the new comment is anchored to, for a card
@@ -118,6 +126,24 @@ interface CommentsContextValue {
   registerViewCapture: (card: CommentCardKey, capture: ViewCapture) => () => void;
   /** The card's current view, for a root comment to record; null when the card records none. */
   captureView: (card: CommentCardKey, itemKey?: string | null) => CommentView | null;
+}
+
+export interface ViewRequest {
+  card: CommentCardKey;
+  key: string;
+  comment: RunComment;
+  silent?: boolean;
+}
+
+/**
+ * The view that clears a chart card back to no series. Graphs and Compare apply an empty series
+ * list as such; Trends recognises it (no aggregation) and clears its series only.
+ */
+export function emptyViewFor(card: CommentCardKey): CommentView | null {
+  if (card === 'graphs') return { kind: 'graphs', series: [] };
+  if (card === 'compare') return { kind: 'compare', series: [] };
+  if (card === 'trends') return { kind: 'trends', series: [], timeRange: '', evaluateType: '' };
+  return null;
 }
 
 /** Reads a card's view for a new root comment; `itemKey` is the comment's anchor, if any. */
@@ -164,6 +190,7 @@ export function CommentsProvider({
   const [markerDraft, setMarkerDraft] = useState<MarkerDraft | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [viewRequest, setViewRequest] = useState<CommentsContextValue['viewRequest']>(null);
+  const [storyEvent, setStoryEvent] = useState<CommentsContextValue['storyEvent']>(null);
   const captures = useRef(new Map<CommentCardKey, ViewCapture>());
   const openCardRef = useRef(openCard);
   openCardRef.current = openCard;
@@ -195,9 +222,15 @@ export function CommentsProvider({
     const offs = (['comment:created', 'comment:updated', 'comment:deleted'] as const).map((t) =>
       socketManager.on<RunComment>(t, handler(t)),
     );
+    // Body-free on purpose (drafts are private): only ids, the UI refetches what it shows.
+    const offStory = socketManager.on<{ testRunId: string; storyId: string }>('story:changed', (e) => {
+      if (e?.testRunId !== runId || typeof e.storyId !== 'string') return;
+      setStoryEvent({ storyId: e.storyId, seq: ++seqRef.current });
+    });
     return () => {
       offState();
       offs.forEach((off) => off());
+      offStory();
       socketManager.emit('unsubscribe:test-run', { testRunId: runId });
     };
   }, [runId, refreshUnread]);
@@ -232,15 +265,27 @@ export function CommentsProvider({
   const moveMarker = useCallback((time: string) => setMarkerDraft((d) => (d ? { ...d, time } : d)), []);
   const cancelMarker = useCallback(() => setMarkerDraft(null), []);
   const restoreView = useCallback(
-    (comment: RunComment) => {
+    (comment: RunComment, opts?: { silent?: boolean }) => {
       if (!comment.chartContext) return;
       const key = expansionKeyOf(comment.cardKey);
       if (key) reveal(key);
       // A fresh key per request, so "Restore view" twice replays twice; the card skips seen keys.
-      setViewRequest({ card: comment.cardKey, key: `comment:${comment.id}:${++seqRef.current}`, comment });
+      setViewRequest({ card: comment.cardKey, key: `comment:${comment.id}:${++seqRef.current}`, comment, ...(opts?.silent ? { silent: true } : {}) });
     },
     [reveal],
   );
+  const applyView = useCallback((card: CommentCardKey, view: CommentView | null) => {
+    const chartContext = view ?? emptyViewFor(card);
+    if (!chartContext) return;
+    const seq = ++seqRef.current;
+    // A synthetic root: the cards' replay path reads only the card, the view and (Configuration) the anchor.
+    const comment: RunComment = {
+      id: `restore-${seq}`, testRunId: '', cardKey: card, parentId: null, itemKey: null, itemLabel: null, body: null,
+      deleted: false, authorId: '', authorName: '', markerSeq: null, markerTime: null, chartContext, tag: null,
+      createdAt: new Date(0).toISOString(), editedAt: null,
+    };
+    setViewRequest({ card, key: `restore:${card}:${seq}`, comment, silent: true });
+  }, []);
   const registerViewCapture = useCallback((card: CommentCardKey, capture: ViewCapture) => {
     captures.current.set(card, capture);
     return () => {
@@ -301,8 +346,8 @@ export function CommentsProvider({
   const totalUnread = Object.values(unread).reduce<number>((a, b) => a + (b ?? 0), 0);
 
   const value = useMemo(
-    () => ({ runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, registerViewCapture, captureView }),
-    [runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, registerViewCapture, captureView],
+    () => ({ runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, applyView, storyEvent, registerViewCapture, captureView }),
+    [runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, applyView, storyEvent, registerViewCapture, captureView],
   );
   return <CommentsContext.Provider value={value}>{children}</CommentsContext.Provider>;
 }

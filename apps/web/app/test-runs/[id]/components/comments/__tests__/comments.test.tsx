@@ -2,10 +2,20 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { COMMENT_CARD_BY_EXPANSION_KEY } from '@perfana/shared/constants/comment-cards';
 import { TAB_CARDS } from '../../../hooks/useExpansionState';
-import { CommentsProvider, NON_COMMENTABLE_EXPANSION_KEYS, PAGE_ORDER, cardKeyOf, useCommentItemFocus, useComments, useGraphMarkers } from '../CommentsContext';
+import { CommentsProvider, PAGE_ORDER, useCommentItemFocus, useComments, useGraphMarkers } from '../CommentsContext';
 import CardComments from '../CardComments';
 import CommentsDrawer, { describeView } from '../CommentsDrawer';
-import RunCommentsButton from '../RunCommentsButton';
+
+/** The Comments dialog's Next unread, without the dialog: what it calls once it has closed. */
+function NextUnread() {
+  const ctx = useComments();
+  if (!ctx?.nextUnreadCard) return null;
+  return (
+    <button data-testid="next-unread" aria-label={`next: ${ctx.nextUnreadCard} (${ctx.totalUnread})`} onClick={ctx.jumpToNextUnread}>
+      {ctx.totalUnread}
+    </button>
+  );
+}
 import * as api from '@/lib/test-run-comments';
 
 jest.mock('@/lib/socket', () => ({
@@ -36,7 +46,7 @@ const comment = (over: Partial<api.RunComment>): api.RunComment => ({
 const renderPage = (reveal = jest.fn()) =>
   render(
     <CommentsProvider runId="run" reveal={reveal}>
-      <RunCommentsButton />
+      <NextUnread />
       <CardComments card="sloExpanded" expanded><div>slo card</div></CardComments>
       <CardComments card="graphsExpanded" expanded><div>graphs card</div></CardComments>
     </CommentsProvider>,
@@ -49,38 +59,19 @@ beforeEach(() => {
 
 // Design R11: a stored card key must never depend on a React state name. Every card the page
 // renders needs a permanent key, and no two cards may share one.
-// Only the explicit allowlist (the run-wide Comments card) may go without one.
 it('maps every expansion key on the page to a distinct permanent card key', () => {
-  const pageKeys = Object.values(TAB_CARDS).flat();
-  expect(NON_COMMENTABLE_EXPANSION_KEYS).toEqual(['commentsExpanded']);
-  const commentable = pageKeys.filter((k) => !(NON_COMMENTABLE_EXPANSION_KEYS as readonly string[]).includes(k)).sort();
-  expect(Object.keys(COMMENT_CARD_BY_EXPANSION_KEY).sort()).toEqual(commentable);
-  for (const k of NON_COMMENTABLE_EXPANSION_KEYS) {
-    expect(pageKeys).toContain(k);
-    expect(cardKeyOf(k)).toBeUndefined();
-  }
+  const pageKeys = Object.values(TAB_CARDS).flat().sort();
+  expect(Object.keys(COMMENT_CARD_BY_EXPANSION_KEY).sort()).toEqual(pageKeys);
   const values = Object.values(COMMENT_CARD_BY_EXPANSION_KEY);
   expect(new Set(values).size).toBe(values.length);
 });
 
-it('builds the next-unread page order from commentable cards only', () => {
+it('builds the next-unread page order from the cards in page order', () => {
   expect(PAGE_ORDER).not.toContain(undefined);
   expect(PAGE_ORDER).toEqual(
-    Object.values(TAB_CARDS).flat().filter((k) => k !== 'commentsExpanded').map((k) => COMMENT_CARD_BY_EXPANSION_KEY[k as keyof typeof COMMENT_CARD_BY_EXPANSION_KEY]),
+    Object.values(TAB_CARDS).flat().map((k) => COMMENT_CARD_BY_EXPANSION_KEY[k as keyof typeof COMMENT_CARD_BY_EXPANSION_KEY]),
   );
-  expect(PAGE_ORDER.slice(0, 2)).toEqual(['details', 'config']); // the Comments card sits between them
-});
-
-it('next-unread steps over the Comments card from Test run details to Configuration', async () => {
-  mocked.fetchCommentCounts.mockResolvedValue({ config: { total: 1, unread: 1 }, graphs: { total: 1, unread: 1 } });
-  mocked.fetchCommentThreads.mockResolvedValue({ threads: [], lastSeenAt: null });
-  const reveal = jest.fn();
-  renderPage(reveal);
-  const button = await screen.findByTestId('run-comments-button');
-  await waitFor(() => expect(button).toHaveAccessibleName('2 unread · next: Configuration (1)'));
-  fireEvent.click(button);
-  expect(reveal).toHaveBeenCalledWith('configExpanded');
-  expect(reveal).not.toHaveBeenCalledWith('commentsExpanded');
+  expect(PAGE_ORDER.slice(0, 2)).toEqual(['details', 'config']);
 });
 
 it('shows a red unread count, a neutral total when all is read, and nothing when a card has no comments', async () => {
@@ -110,13 +101,13 @@ it('shows a red unread count, a neutral total when all is read, and nothing when
   expect(trends.parentElement).toHaveStyle({ opacity: '0' });
 });
 
-it('header button jumps to the first unread card in page order and opens its drawer', async () => {
+it('next unread jumps to the first unread card in page order and opens its drawer', async () => {
   mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 1, unread: 1 }, slo: { total: 2, unread: 2 } });
   mocked.fetchCommentThreads.mockResolvedValue({ threads: [], lastSeenAt: null });
   const reveal = jest.fn();
   renderPage(reveal);
-  const button = await screen.findByTestId('run-comments-button');
-  expect(button).toHaveAccessibleName('3 unread · next: Service level objectives (2)');
+  const button = await screen.findByTestId('next-unread');
+  expect(button).toHaveAccessibleName('next: slo (3)');
 
   fireEvent.click(button);
   expect(reveal).toHaveBeenCalledWith('sloExpanded'); // Results tab comes before Reporting
@@ -210,11 +201,11 @@ it('opening an anchored thread asks its card to show that row', async () => {
   render(
     <CommentsProvider runId="run" reveal={reveal}>
       <FakeSloCard onFocus={onFocus} />
-      <RunCommentsButton />
+      <NextUnread />
       <CommentsDrawer />
     </CommentsProvider>,
   );
-  fireEvent.click(await screen.findByTestId('run-comments-button'));
+  fireEvent.click(await screen.findByTestId('next-unread'));
   // The only unread thread auto-expands on open, which is "opening" it.
   await waitFor(() => expect(onFocus).toHaveBeenCalledWith('row-7'));
   expect(reveal).toHaveBeenCalledWith('sloExpanded');

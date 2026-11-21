@@ -37,6 +37,7 @@ import { CONTROL_GROUP_BASELINE } from '@/lib/control-group-baseline';
 import { CARD_LABELS, useComments, type MarkerDraft } from './CommentsContext';
 import { CommentTagChip } from './CommentTagChip';
 import { CommentTagPicker } from './CommentTagPicker';
+import { AddToStoryMenu } from '../stories/AddToStoryMenu';
 
 /** Cards whose single thread opens (and focuses its item) as soon as the comments open. */
 const AUTO_OPEN_SINGLE_THREAD = new Set<CommentCardKey>(['distributed-tracing']);
@@ -160,10 +161,13 @@ function CommentItem({
   mine,
   canDelete,
   taggable,
+  stories,
   onEdit,
   onDelete,
 }: {
   comment: RunComment;
+  /** The stories a root is a step of (the delete confirmation names them). */
+  stories?: { id: string; title: string; position: number }[];
   isNew: boolean;
   mine: boolean;
   /** Author, or an organization admin moderating someone else's comment. */
@@ -222,7 +226,11 @@ function CommentItem({
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mt: 0.25 }}>
           {confirming ? (
             <>
-              <Typography variant="caption">Delete this comment?</Typography>
+              <Typography variant="caption" data-testid="comment-delete-confirm">
+                {stories && stories.length > 0
+                  ? `Delete this comment? It is ${stories.map((st) => `step ${st.position} of “${st.title}”`).join(', ')}; the story keeps the step as “comment deleted”.`
+                  : 'Delete this comment?'}
+              </Typography>
               <Button size="small" color="error" onClick={() => onDelete().catch((e) => { setError(errorText(e)); setConfirming(false); })}>
                 Delete
               </Button>
@@ -646,6 +654,7 @@ export default function CommentsDrawer() {
                     mine={t.authorId === me}
                     canDelete={canModerate || t.authorId === me}
                     taggable
+                    stories={t.stories}
                     // The tag goes only when it changed, so a text edit never resends it.
                     onEdit={async (body, tag) => upsert(await editComment(t.id, body, tag !== t.tag ? tag : undefined))}
                     onDelete={() => remove(t)}
@@ -671,6 +680,9 @@ export default function CommentsDrawer() {
                         submitLabel="Reply"
                         onSubmit={async (body) => upsert(await postComment(runId, card, body, t.id))}
                       />
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
+                        <AddToStoryMenu commentId={t.id} />
+                      </Box>
                     </Box>
                   )}
                 </Box>

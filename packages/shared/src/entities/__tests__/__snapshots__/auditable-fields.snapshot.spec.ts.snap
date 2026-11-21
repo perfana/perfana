@@ -382,6 +382,15 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "tag",
   ],
   "TestRunCommentRead": null,
+  "TestRunStory": [
+    "testRunId",
+    "title",
+    "summary",
+    "status",
+    "authorId",
+    "authorName",
+  ],
+  "TestRunStoryStep": null,
   "TracingInstance": [
     "label",
     "tracingUrl",

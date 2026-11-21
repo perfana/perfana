@@ -113,12 +113,13 @@ export function useConfigComments(
 
   // Restore view / deep link: select the recorded comparison run, once per request key.
   const consumed = useRef(new Set<string>());
-  const pending = useRef<{ wanted: string; previous: string } | null>(null);
+  const pending = useRef<{ wanted: string; previous: string; silent: boolean } | null>(null);
   const request = comments?.viewRequest?.card === 'config' ? comments.viewRequest : null;
 
   const select = useCallback(
-    (wanted: string, previous: string) => {
+    (wanted: string, previous: string, silent = false) => {
       latest.current.handleRelatedTestRunChange(wanted);
+      if (silent) return;
       showToast("Showing the comment's view", {
         label: 'Undo',
         onClick: () => latest.current.handleRelatedTestRunChange(previous),
@@ -137,11 +138,11 @@ export function useConfigComments(
     const d = latest.current;
     if (!d.relatedTestRunsLoaded) {
       // Settled once the card's run list arrives (a deep link expands the card in the same commit).
-      pending.current = { wanted, previous: d.selectedRelatedTestRun };
+      pending.current = { wanted, previous: d.selectedRelatedTestRun, silent: Boolean(request.silent) };
       return;
     }
     pending.current = null;
-    if (d.relatedTestRuns.some((r) => r.test_run_id === wanted)) select(wanted, d.selectedRelatedTestRun);
+    if (d.relatedTestRuns.some((r) => r.test_run_id === wanted)) select(wanted, d.selectedRelatedTestRun, Boolean(request.silent));
     else showToast(`The comment's comparison run ${wanted} is no longer available`);
   }, [request, select, showToast]);
 
@@ -153,7 +154,7 @@ export function useConfigComments(
     pending.current = null;
     // The card auto-selects the previous run as the list arrives; Undo returns there.
     const previous = latest.current.selectedRelatedTestRun || p.previous;
-    if (runs.some((r) => r.test_run_id === p.wanted)) select(p.wanted, previous);
+    if (runs.some((r) => r.test_run_id === p.wanted)) select(p.wanted, previous, p.silent);
     else showToast(`The comment's comparison run ${p.wanted} is no longer available`);
   }, [loaded, runs, select, showToast]);
 

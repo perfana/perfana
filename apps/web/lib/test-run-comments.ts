@@ -91,6 +91,8 @@ export interface RunComment {
 
 export interface RunCommentThread extends RunComment {
   replies: RunComment[];
+  /** The stories this root is a step of, among those the caller can see; absent when none. */
+  stories?: { id: string; title: string; position: number }[];
 }
 
 async function json<T>(res: Response, what: string): Promise<T> {

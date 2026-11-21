@@ -147,3 +147,38 @@ export const COMMENT_TAG_LABELS: Readonly<Record<CommentTag, string>> = Object.f
 export function isCommentTag(value: unknown): value is CommentTag {
   return typeof value === 'string' && (COMMENT_TAGS as readonly string[]).includes(value);
 }
+
+/**
+ * Analysis stories (design: test-run-analysis-stories.md, "Stories"; migration 1830). The widths
+ * and caps are mirrored by `test_run_stories` / `test_run_story_steps` CHECKs and the API DTOs.
+ */
+export const STORY_TITLE_MAX_LENGTH = 200;
+/** A story's conclusion; the same cap as a comment body. */
+export const STORY_SUMMARY_MAX_LENGTH = 10_000;
+/** The story author's connecting words on one step. */
+export const STORY_STEP_NOTE_MAX_LENGTH = 2_000;
+/** Most steps one story may hold. */
+export const STORY_MAX_STEPS = 50;
+
+/** Stored in `test_run_stories.status` and mirrored by its CHECK. */
+export const STORY_STATUSES = Object.freeze(['draft', 'published'] as const);
+export type StoryStatus = (typeof STORY_STATUSES)[number];
+
+/**
+ * Who wrote a story, stored in `test_run_stories.author_kind`. Only 'user' is written until agent
+ * authoring through MCP ships; the API never reads it from a request.
+ */
+export const STORY_AUTHOR_KINDS = Object.freeze(['user', 'agent'] as const);
+export type StoryAuthorKind = (typeof STORY_AUTHOR_KINDS)[number];
+
+/**
+ * The suggested story order (design: "Suggest order"): by tag in `COMMENT_TAGS` order, untagged
+ * last, then by creation time. Pure, so the web editor and a test share it. Stable for ties.
+ */
+export function suggestStoryOrder<T extends { tag: CommentTag | null; createdAt: string }>(steps: readonly T[]): T[] {
+  const rank = (t: CommentTag | null): number => (t ? COMMENT_TAGS.indexOf(t) : COMMENT_TAGS.length);
+  return steps
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => rank(a.s.tag) - rank(b.s.tag) || Date.parse(a.s.createdAt) - Date.parse(b.s.createdAt) || a.i - b.i)
+    .map(({ s }) => s);
+}

@@ -59,9 +59,9 @@ import { TabErrorBoundary } from './components/shared/TabErrorBoundary';
 import { getPlotly } from '@/lib/plotly';
 import { CommentsProvider } from './components/comments/CommentsContext';
 import CardComments from './components/comments/CardComments';
-import RunCommentsButton from './components/comments/RunCommentsButton';
+import RunCommentsButton from './components/comments/run-comments/RunCommentsButton';
 import CommentDeepLink from './components/comments/CommentDeepLink';
-import CommentsCard from './components/comments-card/CommentsCard';
+import StoryReader from './components/stories/StoryReader';
 import type { ExpansionState, ToastAction } from './types';
 
 const TAB_PANEL_IDS: Record<TabIndex, string> = {
@@ -390,8 +390,6 @@ export default function TestRunDetailsPage() {
                   onRefreshTriggered={refreshTestRun}
                 />
               </CardComments>
-              {/* Run-wide list of every card's comments; not itself commentable, so no CardComments. */}
-              <CommentsCard expanded={expansionState.commentsExpanded} onExpand={() => { const wasCollapsed = !expansionState.commentsExpanded; toggleExpansion('commentsExpanded'); if (wasCollapsed) scrollToCard('comments-card-expanded'); }} />
               <CardComments card="configExpanded" expanded={expansionState.configExpanded}>
                 <ConfigurationComparisonSection testRun={testRun} testRunId={testRunId} configExpanded={expansionState.configExpanded} onConfigExpand={() => { const wasCollapsed = !expansionState.configExpanded; toggleExpansion('configExpanded'); if (wasCollapsed) scrollToCard('config-comparison-expanded'); }} showToast={showToast} />
               </CardComments>
@@ -484,6 +482,9 @@ export default function TestRunDetailsPage() {
           )}
         </Box>
       </Box>
+
+      {/* ?story=&step=: the analysis story reader, its bar fixed to the bottom with an in-flow spacer */}
+      <StoryReader />
 
       {/* Report generation progress — stays up until every pending report is ready or has failed */}
       <PendingReports ids={pendingReportIds} onReady={handleReportReady} onSettled={handleReportSettled} showToast={showToast} />

@@ -51,6 +51,8 @@ jest.mock('next/navigation', () => ({
   useRouter: jest.fn(() => mockRouter),
   useParams: jest.fn(() => mockParams),
   useSearchParams: jest.fn(() => mockSearchParams),
+  // The story reader (mounted on the page) builds its ?story= URLs on the current path.
+  usePathname: jest.fn(() => '/test-runs/test-run-123'),
 }));
 
 jest.mock('@/lib/api', () => ({
