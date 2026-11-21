@@ -1081,6 +1081,23 @@ describe('ReportTemplateService', () => {
       expect(() => validate([section({ type: 'nonsense' as never })])).toThrow(/Invalid section type/);
     });
 
+    it('accepts a comments section with no layout, by-card or stories', () => {
+      expect(() => validate([
+        section({ type: 'comments', order: 0 }),
+        section({ type: 'comments', order: 1, config: { layout: 'by-card' } }),
+        section({ type: 'comments', order: 2, config: { layout: 'stories', cards: ['slo'] } }),
+      ])).not.toThrow();
+    });
+
+    it('rejects an unknown comments layout', () => {
+      expect(() => validate([section({ type: 'comments', config: { layout: 'timeline' } })])).toThrow(
+        /Invalid comments layout/,
+      );
+      expect(() => validate([section({ type: 'comments', config: { layout: null } })])).toThrow(
+        /Invalid comments layout/,
+      );
+    });
+
     it('still rejects duplicate orders', () => {
       expect(() => validate([section({ order: 0 }), section({ order: 0 })])).toThrow(
         /Duplicate section order/,

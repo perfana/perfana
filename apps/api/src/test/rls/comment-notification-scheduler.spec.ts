@@ -63,6 +63,7 @@ describe('CommentNotificationScheduler against a real database', () => {
     await ds.initialize();
     scheduler = new CommentNotificationScheduler(ds, {
       sendCommentDigest: send,
+      sendStoryAnnouncement: jest.fn(), // the sweep also announces stories; see story-notification-scheduler.spec.ts
       getPerfanaUrl: () => 'https://perfana.example',
     } as never);
     await ds.query(`INSERT INTO organizations (id, name) VALUES ($1, $2)`, [org, `comment-notify-spec-${suffix}`]);

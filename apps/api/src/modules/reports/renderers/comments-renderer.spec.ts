@@ -10,6 +10,7 @@ import type { GraphsRenderer } from './graphs-renderer';
 import type {
   ReportDataFetcherService,
   ReportCommentRow,
+  ReportStory,
   MetricsTimeSeriesPanel,
 } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
@@ -49,8 +50,11 @@ const panel = (): MetricsTimeSeriesPanel => ({
   ],
 });
 
-function setup(rows: ReportCommentRow[], series: MetricsTimeSeriesPanel[] = []) {
-  const dataFetcher = { getTestRunComments: jest.fn().mockResolvedValue(rows) };
+function setup(rows: ReportCommentRow[], series: MetricsTimeSeriesPanel[] = [], stories: ReportStory[] = []) {
+  const dataFetcher = {
+    getTestRunComments: jest.fn().mockResolvedValue(rows),
+    getPublishedStories: jest.fn().mockResolvedValue(stories),
+  };
   const graphs = {
     fetchPresetSeries: jest.fn().mockResolvedValue(series),
     analysisWindow: jest.fn().mockReturnValue({ from: null, to: null, only: false }),
@@ -216,5 +220,107 @@ describe('CommentsRenderer', () => {
     expect(html.indexOf('heap shrank')).toBeLessThan(html.indexOf('Compared with run'));
     expect(html).not.toContain('secret');
     expect(html).not.toContain('wrong-card');
+  });
+});
+
+// Value: protects=the Comments section's `stories` layout (analysis stories, PR5): published
+// stories only, in the fetcher's order, each step numbered with tag, card · item, body, note, the
+// marker chart and config snapshot; deleted steps keep tag and note; everything escaped; the
+// default layout is untouched; fails_when=the layout switch reads the wrong key, a story or step
+// field is printed raw, a deleted body leaks, or by-card templates start reading stories;
+// seam=the data fetcher (mocked; its SQL is in report-data-fetcher.comments.spec.ts).
+describe('CommentsRenderer stories layout', () => {
+  const story = (over: Partial<ReportStory> = {}): ReportStory => ({
+    id: 's1',
+    title: 'Checkout latency after deploy',
+    summary: 'The heap was halved.',
+    authorName: 'Daniel',
+    publishedAt: new Date('2026-11-20T12:00:00Z'),
+    steps: [],
+    ...over,
+  });
+
+  it('keeps the by-card layout for a section with no layout, and never reads stories there', async () => {
+    const { renderer, dataFetcher } = setup([row({ body: 'card thread' })], [], [story()]);
+    for (const config of [{}, { layout: 'by-card' }, { layout: 'bogus' }]) {
+      const html = await renderer.renderCommentsSection(section(config), testRun);
+      expect(html).toContain('card thread');
+      expect(html).not.toContain('Checkout latency');
+    }
+    expect(dataFetcher.getPublishedStories).not.toHaveBeenCalled();
+  });
+
+  it('renders each story with its steps in order, omitting comments in no story', async () => {
+    const { renderer, dataFetcher } = setup([row({ body: 'not in a story' })], [], [
+      story({
+        steps: [
+          { position: 1, note: 'first the spike', comment: row({ cardKey: 'performance', itemLabel: 'checkout', body: 'p95 doubled', tag: 'symptom' }) },
+          { position: 2, note: null, comment: row({ cardKey: 'config', itemLabel: 'heap.max', body: 'heap halved', tag: 'root-cause' }) },
+        ],
+      }),
+      story({ id: 's2', title: 'Second analysis', summary: null, authorName: 'Ada', steps: [
+        { position: 1, note: null, comment: row({ body: 'only step' }) },
+      ] }),
+    ]);
+    const html = await renderer.renderCommentsSection(section({ layout: 'stories', cards: ['slo'] }), testRun, 'u1', ['r']);
+    expect(dataFetcher.getPublishedStories).toHaveBeenCalledWith(testRun, 'u1', ['r']);
+    expect(dataFetcher.getTestRunComments).not.toHaveBeenCalled();
+    expect(html).not.toContain('not in a story');
+    expect(html).toContain('2 analysis stories');
+    expect(html).toContain('>Checkout latency after deploy</h3>');
+    expect(html).toContain('2 steps');
+    expect(html).toContain('>Daniel</strong>');
+    expect(html).toContain('published 2026-11-20 12:00 UTC');
+    expect(html).toContain('The heap was halved.');
+    const order = ['Step 1', '>Symptom</span>', 'Performance analysis · checkout', 'p95 doubled', 'first the spike', 'Step 2', '>Root cause</span>', 'heap halved', 'Second analysis', 'only step'];
+    const at = order.map((s) => html.indexOf(s));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(html).toContain('1 step<');
+  });
+
+  it('escapes every story and step field', async () => {
+    const x = '<img src=x onerror="alert(1)">';
+    const { renderer } = setup([], [], [story({
+      title: x, summary: x, authorName: x,
+      steps: [{ position: 1, note: x, comment: row({ body: x, authorName: x, itemLabel: x, tag: x }) }],
+    })]);
+    const html = await renderer.renderCommentsSection(section({ layout: 'stories' }), testRun);
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;');
+  });
+
+  it('draws the Graphs marker chart for a marker step, and the config snapshot for a config step', async () => {
+    const view = { kind: 'config', comparedToTestRunId: 'App-00006', status: 'changed', previousValue: '2g', currentValue: '512m' };
+    const { renderer, graphs } = setup([], [panel()], [story({ steps: [
+      { position: 1, note: null, comment: graphsMarker() },
+      { position: 2, note: null, comment: row({ cardKey: 'config', itemLabel: 'heap.max', body: 'heap', chartContext: view }) },
+    ] })]);
+    const html = await renderer.renderCommentsSection(section({ layout: 'stories' }), testRun);
+    expect(graphs.fetchPresetSeries).toHaveBeenCalledTimes(1);
+    expect(html).toContain('<svg');
+    expect(html).toMatch(/<g class="chart-callout">.*>3<\/text><\/g>/s);
+    expect(html).toContain(`Marker ${markerGlyph(3)}`);
+    expect(html).toContain('Compared with run App-00006: 2g → 512m (changed)');
+  });
+
+  it('prints a deleted step as "Comment deleted" with its tag and note, and never its body or chart', async () => {
+    const { renderer, graphs } = setup([], [panel()], [story({ steps: [
+      { position: 1, note: 'we ruled this out', comment: graphsMarker({ body: 'secret left behind', deletedAt: new Date(), tag: 'ruled-out' }) },
+      { position: 2, note: 'kept', comment: null },
+    ] })]);
+    const html = await renderer.renderCommentsSection(section({ layout: 'stories' }), testRun);
+    expect(html).not.toContain('secret left behind');
+    expect(html).toContain('Comment deleted');
+    expect(html).toContain('>Ruled out</span>');
+    expect(html).toContain('we ruled this out');
+    expect(html).toContain('Comment not available');
+    expect(graphs.fetchPresetSeries).not.toHaveBeenCalled();
+  });
+
+  it('says so when the run has no published story', async () => {
+    const { renderer } = setup([row()], [], []);
+    const html = await renderer.renderCommentsSection(section({ layout: 'stories' }), testRun);
+    expect(html).toContain('No published analysis stories for this run.');
   });
 });

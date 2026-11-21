@@ -612,3 +612,26 @@ export interface ReportCommentRow {
   /** A root's tag key (`COMMENT_TAGS`, migration 1829); kept on a soft-deleted root. */
   tag: string | null;
 }
+
+/** One step of a published analysis story, as the Comments section's `stories` layout reads it. */
+export interface ReportStoryStep {
+  /** 1-based, dense. */
+  position: number;
+  /** The story author's connecting words for this step. */
+  note: string | null;
+  /**
+   * The step's root comment (soft-deleted roots included, body wiped). Null when the row is not
+   * readable as this run's: a comment of another run or organization never prints.
+   */
+  comment: ReportCommentRow | null;
+}
+
+/** One published `test_run_stories` row with its steps in order (migration 1830). */
+export interface ReportStory {
+  id: string;
+  title: string;
+  summary: string | null;
+  authorName: string;
+  publishedAt: Date | null;
+  steps: ReportStoryStep[];
+}

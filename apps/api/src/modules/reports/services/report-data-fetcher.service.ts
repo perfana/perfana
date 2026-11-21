@@ -60,6 +60,7 @@ import {
   RegressionsMetric,
   GraphPresetPanels,
   ReportCommentRow,
+  ReportStory,
   ReportErrorAnalysis,
   ReportTransaction,
   ScenarioData,
@@ -3634,6 +3635,89 @@ export class ReportDataFetcherService {
       deletedAt: r.deleted_at ? new Date(r.deleted_at) : null,
       tag: r.tag,
     }));
+  }
+
+  /**
+   * The report run's PUBLISHED analysis stories (migration 1830), ordered by `published_at`, each
+   * with its steps in position order joined to their root comments. One query.
+   *
+   * Scoped like `getTestRunComments`: to the run (its uuid, already resolved and authorized by
+   * the caller), and the story, each step and each comment must carry the organization of the
+   * run's system, so a row whose copy disagrees never prints. A draft is never read, whoever
+   * generates the report. A step whose comment fails those checks keeps its place with
+   * `comment: null`.
+   */
+  async getPublishedStories(
+    testRun: TestRun,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<ReportStory[]> {
+    const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
+    const rows: Array<{
+      story_id: string; story_title: string; story_summary: string | null; story_author: string;
+      published_at: Date | null; position: number | null; note: string | null;
+      id: string | null; card_key: string; parent_id: string | null; body: string; author_name: string;
+      item_label: string | null; marker_seq: number | null; marker_time: Date | null;
+      chart_context: Record<string, unknown> | null; created_at: Date; edited_at: Date | null;
+      deleted_at: Date | null; tag: string | null;
+    }> = await withRequestEm(this.testRunRepo).query(
+      `SELECT s.id AS story_id, s.title AS story_title, s.summary AS story_summary,
+              s.author_name AS story_author, s.published_at, st.position, st.note,
+              c.id, c.card_key, c.parent_id, c.body, c.author_name, c.item_label,
+              c.marker_seq, c.marker_time, c.chart_context, c.created_at, c.edited_at, c.deleted_at, c.tag
+         FROM test_run_stories s
+         JOIN test_runs tr ON tr.id = s.test_run_id
+         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+         LEFT JOIN test_run_story_steps st
+                ON st.story_id = s.id AND st.organization_id = sut.organization_id
+         LEFT JOIN test_run_comments c
+                ON c.id = st.comment_id AND c.test_run_id = s.test_run_id
+               AND c.organization_id = sut.organization_id AND c.parent_id IS NULL
+        WHERE s.test_run_id = $1
+          AND s.status = 'published'
+          AND s.organization_id = sut.organization_id
+          ${orgFilter.clause}
+        ORDER BY s.published_at NULLS LAST, s.created_at, s.id, st.position`,
+      [testRun.id, ...orgFilter.params],
+    );
+    const stories: ReportStory[] = [];
+    const byId = new Map<string, ReportStory>();
+    for (const r of rows) {
+      let story = byId.get(r.story_id);
+      if (!story) {
+        story = {
+          id: r.story_id,
+          title: r.story_title,
+          summary: r.story_summary,
+          authorName: r.story_author,
+          publishedAt: r.published_at ? new Date(r.published_at) : null,
+          steps: [],
+        };
+        byId.set(r.story_id, story);
+        stories.push(story);
+      }
+      if (r.position === null) continue; // a story with no steps
+      story.steps.push({
+        position: r.position,
+        note: r.note,
+        comment: r.id === null ? null : {
+          id: r.id,
+          cardKey: r.card_key,
+          parentId: r.parent_id,
+          body: r.body,
+          authorName: r.author_name,
+          itemLabel: r.item_label,
+          markerSeq: r.marker_seq,
+          markerTime: r.marker_time ? new Date(r.marker_time) : null,
+          chartContext: r.chart_context,
+          createdAt: new Date(r.created_at),
+          editedAt: r.edited_at ? new Date(r.edited_at) : null,
+          deletedAt: r.deleted_at ? new Date(r.deleted_at) : null,
+          tag: r.tag,
+        },
+      });
+    }
+    return stories;
   }
 
   /**

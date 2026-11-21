@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
 import { NotificationChannel } from '@perfana/shared';
 import { CommentDigest, commentCardLabel } from './message-builders';
+import type { StoryAnnouncement } from './message-builders';
 import { NotificationsService } from './notifications.service';
 
 /** A burst is announced once its oldest unannounced comment is this old. */
@@ -13,6 +14,20 @@ export const COMMENT_NOTIFY_MAX_RUNS_PER_TICK = 50;
 export const COMMENT_NOTIFY_RETRY_SECONDS = 300;
 /** Once a batch's oldest comment is this old, a failure is final: the claim stands, ERROR logged. */
 export const COMMENT_NOTIFY_GIVE_UP_SECONDS = 3600;
+
+/** Bound on stories announced per sweep; the rest wait for the next tick. */
+export const STORY_NOTIFY_MAX_PER_TICK = 50;
+
+interface ClaimedStory {
+  id: string;
+  /** The run's uuid. */
+  test_run_id: string;
+  title: string;
+  author_name: string;
+  updated_at: Date;
+  /** `count(*)` arrives as a string from node-postgres. */
+  step_count: string | number;
+}
 
 interface ClaimedComment {
   id: string;
@@ -75,6 +90,13 @@ export class CommentNotificationScheduler {
     } catch (error) {
       this.logger.error(
         `Comment notification sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    try {
+      await this.sweepStories();
+    } catch (error) {
+      this.logger.error(
+        `Story notification sweep failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
       this.isRunning = false;
@@ -187,6 +209,134 @@ export class CommentNotificationScheduler {
         [rows.map((r) => r.id)],
       );
       return rows;
+    });
+  }
+
+  // ==================== Published analysis stories (PR5) ====================
+
+  /**
+   * Announce each published, not yet announced story once (design: test-run-analysis-stories.md,
+   * "Notifications"). A draft is never claimed; a story deleted before the claim is simply gone;
+   * an unpublish never clears `notified_at`, so a republish is not announced again.
+   */
+  private async sweepStories(): Promise<void> {
+    const stories: Array<{ id: string }> = await this.dataSource.query(
+      `SELECT id
+         FROM test_run_stories
+        WHERE status = 'published' AND notified_at IS NULL
+          AND (notify_after IS NULL OR notify_after <= now())
+        ORDER BY published_at, id
+        LIMIT $1`,
+      [STORY_NOTIFY_MAX_PER_TICK],
+    );
+    for (const { id } of stories) {
+      try {
+        await this.announceStory(id);
+      } catch (error) {
+        this.logger.error(
+          `Story announcement failed for story ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Claim one published story, then post to its system's opted-in channels. Returns true when
+   * the claim was made and kept (false when another replica holds it, it is not claimable, or
+   * the claim was released for a retry).
+   */
+  async announceStory(storyId: string): Promise<boolean> {
+    const story = await this.claimStory(storyId);
+    if (!story) return false;
+
+    // No transaction is open from here on.
+    const [run]: Array<{ test_run_id: string; system_under_test_id: string; system_name: string }> =
+      await this.dataSource.query(
+        `SELECT tr.test_run_id, tr.system_under_test_id, s.name AS system_name
+           FROM test_runs tr JOIN systems_under_test s ON s.id = tr.system_under_test_id
+          WHERE tr.id = $1`,
+        [story.test_run_id],
+      );
+    if (!run) return true; // run deleted meanwhile; nothing to announce
+
+    // As for comments: a story on a system with no opted-in channel stays claimed, so a channel
+    // enabled later does not announce old analyses.
+    const channels = await this.dataSource.getRepository(NotificationChannel).find({
+      where: { systemUnderTestId: run.system_under_test_id, enabled: true, notifyOnComment: true },
+    });
+    if (channels.length === 0) return true;
+
+    const announcement: StoryAnnouncement = {
+      systemName: run.system_name,
+      testRunId: run.test_run_id,
+      authorName: story.author_name,
+      title: story.title,
+      stepCount: Number(story.step_count),
+      link:
+        `${this.notifications.getPerfanaUrl().replace(/\/+$/, '')}/test-runs/${encodeURIComponent(story.test_run_id)}` +
+        `?story=${encodeURIComponent(story.id)}`,
+    };
+
+    let delivered = 0;
+    let retryableFailures = 0;
+    for (const channel of channels) {
+      try {
+        await this.notifications.sendStoryAnnouncement(channel, announcement);
+        delivered++;
+      } catch (error) {
+        const retryable = NotificationsService.isRetryableDeliveryError(error);
+        if (retryable) retryableFailures++;
+        const msg = error instanceof Error ? error.message : String(error);
+        const text = `Story notification to ${channel.type} channel "${channel.name}" (${channel.id}) failed for story ${story.id} on run ${run.test_run_id}: ${msg}`;
+        if (retryable) this.logger.warn(`${text} (will retry if no channel succeeds)`);
+        else this.logger.error(`${text} (not retryable)`);
+      }
+    }
+
+    if (delivered === 0 && retryableFailures > 0) {
+      // `updated_at` moves with every publish (and edit), never with the sweep's own raw
+      // UPDATEs, so it measures how long this publication has been waiting to be announced.
+      if (Date.now() - new Date(story.updated_at).getTime() < COMMENT_NOTIFY_GIVE_UP_SECONDS * 1000) {
+        await this.dataSource.query(
+          `UPDATE test_run_stories
+              SET notified_at = NULL, notify_after = now() + make_interval(secs => $2)
+            WHERE id = $1`,
+          [story.id, COMMENT_NOTIFY_RETRY_SECONDS],
+        );
+        this.logger.warn(`Released story ${story.id} of run ${run.test_run_id} for a retry in ${COMMENT_NOTIFY_RETRY_SECONDS} s`);
+        return false;
+      }
+      this.logger.error(
+        `Giving up on announcing story ${story.id} of run ${run.test_run_id}: every channel has failed for over ${COMMENT_NOTIFY_GIVE_UP_SECONDS / 60} minutes`,
+      );
+    }
+    return true;
+  }
+
+  /**
+   * One short transaction, the comments' shape: a per-story advisory lock (skip when a replica
+   * holds it), the row locked with SKIP LOCKED and re-checked as published and unannounced,
+   * stamped, committed. Null = nothing claimed.
+   */
+  private async claimStory(storyId: string): Promise<ClaimedStory | null> {
+    return this.dataSource.transaction(async (em) => {
+      const [{ ok }] = await em.query(
+        `SELECT pg_try_advisory_xact_lock(hashtextextended('story-notify:' || $1::text, 0)) AS ok`,
+        [storyId],
+      );
+      if (!ok) return null;
+      const [row]: ClaimedStory[] = await em.query(
+        `SELECT s.id, s.test_run_id, s.title, s.author_name, s.updated_at,
+                (SELECT count(*) FROM test_run_story_steps st WHERE st.story_id = s.id) AS step_count
+           FROM test_run_stories s
+          WHERE s.id = $1 AND s.status = 'published' AND s.notified_at IS NULL
+            AND (s.notify_after IS NULL OR s.notify_after <= now())
+            FOR UPDATE OF s SKIP LOCKED`,
+        [storyId],
+      );
+      if (!row) return null;
+      await em.query(`UPDATE test_run_stories SET notified_at = now() WHERE id = $1`, [storyId]);
+      return row;
     });
   }
 }
