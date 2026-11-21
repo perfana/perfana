@@ -1,4 +1,4 @@
-# Design: Comment tags, a run-wide comments card and analysis stories
+# Design: Comment tags, a run-wide comments dialog and analysis stories
 
 Generated on 2026-11-21
 Builds on: [test-run-comments.md](test-run-comments.md) (migrations 1827, 1828; PR1–PR3 as built)
@@ -55,7 +55,7 @@ A comment can point at another ("explains ②", "rules out ③"), forming a grap
 
 ### Approach B: Tags + story entity with ordered steps (chosen)
 
-Tags on root comments; a `test_run_stories` table with ordered steps that reference comments; a comments card that indexes everything and hosts story editing; a stepper reader driven by the existing deep-link machinery. Each piece is useful on its own and ships separately.
+Tags on root comments; a `test_run_stories` table with ordered steps that reference comments; a run-wide comments dialog that indexes everything and hosts story editing; a stepper reader driven by the existing deep-link machinery. Each piece is useful on its own and ships separately.
 
 ### Approach C: A story is a special root comment whose replies are steps
 
@@ -86,7 +86,7 @@ Each tag gets an icon and colour from the `readable` palette (`apps/web/lib/them
 
 **API.** `POST /test-runs/:id/comments` and `PATCH /comments/:id` accept `tag` (`null` clears). PATCH stays author-only (v1 R5); its editable set grows from `body` to `body` + `tag`. The list and socket payloads carry `tag`. Changing a tag does not bump `edited_at` — "(edited)" is about the text.
 
-**Web.** A tag chip on each root in `CommentsDrawer`, a tag picker in the composer and in the root's edit mode. The chip is clickable in the comments card to filter.
+**Web.** A tag chip on each root in `CommentsDrawer`, a tag picker in the composer and in the root's edit mode. The chip is clickable in the comments dialog to filter.
 
 **Report.** The Comments section prints the tag before each root.
 
@@ -125,16 +125,22 @@ Both cards join the cards that already anchor comments to items (Performance ana
 
 **Ripple effects.**
 
-- The **comments card** row shows `Configuration · heap.max` / `Dashboards · JVM overview` from `item_label`, and "Show in context" applies the comment filter through the same `focusItem` path.
+- The **comments dialog** row shows `Configuration · heap.max` / `Dashboards · JVM overview` from `item_label`, and "Show in context" applies the comment filter through the same `focusItem` path.
 - A **story step** on a config item or dashboard focuses it the same way. This is where the comment filter matters most, because the reader did not set up the card's filters and should not have to undo them.
 - The **Comments report section** already prints `item_label` under the card heading; a config comment additionally prints its comparison snapshot.
 - Each card builds its own `item_key` format today, and nothing records them centrally. The two new prefixes, `config:` and `dashboard:`, are exported as builder functions from `packages/shared/src/constants/comment-cards.ts`, so the report and future cross-run lookups parse them from one definition.
 
-### The comments card
+### The comments dialog (was: the comments card)
 
-A new card **Comments** on the Results tab, right after Test run details, shown only when the run has at least one comment (an empty card is noise on most runs). Its own expansion key (`commentsExpanded`) is added to `TAB_CARDS`; it is **not** a commentable card (not in `COMMENT_CARD_KEYS`). `CommentsContext` builds `PAGE_ORDER` from `TAB_CARDS` and maps each key through `cardKeyOf`, which has no entry for this card, so `PAGE_ORDER` must skip expansion keys without a comment card key, or next-unread breaks on `undefined`.
+**Revised 2026-11-21, after PR3 shipped a card:** the run-wide view is a **dialog opened from an icon in the test-run details header**, not a card on the Results tab. A card cost a slot in the Results tab's order for something that is about the whole page, and it sat in the flow of the page it was meant to navigate. PR4 carries the move.
 
-Two tabs inside the card:
+- **Header icon.** A comments icon where the red run-header unread button used to be, with a total-count badge and an unread state when others wrote since you last looked. Shown when the run has comments or stories. `aria-label` reads e.g. `Comments: 12, 3 unread`.
+- **Dialog.** A large MUI `Dialog`, full screen below the `sm` breakpoint, with two tabs: **All comments** and **Stories** (below).
+- **Next unread** moves into the dialog header and replaces the separate red button (v1 eng review R6): it closes the dialog and reveals the next card with unread comments, opening its drawer, as before. The test-run list's `?comments=next|first` link keeps working.
+- **Navigating closes the dialog.** Show in context, Read (a story) and Next unread close it first, so the card, drawer or story bar is visible.
+- PR3's `commentsExpanded` expansion key, its `TAB_CARDS` entry and the non-commentable-key allowlist go away with the card.
+
+Two tabs inside the dialog:
 
 **All comments.** One row per root, newest first, reading `GET /test-runs/:id/comments` with no `card` (already run-wide) and live-updated from the existing `comment:*` socket events.
 
@@ -142,7 +148,7 @@ Two tabs inside the card:
 - Filters: tag (multi), card, author, "markers only". Client-side; a run's comment count does not justify server filtering.
 - Actions: **Show in context** (the existing `?card=&comment=` path: reveal, focus item, replay view, open drawer, highlight) and **Add to story ▾** (existing stories by the caller, or "New story…").
 - No composer here. A comment written without a card has no anchor and no view, and those are what make it evidence.
-- Opening the card marks nothing seen; "seen" stays "that card's drawer is open" (v1 premise 4).
+- Opening the dialog marks nothing seen; "seen" stays "that card's drawer is open" (v1 premise 4).
 
 **Stories.** The run's stories (see visibility) with status, author, step count and **Read** / **Edit**; the editor lives here.
 
@@ -218,13 +224,13 @@ All routes: `withOrgFilter` once, required parameter, 404 outside scope, `[]` ea
 
 A body-free `story:changed { testRunId, storyId }` to the per-run room only, emitted on every create/update/steps/delete. Clients refetch through the access-checked GET, which is where draft visibility is enforced. Sending story bodies on the socket would leak drafts to everyone in the run room.
 
-The reader and the comments card already receive `comment:updated` / `comment:deleted`, so a step's text and its deleted state stay current without a story event.
+The reader and the comments dialog already receive `comment:updated` / `comment:deleted`, so a step's text and its deleted state stay current without a story event.
 
 #### Authoring
 
-- **Add to story** from the comments card row and from each root in a card's drawer (menu next to Reply).
+- **Add to story** from the comments dialog row and from each root in a card's drawer (menu next to Reply).
 - **New story…** asks only for a title; the first step is the comment it was started from.
-- **Editor** (in the comments card's Stories tab): title, summary, and the step list with drag-to-reorder (dnd-kit, as the report builder; mind Common Issue #65's `ClearDragWhenIdle`), keyboard up/down buttons, an inline note per step, remove.
+- **Editor** (in the comments dialog's Stories tab): title, summary, and the step list with drag-to-reorder (dnd-kit, as the report builder; mind Common Issue #65's `ClearDragWhenIdle`), keyboard up/down buttons, an inline note per step, remove.
 - **Suggest order** sorts steps by `COMMENT_TAGS` order, then by `created_at`. A suggestion only: it rewrites the list once, the author can reorder after.
 - **Publish** / **Unpublish**. Publishing a story with zero steps is refused (400).
 
@@ -299,7 +305,7 @@ v1 eng review R3 refused every comment write from an API key, because "a key has
 
 `test_run_comments` and `test_run_stories` gain `author_kind varchar(16) NOT NULL DEFAULT 'user'`, CHECK in (`user`, `agent`), set by the server from the principal and never from the request. For an agent, `author_id = api-key:<id>` and `author_name` is the key's `description` (for example "Claude analysis agent"), as R3's option B described.
 
-Everywhere an author is shown, `agent` renders an **AI** chip next to the name: the drawer, the comments card, the story list, the reader bar, the report and the channel post. A reader must never mistake an agent's root-cause claim for a colleague's.
+Everywhere an author is shown, `agent` renders an **AI** chip next to the name: the drawer, the comments dialog, the story list, the reader bar, the report and the channel post. A reader must never mistake an agent's root-cause claim for a colleague's.
 
 #### Agent stories are proposals, and a human publishes them
 
@@ -367,7 +373,7 @@ No delete or publish tools. The MCP README gets a worked example: diagnose a run
 
 1. **PR1 — Item comments on Configuration and Dashboards.** Comment buttons, item counts, the comment filter and chip on both cards, the `config` view DTO and replay of the comparison run, the comparison snapshot in the drawer and the report. No migration. Independent of everything else here, so it can ship first.
 2. **PR2 — Tags.** Migration 1829 (column + two CHECKs), entity, DTOs, list/socket payloads, drawer chip and picker, Comments report section prints the tag. Useful on its own.
-3. **PR3 — Comments card.** Card, tab placement, All comments list with filters, Show in context, live updates. No API change.
+3. **PR3 — Comments card.** Card, tab placement, All comments list with filters, Show in context, live updates. No API change. *(Shipped as a card; PR4 moves it into the header dialog.)*
 4. **PR4 — Stories.** Migration 1830 (two tables, RLS, indexes), API, delete-rule extension, SUT export, Add to story, editor, reader bar with view snapshot/restore, `?story=&step=` link.
 5. **PR5 — Report and notification.** Comments section `stories` layout; publish announcement through the sweep.
 6. **PR6 — Agents through MCP.** Migration 1831 (`author_kind` on comments and stories, `client_ref` + index, `published_by_*`), the `comments:write` key role and its option in the API-key dialog, the `anchor` resolver with shared item-key builders and their contract test, `applicationDashboardId` in `get_available_metrics`, the AI chip and agent-draft rules in the web, the sweep skipping agent comments, the MCP tools and README example. `author_kind` could ship in PR4's migration instead, so stories never exist without it; decide when PR4 starts.
@@ -390,7 +396,7 @@ No delete or publish tools. The MCP README gets a worked example: diagnose a run
 1. **Co-authoring.** Should a draft be visible to, or editable by, colleagues? v1 proposal: author-only; others can "Duplicate as my draft" later.
 2. **Who may tag.** Only the comment author (proposed), or also a story author when adding someone else's comment? Letting others tag means a tag no longer reflects the comment author's intent.
 3. **Should reading a step mark its card seen?** Proposed no, for consistency with v1. Counter-argument: someone who read the whole story has effectively read those comments.
-4. **Card visibility.** Hide the Comments card on runs without comments (proposed), or always show it so people learn the feature exists?
+4. **Icon visibility.** Hide the header comments icon on runs without comments or stories (proposed), or always show it so people learn the feature exists?
 5. **Typed links (Approach A).** Revisit once stories are in use: do authors write step notes like "this explains step 1"? If so, that is the demand signal for links.
 6. **Story-level verdict.** Should a published story be able to set or suggest the run's verdict / annotation? Out of scope here; worth deciding before anyone builds it ad hoc.
 7. **Comments on a Grafana panel.** A dashboard-level anchor is what this design adds. Pinning a comment to one panel of an embedded dashboard needs a panel list per dashboard in the card: `DashboardDialog` embeds the whole dashboard in an iframe, and Perfana cannot see clicks inside it. Worth it only if dashboard comments turn out to be mostly about one panel.
