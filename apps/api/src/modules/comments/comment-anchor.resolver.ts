@@ -298,7 +298,8 @@ async function resolveAdapt(em: EntityManager, run: AnchorRun, anchor: AdaptAnch
     );
   }
   const row = {
-    application_dashboard_id: anchor.applicationDashboardId,
+    // Postgres matched it as a uuid; the stored key needs the canonical (lowercase) spelling the card builds from.
+    application_dashboard_id: anchor.applicationDashboardId.toLowerCase(),
     panel_id: anchor.panelId,
     metric_name: anchor.metricName,
     dashboard_label: rows[0].dashboard_label,

@@ -232,6 +232,13 @@ describe('Adapt, tracing and Pyroscope anchors', () => {
     expect(r.chartContext).toBeNull();
   });
 
+  // Value: protects=adapt item key uses the canonical lowercase uuid; fails_when=the caller's spelling is stored; why_new=only lowercase ids tested; seam=none; no_claim=web row match
+  it('adapt: an upper-case dashboard uuid is stored in the canonical form the card keys on', async () => {
+    const em = emWith([['FROM ds_adapt_results', [{ dashboard_label: 'JVM', panel_title: 'Heap' }]]]);
+    const r = await resolve(em, { type: 'adapt', applicationDashboardId: 'ABCDEF01-2345-4678-89AB-CDEF01234567', panelId: 7, metricName: 'm' });
+    expect(r.itemKey).toBe('abcdef01-2345-4678-89ab-cdef01234567|7|m');
+  });
+
   it('adapt: no result for the series lists what the panel has; no result for the panel says so', async () => {
     const em = emWith([['SELECT DISTINCT metric_name FROM ds_adapt_results', [{ metric_name: 'a' }, { metric_name: 'b' }]]]);
     await expect(resolve(em, { type: 'adapt', applicationDashboardId: DASH, panelId: 7, metricName: 'ghost' })).rejects.toThrow(
@@ -262,6 +269,14 @@ describe('Adapt, tracing and Pyroscope anchors', () => {
     ]]]);
     await expect(resolve(em, { type: 'tracing', serviceName: 'matrix-multiply' })).rejects.toThrow(
       /Service "matrix-multiply" is not configured in this run's tracing service; it traces: orders/,
+    );
+  });
+
+  // Value: protects=400 (not 500) for a tracing service with NULL service_names; fails_when=the ?? [] guards are dropped; why_new=only populated arrays tested; seam=none; no_claim=SQL hierarchy
+  it('tracing: a winning service with no service names says so instead of crashing', async () => {
+    const em = emWith([['FROM tracing_services', [{ id: TS, service_names: null, level: 0 }]]]);
+    await expect(resolve(em, { type: 'tracing', serviceName: 'orders' })).rejects.toThrow(
+      /Service "orders" is not configured: this run's tracing service lists no service names/,
     );
   });
 
