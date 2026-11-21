@@ -116,6 +116,13 @@ checks it exists in the run (a 400 says what was not found) and builds the link:
 | `{ type: 'dashboard', applicationDashboardId }` | a Dashboards tile | `application_dashboard_id` in `get_available_metrics` |
 | `{ type: 'slo', checkResultId }` | an SLO row | `id` in `get_check_results` |
 | `{ type: 'marker', time, series: [{ dashboardLabel, panelId, metricName, applicationDashboardId? }], range? }` | a numbered marker on the Graphs card, with the series drawn | `get_available_metrics`, `get_metric_trends` |
+| `{ type: 'adapt', applicationDashboardId, panelId, metricName }` | an Anomaly detection (Adapt) row, scrolled to and expanded | `applicationDashboardId`, `panelId`, `metric_name` of a regression in `get_adapt_results` |
+| `{ type: 'tracing', serviceName, scenario?, transaction?, sampler? }` | a Distributed tracing service tab with those request filters set | `list_connected_sources` (tracing is connected), the `service` / `scenario` / `transaction` you passed to `get_slow_traces` |
+| `{ type: 'pyroscope', application, profiler, view: 'single' \| 'diff' }` | a Pyroscope application/profiler tab, in single or baseline-vs-current diff view | `pyroscope.configurations` in `list_connected_sources` (the service `get_hotspots` / `get_flamegraph` take) |
+
+One Adapt comment holds one row, so post one comment per key regression. A `diff` Pyroscope anchor
+needs a completed earlier run of the same workload; the card compares with the most recent one, and
+the anchor does not choose a specific baseline.
 
 A dashboard label is not unique across Grafana instances: if two dashboards share it the API answers
 400 listing both `applicationDashboardId`s, and the agent retries with the id in the series entry.

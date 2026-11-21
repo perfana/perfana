@@ -386,7 +386,10 @@ export type CommentAnchor =
       time: string;
       series: Array<{ dashboardLabel: string; panelId: number; metricName: string; applicationDashboardId?: string }>;
       range?: [string, string];
-    };
+    }
+  | { type: 'adapt'; applicationDashboardId: string; panelId: number; metricName: string }
+  | { type: 'tracing'; serviceName: string; scenario?: string; transaction?: string; sampler?: string }
+  | { type: 'pyroscope'; application: string; profiler: string; view: 'single' | 'diff' };
 
 export interface AddCommentInput {
   body: string;
@@ -526,6 +529,9 @@ export interface CheckResult {
 }
 
 export interface AdaptMetricSummary {
+  /** With panelId and metric_name, what an `adapt` comment anchor names. Absent on an older API. */
+  applicationDashboardId?: string;
+  panelId?: number;
   metric_name: string;
   dashboard: string;
   panel: string;

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.93] - 2026-11-21
+
+### Added
+- **An AI agent can pin a comment to an Anomaly detection row, a tracing service or a Pyroscope diff.** Through the Perfana MCP server an agent's comment can now name one Adapt result, a Distributed tracing service with its scenario, transaction and request filters, or a Pyroscope application and profiler in single or diff view. Opening the comment, or a step of an investigation built from it, opens that card on that row, tab or comparison instead of only on the card. The server checks the item exists for the run and answers with an error that lists what it does have, for example the series on that panel or the services that run traces.
+- **The MCP Adapt results name the row to comment on.** `get_adapt_results` now returns each regression's dashboard and panel id, which is what the new Anomaly detection anchor takes.
+
 ## [0.2.97.92] - 2026-11-21
 
 ### Added

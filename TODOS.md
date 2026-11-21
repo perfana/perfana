@@ -294,6 +294,18 @@ Filed from the reviews of `docs/designs/test-run-comments.md`: threads (PR1, v0.
 markers (PR2, v0.2.97.88), and channel notifications, the Comments report section and SUT export
 (PR3, v0.2.97.89).
 
+### Switch the perfana-demo `perfana-report` skill to the Adapt, tracing and Pyroscope anchors (P1)
+
+**What:** In the perfana-demo repo, change `.claude/skills/perfana-report/references/comments-and-investigations.md` (source → anchor table, lines 81-83) so Adapt, tracing and Pyroscope comments use `{type:"adapt"}`, `{type:"tracing"}` and `{type:"pyroscope", view:"diff"}` instead of `{type:"card"}`.
+
+**Why:** Until it does, an AI-drafted investigation built by that skill still opens those three cards with nothing focused, which is the problem v0.2.97.93 fixed on the API and MCP side.
+
+**Context:** Deferred from plan: GitHub issue #768 ("Once this lands…"). The anchors take `applicationDashboardId`/`panelId`/`metricName` from `get_adapt_results`, a `serviceName` plus optional filters, and an `application`/`profiler` pair from `list_connected_sources`. A `diff` anchor needs a completed earlier run of the workload.
+
+**Effort:** S
+**Priority:** P1
+**Depends on:** v0.2.97.93 deployed where the skill runs
+
 ### Comment notifications: rough edges the v0.2.97.89 review left in (P2)
 
 Noted, not fixed, in the PR3 review (none loses a post outright or breaks a deploy that runs the

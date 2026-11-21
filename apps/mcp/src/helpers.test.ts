@@ -8,6 +8,7 @@ import {
   buildErrorAnalysis,
   pctChange,
   regression,
+  buildAdaptSummary,
 } from './helpers.js';
 import type { TransactionStats } from './helpers.js';
 
@@ -379,5 +380,25 @@ describe('buildErrorAnalysis', () => {
 
     const result = buildErrorAnalysis('run-1', summary, [], byTransaction);
     assert.equal(result.topErrorsByTransaction.length, 20);
+  });
+});
+
+// ─── buildAdaptSummary: the ids an `adapt` comment anchor needs ─────────────
+
+describe('buildAdaptSummary', () => {
+  it('keeps applicationDashboardId and panelId on each regression and on the top metrics per dashboard', () => {
+    const r = {
+      applicationDashboardId: 'ad-1', panelId: 7, metric_name: 'order_confirmation_pdf_gen', dashboard: 'JVM', panel: 'Heap',
+      unit: 'ms', current: 2, baseline: 1, change_pct: 2313, absolute_change: 1, conclusion: 'regression',
+    };
+    const out = buildAdaptSummary(
+      { test_run_id: 't', conclusion: 'REGRESSION', updated_at: 'now', regressions: [r], improvements: [], differences: [] },
+      { regressions: [], unresolvedCount: 0, totalTracked: 0 },
+    );
+    assert.equal(out.classifiedRegressions[0]!.applicationDashboardId, 'ad-1');
+    assert.equal(out.classifiedRegressions[0]!.panelId, 7);
+    assert.deepEqual(out.byDashboard[0]!.topMetrics[0], {
+      metric_name: 'order_confirmation_pdf_gen', change_pct: 2313, panel: 'Heap', applicationDashboardId: 'ad-1', panelId: 7,
+    });
   });
 });

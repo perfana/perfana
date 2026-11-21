@@ -246,7 +246,7 @@ interface DashboardGroup {
   dashboard: string;
   sourceType: string;
   regressionCount: number;
-  topMetrics: Array<{ metric_name: string; change_pct: number | null; panel: string }>;
+  topMetrics: Array<{ metric_name: string; change_pct: number | null; panel: string; applicationDashboardId?: string; panelId?: number }>;
 }
 
 interface CausalChain {
@@ -400,7 +400,12 @@ export function buildAdaptSummary(
       topMetrics: [...metrics]
         .sort((a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0))
         .slice(0, 5)
-        .map(m => ({ metric_name: m.metric_name, change_pct: m.change_pct, panel: m.panel })),
+        .map(m => ({
+          metric_name: m.metric_name,
+          change_pct: m.change_pct,
+          panel: m.panel,
+          ...(m.applicationDashboardId ? { applicationDashboardId: m.applicationDashboardId, panelId: m.panelId } : {}),
+        })),
     }))
     .sort((a, b) => b.regressionCount - a.regressionCount);
 

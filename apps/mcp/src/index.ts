@@ -489,7 +489,7 @@ server.tool(
 server.tool(
   'add_test_run_comment',
   'Leave a finding on a test run as a comment, so the team sees it on the run. It is marked as written by an AI agent and is never announced to chat channels. ' +
-    'Pin it to what it is about with `anchor` (a transaction, a configuration item, a dashboard, an SLO result, a numbered marker on a graph series, or a card); the server checks the thing exists and answers with a correctable error if not. ' +
+    'Pin it to what it is about with `anchor` (a transaction, a configuration item, a dashboard, an SLO result, a numbered marker on a graph series, an Adapt row, a tracing service, a Pyroscope application in single or diff view, or a card); the server checks the thing exists and answers with a correctable error if not. ' +
     'Tag it with its role in the analysis. A retry of the same call returns the first comment rather than a duplicate. Needs an API key with the comments:write role.',
   {
     testRunId: z.string().describe('The test run ID'),

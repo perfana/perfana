@@ -42,6 +42,9 @@ export interface EnrichedAdaptConclusion {
 }
 
 interface EnrichedAdaptResult {
+  /** With panelId and metric_name, the Anomaly detection row an agent's `adapt` comment anchor names. */
+  applicationDashboardId: string;
+  panelId: number;
   metric_name: string;
   dashboard: string;
   panel: string;
@@ -778,12 +781,14 @@ export class AdaptService {
     const results = await this.adaptResultsRepo.find({
       where: { id: In(ids) },
       select: [
-        'id', 'metric_name', 'dashboard_label', 'panel_title',
+        'id', 'application_dashboard_id', 'panel_id', 'metric_name', 'dashboard_label', 'panel_title',
         'unit', 'mean', 'statistic', 'conclusion',
       ],
     });
 
     return results.map((r) => ({
+      applicationDashboardId: r.application_dashboard_id,
+      panelId: r.panel_id,
       metric_name: r.metric_name,
       dashboard: r.dashboard_label,
       panel: r.panel_title,

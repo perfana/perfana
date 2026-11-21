@@ -32,6 +32,9 @@ describe('Agent comments against a real database', () => {
   const orgB = randomUUID();
   const sutA = randomUUID();
   const dashA = randomUUID();
+  const tracingInstance = randomUUID();
+  const tracingService = randomUUID();
+  const pyroscopeInstance = randomUUID();
   const runHuman = `agent-comments-spec-run-${suffix}`;
   const prevHuman = `agent-comments-spec-prev-${suffix}`;
   let runUuid = '';
@@ -79,6 +82,32 @@ describe('Agent comments against a real database', () => {
        VALUES ($1, $2, 'jvm-uid', 3, '2026-11-20T10:30:00Z', 'used', 'Heap', $3, 1, 'bytes')`,
       [runHuman, dashA, `JVM ${suffix}`],
     );
+    await ds.query(
+      `INSERT INTO ds_adapt_results (test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name, dashboard_uid,
+         dashboard_label, panel_title, test_run_start, compare_config, statistic, conditions, thresholds, checks, conclusion, organization_id)
+       VALUES ($1, 'cg', $2, 3, 'used', 'jvm-uid', $3, 'Heap', '2026-11-20T10:00:00Z', '{}', '{}', '{}', '{}', '{}', '{"label":"regression"}', $4)`,
+      [runHuman, dashA, `JVM ${suffix}`, orgA],
+    );
+    await ds.query(
+      `INSERT INTO tracing_instances (id, label, tracing_url, tracing_ui, organization_id) VALUES ($1, $2, 'http://tempo:3200', 'tempo', $3)`,
+      [tracingInstance, `agent-comments-spec-${suffix}`, orgA],
+    );
+    await ds.query(
+      `INSERT INTO tracing_services (id, system_under_test_id, test_environment, workload, tracing_instance_id, service_names, organization_id)
+       VALUES ($1, $2, 'acc', NULL, $3, ARRAY['orders','matrix-multiply'], $4)`,
+      [tracingService, sutA, tracingInstance, orgA],
+    );
+    await ds.query(
+      `INSERT INTO pyroscope_instances (id, label, pyroscope_url, organization_id) VALUES ($1, $2, 'http://pyroscope:4040', $3)`,
+      [pyroscopeInstance, `agent-comments-spec-${suffix}`, orgA],
+    );
+    await ds.query(
+      `UPDATE systems_under_test SET pyroscope_instance_id = $2,
+         pyroscope_configurations = '[{"application":"shop","profiler":"process_cpu:cpu:nanoseconds:cpu:nanoseconds"}]'::jsonb
+       WHERE id = $1`,
+      [sutA, pyroscopeInstance],
+    );
+    await ds.query(`UPDATE test_runs SET completed = true WHERE id = $1`, [prevUuid]);
   });
 
   afterAll(async () => {
@@ -86,8 +115,12 @@ describe('Agent comments against a real database', () => {
     await ds.query(`DELETE FROM ds_metric_collection_status WHERE test_run_id = ANY($1)`, [[runHuman, prevHuman]]);
     await ds.query(`DELETE FROM test_run_configs WHERE test_run_id = ANY($1)`, [[runUuid, prevUuid]]);
     await ds.query(`DELETE FROM test_runs WHERE id = ANY($1)`, [[runUuid, prevUuid]]); // cascades comments
+    await ds.query(`DELETE FROM ds_adapt_results WHERE test_run_id = $1`, [runHuman]);
+    await ds.query(`DELETE FROM tracing_services WHERE id = $1`, [tracingService]);
+    await ds.query(`DELETE FROM tracing_instances WHERE id = $1`, [tracingInstance]);
     await ds.query(`DELETE FROM application_dashboards WHERE id = $1`, [dashA]);
     await ds.query(`DELETE FROM systems_under_test WHERE id = $1`, [sutA]);
+    await ds.query(`DELETE FROM pyroscope_instances WHERE id = $1`, [pyroscopeInstance]);
     await ds.query(`DELETE FROM organizations WHERE id = ANY($1)`, [[orgA, orgB]]);
     await ds.destroy();
   });
@@ -204,5 +237,76 @@ describe('Agent comments against a real database', () => {
     await expect(
       service.create(runUuid, { body: 'x', anchor: { type: 'transaction', name: 'never-ran' } } as never, agent),
     ).rejects.toThrow(/Transaction "never-ran" not found/);
+  });
+
+  it('resolves an adapt anchor to the Anomaly detection row, and refuses a series with no result', async () => {
+    const c = await service.create(runUuid, { body: 'heap +40%', tag: 'symptom', anchor: { type: 'adapt', applicationDashboardId: dashA, panelId: 3, metricName: 'used' } } as never, agent);
+    expect(c).toMatchObject({ cardKey: 'anomaly', itemKey: `${dashA}|3|used`, itemLabel: `JVM ${suffix} · Heap · used` });
+    await expect(
+      service.create(runUuid, { body: 'x', anchor: { type: 'adapt', applicationDashboardId: dashA, panelId: 3, metricName: 'free' } } as never, agent),
+    ).rejects.toThrow(/No Adapt result for series "free".*that panel has: used/);
+  });
+
+  it('resolves a tracing anchor through the environment-level tracing service, and refuses an unconfigured service', async () => {
+    const c = await service.create(
+      runUuid,
+      { body: '99.4% in matrix-multiply', tag: 'evidence', anchor: { type: 'tracing', serviceName: 'matrix-multiply', scenario: 'Checkout', transaction: 'T04_Pay' } } as never,
+      agent,
+    );
+    expect(c).toMatchObject({
+      cardKey: 'distributed-tracing',
+      itemKey: JSON.stringify([tracingService, 'matrix-multiply', 'Checkout', 'T04_Pay', null]),
+      itemLabel: 'matrix-multiply · Checkout / T04_Pay',
+    });
+    await expect(
+      service.create(runUuid, { body: 'x', anchor: { type: 'tracing', serviceName: 'payments' } } as never, agent),
+    ).rejects.toThrow(/Service "payments" is not configured.*matrix-multiply, orders/);
+  });
+
+  it('resolves a pyroscope diff anchor when a completed earlier run exists, and refuses an unconfigured pair', async () => {
+    const c = await service.create(
+      runUuid,
+      { body: 'multiply 2.14s -> 51.3s', tag: 'root-cause', anchor: { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds', view: 'diff' } } as never,
+      agent,
+    );
+    expect(c).toMatchObject({
+      cardKey: 'pyroscope',
+      itemKey: '["shop","process_cpu:cpu:nanoseconds:cpu:nanoseconds","diff"]',
+      itemLabel: 'shop / process_cpu · Diff view',
+    });
+    await expect(
+      service.create(runUuid, { body: 'x', anchor: { type: 'pyroscope', application: 'shop', profiler: 'memory:alloc', view: 'single' } } as never, agent),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  // Value: protects=diff baseline excludes the run itself and incomplete runs; fails_when=`id <> $4` or `completed` dropped from the SQL; why_new=mock em ignores predicates; seam=none; no_claim=card's baseline pick
+  it('refuses a pyroscope diff anchor when the only completed run is the run itself', async () => {
+    const diff = { type: 'pyroscope', application: 'shop', profiler: 'process_cpu:cpu:nanoseconds:cpu:nanoseconds', view: 'diff' };
+    await ds.query(`UPDATE test_runs SET completed = (id = $1) WHERE id = ANY($2)`, [runUuid, [runUuid, prevUuid]]);
+    try {
+      await expect(service.create(runUuid, { body: 'x', anchor: diff } as never, agent)).rejects.toThrow(/diff view needs a completed earlier run/);
+    } finally {
+      await ds.query(`UPDATE test_runs SET completed = (id = $1) WHERE id = ANY($2)`, [prevUuid, [runUuid, prevUuid]]);
+    }
+  });
+
+  // Value: protects=workload-level tracing service wins over environment level (real SQL); fails_when=level CASE/ORDER or scope predicate breaks; why_new=unit test feeds pre-levelled rows; seam=none; no_claim=system-only level
+  it('resolves a tracing anchor through a workload-level service ahead of the environment-level one', async () => {
+    const workloadService = randomUUID();
+    await ds.query(
+      `INSERT INTO tracing_services (id, system_under_test_id, test_environment, workload, tracing_instance_id, service_names, organization_id)
+       VALUES ($1, $2, 'acc', 'load', $3, ARRAY['payments'], $4)`,
+      [workloadService, sutA, tracingInstance, orgA],
+    );
+    try {
+      const c = await service.create(runUuid, { body: 'p', anchor: { type: 'tracing', serviceName: 'payments' } } as never, agent);
+      expect(c.itemKey).toBe(JSON.stringify([workloadService, 'payments', null, null, null]));
+      await expect(
+        service.create(runUuid, { body: 'x', anchor: { type: 'tracing', serviceName: 'orders' } } as never, agent),
+      ).rejects.toThrow(/Service "orders" is not configured.*it traces: payments/);
+    } finally {
+      await ds.query(`DELETE FROM test_run_comments WHERE test_run_id = $1 AND card_key = 'distributed-tracing' AND item_key LIKE $2`, [runUuid, `%${workloadService}%`]);
+      await ds.query(`DELETE FROM tracing_services WHERE id = $1`, [workloadService]);
+    }
   });
 });
