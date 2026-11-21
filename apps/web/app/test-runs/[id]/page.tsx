@@ -61,6 +61,7 @@ import { CommentsProvider } from './components/comments/CommentsContext';
 import CardComments from './components/comments/CardComments';
 import RunCommentsButton from './components/comments/RunCommentsButton';
 import CommentDeepLink from './components/comments/CommentDeepLink';
+import StoryReader from './components/stories/StoryReader';
 import CommentsCard from './components/comments-card/CommentsCard';
 import type { ExpansionState, ToastAction } from './types';
 
@@ -484,6 +485,9 @@ export default function TestRunDetailsPage() {
           )}
         </Box>
       </Box>
+
+      {/* ?story=&step=: the analysis story reader, its bar fixed to the bottom with an in-flow spacer */}
+      <StoryReader />
 
       {/* Report generation progress — stays up until every pending report is ready or has failed */}
       <PendingReports ids={pendingReportIds} onReady={handleReportReady} onSettled={handleReportSettled} showToast={showToast} />

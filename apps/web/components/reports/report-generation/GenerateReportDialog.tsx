@@ -33,7 +33,6 @@ import {
   pointerWithin,
   KeyboardSensor,
   PointerSensor,
-  useDndContext,
   useDroppable,
   useSensor,
   useSensors,
@@ -55,6 +54,7 @@ import {
   type AnimateLayoutChanges,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { ClearDragWhenIdle } from '@/components/dnd/ClearDragWhenIdle';
 import {
   Assignment as AssignmentIcon,
   Description as DescriptionIcon,
@@ -214,20 +214,9 @@ function CanvasDropArea({ children, enabled }: { children: ReactNode; enabled: b
   );
 }
 
-/**
- * Ends the dialog's drag state when dnd-kit has no drag. The move past the activation distance and
- * the release can land before React commits (a jittery click, a trackpad tap-and-nudge), and dnd-kit
- * then calls neither onDragEnd nor onDragCancel: both read `active` from a layout effect that has
- * not run. Nothing else clears this state, and while it is set the dialog ignores the mouse and
- * Escape, so the report in progress could not be reached again.
- */
-function ClearDragWhenIdle({ dragging, onIdle }: { dragging: boolean; onIdle: () => void }) {
-  const { active } = useDndContext();
-  useEffect(() => {
-    if (dragging && !active) onIdle();
-  }, [active, dragging, onIdle]);
-  return null;
-}
+// ClearDragWhenIdle (components/dnd) ends the dialog's drag state when dnd-kit ended the drag
+// without calling onDragEnd or onDragCancel. Nothing else clears this state, and while it is set
+// the dialog ignores the mouse and Escape, so the report in progress could not be reached again.
 
 // ==================== Main Component ====================
 

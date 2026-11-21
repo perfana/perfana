@@ -18,6 +18,8 @@ import { fetchCommentThreads, formatCommentTime, type RunCommentThread } from '@
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import { CARD_LABELS, PAGE_ORDER, useComments } from '../comments/CommentsContext';
 import { CommentTagChip } from '../comments/CommentTagChip';
+import { AddToStoryMenu } from '../stories/AddToStoryMenu';
+import { StoriesPanel } from '../stories/StoriesPanel';
 
 const tagOf = (t: { tag?: unknown }): CommentTag | null => (isCommentTag(t.tag) ? t.tag : null);
 /** What the root is on: its item, or its marker number on Graphs. */
@@ -92,7 +94,7 @@ const NO_FILTERS: Filters = { tags: [], card: '', author: '', markersOnly: false
  * context" that does what the `?card=&comment=` deep link does. Not itself commentable, hidden
  * while the run has no comments, and opening it marks nothing seen.
  *
- * The tab bar holds one tab for now; the Stories tab joins it.
+ * The Stories tab lists the run's stories and holds the story editor.
  */
 export default function CommentsCard({ expanded, onExpand }: { expanded: boolean; onExpand: () => void }) {
   const ctx = useComments();
@@ -183,8 +185,14 @@ export default function CommentsCard({ expanded, onExpand }: { expanded: boolean
             <Box sx={{ mt: 1 }}>
               <Tabs value={tab} onChange={(_, v: number) => setTab(v)} aria-label="Comments views" sx={{ minHeight: 40, mb: 1.5 }}>
                 <Tab label="All comments" id="comments-card-tab-all" aria-controls="comments-card-panel-all" sx={{ minHeight: 40, textTransform: 'none' }} />
+                <Tab label="Stories" id="comments-card-tab-stories" aria-controls="comments-card-panel-stories" sx={{ minHeight: 40, textTransform: 'none' }} />
               </Tabs>
-              <Box role="tabpanel" id="comments-card-panel-all" aria-labelledby="comments-card-tab-all">
+              {tab === 1 && (
+                <Box role="tabpanel" id="comments-card-panel-stories" aria-labelledby="comments-card-tab-stories">
+                  <StoriesPanel />
+                </Box>
+              )}
+              <Box role="tabpanel" id="comments-card-panel-all" aria-labelledby="comments-card-tab-all" hidden={tab !== 0}>
                 {error && <Alert severity="error">{error}</Alert>}
                 {!error && !threads && (
                   <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
@@ -335,15 +343,18 @@ function CommentRow({
           </Typography>
         )}
       </Box>
-      <Button
-        size="small"
-        variant="outlined"
-        onClick={onShow}
-        aria-label={`Show in context: ${t.authorName}'s comment on ${where}`}
-        sx={{ flexShrink: 0, textTransform: 'none' }}
-      >
-        Show in context
-      </Button>
+      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', flexShrink: 0 }}>
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={onShow}
+          aria-label={`Show in context: ${t.authorName}'s comment on ${where}`}
+          sx={{ flexShrink: 0, textTransform: 'none' }}
+        >
+          Show in context
+        </Button>
+        {!t.deleted && <AddToStoryMenu commentId={t.id} label={`Add ${t.authorName}'s comment on ${where} to a story`} />}
+      </Box>
     </Box>
   );
 }
