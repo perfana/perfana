@@ -1,11 +1,22 @@
 import React from 'react';
+import { runCommentsLabel } from '../run-comments/RunCommentsButton';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { COMMENT_CARD_BY_EXPANSION_KEY } from '@perfana/shared/constants/comment-cards';
 import { TAB_CARDS } from '../../../hooks/useExpansionState';
-import { CommentsProvider, useCommentItemFocus, useComments, useGraphMarkers } from '../CommentsContext';
+import { CommentsProvider, PAGE_ORDER, useCommentItemFocus, useComments, useGraphMarkers } from '../CommentsContext';
 import CardComments from '../CardComments';
 import CommentsDrawer, { describeView } from '../CommentsDrawer';
-import RunCommentsButton from '../RunCommentsButton';
+
+/** The Comments dialog's Next unread, without the dialog: what it calls once it has closed. */
+function NextUnread() {
+  const ctx = useComments();
+  if (!ctx?.nextUnreadCard) return null;
+  return (
+    <button data-testid="next-unread" aria-label={`next: ${ctx.nextUnreadCard} (${ctx.totalUnread})`} onClick={ctx.jumpToNextUnread}>
+      {ctx.totalUnread}
+    </button>
+  );
+}
 import * as api from '@/lib/test-run-comments';
 
 jest.mock('@/lib/socket', () => ({
@@ -36,7 +47,7 @@ const comment = (over: Partial<api.RunComment>): api.RunComment => ({
 const renderPage = (reveal = jest.fn()) =>
   render(
     <CommentsProvider runId="run" reveal={reveal}>
-      <RunCommentsButton />
+      <NextUnread />
       <CardComments card="sloExpanded" expanded><div>slo card</div></CardComments>
       <CardComments card="graphsExpanded" expanded><div>graphs card</div></CardComments>
     </CommentsProvider>,
@@ -54,6 +65,14 @@ it('maps every expansion key on the page to a distinct permanent card key', () =
   expect(Object.keys(COMMENT_CARD_BY_EXPANSION_KEY).sort()).toEqual(pageKeys);
   const values = Object.values(COMMENT_CARD_BY_EXPANSION_KEY);
   expect(new Set(values).size).toBe(values.length);
+});
+
+it('builds the next-unread page order from the cards in page order', () => {
+  expect(PAGE_ORDER).not.toContain(undefined);
+  expect(PAGE_ORDER).toEqual(
+    Object.values(TAB_CARDS).flat().map((k) => COMMENT_CARD_BY_EXPANSION_KEY[k as keyof typeof COMMENT_CARD_BY_EXPANSION_KEY]),
+  );
+  expect(PAGE_ORDER.slice(0, 2)).toEqual(['details', 'config']);
 });
 
 it('shows a red unread count, a neutral total when all is read, and nothing when a card has no comments', async () => {
@@ -83,18 +102,69 @@ it('shows a red unread count, a neutral total when all is read, and nothing when
   expect(trends.parentElement).toHaveStyle({ opacity: '0' });
 });
 
-it('header button jumps to the first unread card in page order and opens its drawer', async () => {
+it('next unread jumps to the first unread card in page order and opens its drawer', async () => {
   mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 1, unread: 1 }, slo: { total: 2, unread: 2 } });
   mocked.fetchCommentThreads.mockResolvedValue({ threads: [], lastSeenAt: null });
   const reveal = jest.fn();
   renderPage(reveal);
-  const button = await screen.findByTestId('run-comments-button');
-  expect(button).toHaveAccessibleName('3 unread · next: Service level objectives (2)');
+  const button = await screen.findByTestId('next-unread');
+  expect(button).toHaveAccessibleName('next: slo (3)');
 
   fireEvent.click(button);
   expect(reveal).toHaveBeenCalledWith('sloExpanded'); // Results tab comes before Reporting
   expect(await screen.findByRole('complementary', { name: 'Comments on Service level objectives' })).toBeInTheDocument();
   await waitFor(() => expect(mocked.markCommentsSeen).toHaveBeenCalledWith('run', 'slo'));
+});
+
+it('says how many unread an AI agent wrote in the header comments label', () => {
+  expect(runCommentsLabel(5, 5, 0, 3)).toBe('Comments: 5, 5 unread (3 from AI)');
+  expect(runCommentsLabel(5, 5, 0, 0)).toBe('Comments: 5, 5 unread');
+  expect(runCommentsLabel(5, 0, 0, 0)).toBe('Comments: 5');
+});
+
+it('marks an agent author with an AI chip in the drawer, and a person without one', async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 2, unread: 0 } });
+  mocked.fetchCommentThreads.mockResolvedValue({
+    lastSeenAt: '2999-01-01T00:00:00Z',
+    threads: [
+      { ...comment({ id: 'ai', body: 'agent finding', authorName: 'Claude analysis agent', authorKind: 'agent' }), replies: [] },
+      { ...comment({ id: 'hu', body: 'human note', authorName: 'Anna', authorKind: 'user' }), replies: [] },
+    ],
+  });
+  renderPage();
+  fireEvent.click(await screen.findByTestId('card-comments-graphs'));
+  const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
+  await within(drawer).findAllByText('agent finding');
+  const rows = [...drawer.querySelectorAll('button[aria-expanded]')];
+  const agentRow = rows.find((r) => r.textContent?.includes('Claude analysis agent'))!;
+  const humanRow = rows.find((r) => r.textContent?.includes('human note'))!;
+  expect(within(agentRow as HTMLElement).getByTestId('comment-author-ai')).toHaveTextContent('AI');
+  expect(within(humanRow as HTMLElement).queryByTestId('comment-author-ai')).toBeNull();
+});
+
+it('shows the investigations a thread is in, and a chip opens that investigation in the reader', async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 2, unread: 0 } });
+  mocked.fetchCommentThreads.mockResolvedValue({
+    lastSeenAt: '2999-01-01T00:00:00Z',
+    threads: [
+      { ...comment({ id: 'in', body: 'p95 jumps' }), stories: [{ id: 'st1', title: 'Checkout latency after deploy', position: 1 }], replies: [] },
+      { ...comment({ id: 'out', body: 'not in one' }), stories: [], replies: [] },
+    ],
+  });
+  const router = (jest.requireMock('next/navigation') as { useRouter: () => { push: jest.Mock } }).useRouter();
+  router.push.mockClear();
+  renderPage();
+  fireEvent.click(await screen.findByTestId('card-comments-graphs'));
+  const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
+  await within(drawer).findAllByText('p95 jumps');
+  const chips = within(drawer).getAllByTestId('drawer-thread-stories');
+  expect(chips).toHaveLength(1);
+  const chip = within(chips[0]!).getByRole('button', { name: /Read the investigation Checkout latency after deploy/ });
+  expect(chip).toHaveTextContent('In: Checkout latency after deploy');
+  // Outside the thread's own row button: a button inside a button is invalid and swallows clicks.
+  expect(chip.closest('button[aria-expanded]')).toBeNull();
+  fireEvent.click(chip);
+  expect(router.push).toHaveBeenCalledWith(expect.stringContaining('story=st1'), { scroll: false });
 });
 
 it('lists unread threads first, expands the oldest unread one, and marks seen only after loading', async () => {
@@ -112,7 +182,7 @@ it('lists unread threads first, expands the oldest unread one, and marks seen on
 
   const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
   await within(drawer).findAllByText('fresh one');
-  const rows = [...drawer.querySelectorAll('[aria-expanded]')];
+  const rows = [...drawer.querySelectorAll('button[aria-expanded]')];
   expect(rows[0]).toHaveTextContent('fresh one');
   expect(rows[0]).toHaveAttribute('aria-expanded', 'true');
   expect(within(drawer).getByText('unread reply')).toBeInTheDocument();
@@ -129,7 +199,7 @@ it("offers Delete, but not Edit, on someone else's comment only when the API say
   let drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
   await within(drawer).findAllByText('by someone else');
   const expand = (d: HTMLElement) => {
-    const row = d.querySelector('[aria-expanded]');
+    const row = d.querySelector('button[aria-expanded]');
     if (row?.getAttribute('aria-expanded') === 'false') fireEvent.click(row);
   };
   expand(drawer);
@@ -183,11 +253,11 @@ it('opening an anchored thread asks its card to show that row', async () => {
   render(
     <CommentsProvider runId="run" reveal={reveal}>
       <FakeSloCard onFocus={onFocus} />
-      <RunCommentsButton />
+      <NextUnread />
       <CommentsDrawer />
     </CommentsProvider>,
   );
-  fireEvent.click(await screen.findByTestId('run-comments-button'));
+  fireEvent.click(await screen.findByTestId('next-unread'));
   // The only unread thread auto-expands on open, which is "opening" it.
   await waitFor(() => expect(onFocus).toHaveBeenCalledWith('row-7'));
   expect(reveal).toHaveBeenCalledWith('sloExpanded');
@@ -210,7 +280,7 @@ it('a comment started from a row is posted with that row as its anchor', async (
   expect(screen.getByText('Heap Usage SLO', { selector: 'span' })).toBeInTheDocument();
   fireEvent.change(box, { target: { value: 'margin is 8%' } });
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Comment' })));
-  expect(mocked.postComment).toHaveBeenCalledWith('run', 'slo', 'margin is 8%', undefined, { itemKey: 'row-7', itemLabel: 'Heap Usage SLO' }, undefined);
+  expect(mocked.postComment).toHaveBeenCalledWith('run', 'slo', 'margin is 8%', undefined, { itemKey: 'row-7', itemLabel: 'Heap Usage SLO' }, undefined, null);
   // The author is already at the row: posting must not yank the page to it again.
   expect(onFocus).not.toHaveBeenCalled();
 });
@@ -498,7 +568,7 @@ describe('placing a graph marker', () => {
     setView(view);
     fireEvent.change(screen.getByLabelText(/^Describe what happens at .*\(\+0:00\)/), { target: { value: 'GC pause' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Place marker' })));
-    expect(mocked.postMarker).toHaveBeenCalledWith('run', 'GC pause', steps[0], view);
+    expect(mocked.postMarker).toHaveBeenCalledWith('run', 'GC pause', steps[0], view, null);
     expect(screen.getByTestId('draft')).toHaveTextContent('none');
     expect(screen.getByLabelText('New comment on this card…')).toBeInTheDocument();
   });
@@ -706,7 +776,7 @@ describe('collapsed thread row', () => {
     fireEvent.click(screen.getByText('open'));
     const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
     await within(drawer).findByText('GC pause');
-    const rows = [...drawer.querySelectorAll('[aria-expanded]')];
+    const rows = [...drawer.querySelectorAll('button[aria-expanded]')];
     const marker = rows.find((r) => r.textContent?.includes('GC pause'))!;
     const anchored = rows.find((r) => r.textContent?.includes('noisy'))!;
     expect(marker).toHaveAttribute('aria-expanded', 'false');
@@ -755,19 +825,19 @@ describe('comment views on Graphs, Trends and Compare', () => {
 
   it("posts a root comment with its card's current view", async () => {
     await post('trends', trendsView);
-    expect(mocked.postComment).toHaveBeenCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, trendsView);
+    expect(mocked.postComment).toHaveBeenCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, trendsView, null);
   });
 
   it('posts the comment without its view when the server refuses the view', async () => {
     mocked.postComment.mockRejectedValueOnce(new Error('Posting comment failed (400): chartContext.customRange must run forwards'));
     await post('trends', trendsView);
     expect(mocked.postComment).toHaveBeenCalledTimes(2);
-    expect(mocked.postComment).toHaveBeenLastCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined);
+    expect(mocked.postComment).toHaveBeenLastCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, undefined, null);
   });
 
   it('posts no view when the card has nothing to record', async () => {
     await post('compare', null);
-    expect(mocked.postComment).toHaveBeenCalledWith('run', 'compare', 'p95 creeping up', undefined, undefined, undefined);
+    expect(mocked.postComment).toHaveBeenCalledWith('run', 'compare', 'p95 creeping up', undefined, undefined, undefined, null);
   });
 
   it('describes each kind of view', () => {
@@ -803,5 +873,80 @@ describe('comment views on Graphs, Trends and Compare', () => {
     await waitFor(() => expect(screen.getByTestId('req')).toHaveTextContent('trends:t1'));
     expect(reveal).toHaveBeenCalledWith('trendsExpanded');
     expect(await screen.findByText('1 series · Last week · p95')).toBeInTheDocument();
+  });
+});
+
+// Value: protects=a root comment anchored to a Configuration item records the view for THAT item
+// (the drawer hands the anchor to the card's capture), and the drawer prints the recorded
+// comparison under the comment with a Restore view that replays it on the Configuration card;
+// fails_when=captureView stops receiving the anchor, the snapshot moves above the body or
+// disappears, or describeView mislabels a config view; why_new=PR1 of
+// test-run-analysis-stories.md; seam=none; no_claim=the card's own capture and replay
+// (useConfigComments test) and the API's validation (comments specs).
+describe('comment views on Configuration items', () => {
+  const view: api.ConfigView = { kind: 'config', comparedToTestRunId: 'App-00006', status: 'changed', previousValue: '2g', currentValue: '512m' };
+
+  it('describes a config view', () => {
+    expect(describeView(view, false)).toBe('Compared with run App-00006: 2g → 512m (changed)');
+    expect(describeView({ ...view, status: 'same', previousValue: '512m' }, false)).toBe('Compared with run App-00006: 512m (same)');
+    expect(describeView({ kind: 'config', status: 'new', currentValue: '1', previousValue: null }, false)).toBe('Not compared with another run: 1 (new)');
+  });
+
+  it("posts an item comment with that item's view", async () => {
+    const capture = jest.fn((itemKey?: string | null) => (itemKey === 'config:heap.max' ? view : null));
+    function Card() {
+      const ctx = useComments();
+      const register = ctx?.registerViewCapture;
+      React.useEffect(() => register?.('config', capture), [register]);
+      return <button onClick={() => ctx?.commentOnItem('config', 'config:heap.max', 'heap.max')}>comment on row</button>;
+    }
+    mocked.fetchCommentCounts.mockResolvedValue({});
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: [], lastSeenAt: null });
+    mocked.postComment.mockResolvedValue(comment({ id: 'n1', cardKey: 'config' }));
+    render(
+      <CommentsProvider runId="run" reveal={jest.fn()}>
+        <Card />
+        <CommentsDrawer />
+      </CommentsProvider>,
+    );
+    fireEvent.click(screen.getByText('comment on row'));
+    fireEvent.change(await screen.findByLabelText('Comment on heap.max…'), { target: { value: 'heap shrank' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Comment' })));
+    expect(capture).toHaveBeenCalledWith('config:heap.max');
+    expect(mocked.postComment).toHaveBeenCalledWith('run', 'config', 'heap shrank', undefined, { itemKey: 'config:heap.max', itemLabel: 'heap.max' }, view, null);
+  });
+
+  it('shows the comparison under the comment, and Restore view asks the Configuration card to replay it', async () => {
+    const root = comment({ id: 'k1', cardKey: 'config', itemKey: 'config:heap.max', itemLabel: 'heap.max', body: 'heap shrank', chartContext: view });
+    mocked.fetchCommentCounts.mockResolvedValue({ config: { total: 1, unread: 0 } });
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: [{ ...root, replies: [] }], lastSeenAt: '2999-01-01T00:00:00Z' });
+    const reveal = jest.fn();
+    function Viewer() {
+      const ctx = useComments();
+      return (
+        <>
+          <button onClick={() => ctx?.openDrawer('config', 'k1')}>open</button>
+          <span data-testid="req">{ctx?.viewRequest ? `${ctx.viewRequest.card}:${ctx.viewRequest.comment.id}` : 'none'}</span>
+          <span data-testid="focus">{ctx?.itemFocus ? ctx.itemFocus.itemKey : 'none'}</span>
+        </>
+      );
+    }
+    render(
+      <CommentsProvider runId="run" reveal={reveal}>
+        <Viewer />
+        <CommentsDrawer />
+      </CommentsProvider>,
+    );
+    fireEvent.click(screen.getByText('open'));
+    const snapshot = await screen.findByText('Compared with run App-00006: 2g → 512m (changed)');
+    // Opening the thread only focuses the item; it does not replay the comparison.
+    await waitFor(() => expect(screen.getByTestId('focus')).toHaveTextContent('config:heap.max'));
+    expect(screen.getByTestId('req')).toHaveTextContent('none');
+    const bodies = screen.getAllByText('heap shrank');
+    const body = bodies[bodies.length - 1]!;
+    expect(body.compareDocumentPosition(snapshot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore view' }));
+    expect(screen.getByTestId('req')).toHaveTextContent('config:k1');
+    expect(reveal).toHaveBeenCalledWith('configExpanded');
   });
 });

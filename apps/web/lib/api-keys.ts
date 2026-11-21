@@ -12,6 +12,8 @@ export interface CreateApiKeyRequest {
   description: string;
   ttl: string;
   organizationId?: string; // Organization to create the API key for
+  /** Role identifiers; `comments:write` is the opt-in scope for an AI agent (MCP) to write comments. */
+  roles?: string[];
 }
 
 export interface CreateApiKeyResponse {

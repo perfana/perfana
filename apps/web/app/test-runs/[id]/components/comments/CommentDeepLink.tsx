@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { cardKeyOf, expansionKeyOf, useComments } from './CommentsContext';
+import { useComments } from './CommentsContext';
 
 /**
  * `?card=<comment card key>&comment=<id>`: reveal the card, open its drawer and highlight the
@@ -29,11 +29,7 @@ export default function CommentDeepLink() {
   }, [ctx, jumpTo]);
   useEffect(() => {
     if (!ctx || !card || !comment || done.current === comment) return;
-    const key = expansionKeyOf(card);
-    if (!key) return;
-    done.current = comment;
-    ctx.reveal(key);
-    ctx.openDrawer(cardKeyOf(key), comment, true); // a marker's view is replayed (premise 6)
+    if (ctx.showComment(card, comment)) done.current = comment;
   }, [ctx, card, comment]);
   return null;
 }

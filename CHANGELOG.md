@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.92] - 2026-11-21
+
+### Added
+- **Tag a comment thread with its role in an analysis.** A root comment can be tagged Symptom, Hypothesis, Evidence, Ruled out, Root cause or Action. The tag shows as a chip on the thread, filters the run's comments, and is printed in the report's Comments section.
+- **Comment on a single configuration item or dashboard tile.** The Configuration and Dashboards cards take comments per row. Opening such a comment shows only that item, whatever filters were set, with "Show all" to get your own view back. A configuration comment remembers which run it was compared with, can put that comparison back, and the report prints it under the comment.
+- **Walk a reader through an analysis as an investigation.** "Add to investigation" on a comment collects comments into an ordered walk with a title, a note per step and a conclusion. Reorder steps by dragging or with "Suggest order", then publish. A reader steps through it from a bar at the bottom of the page. Each step opens its card, row or chart view and its thread, and Exit puts every card back as it was. Investigations show unread badges, are announced once to the system's comment channels when published, can be printed in a report with the Comments section's new "Investigations" layout, and travel with an exported system. A comment that is a step in an investigation is hidden rather than removed when deleted, and the delete confirmation names the investigations it is in.
+- **Let an AI agent leave its analysis on the run.** An API key created with "Allow writing comments (for an AI agent)" can post, reply to and edit its own comments through the Perfana MCP server, pinned to a transaction, configuration item, dashboard, SLO result, card or numbered graph marker, and can draft an investigation from them. Everything an agent writes carries an AI chip with the key's description as author, is never announced to chat channels, and is capped at 100 comments, 200 replies and 10 investigations per key per run; a retried call does not post twice. An agent's investigation is labelled "AI draft · not reviewed" until any user who may comment on the run reviews and publishes it; it then reads "proposed by <agent>, published by <reviewer>" on the page, in reports and in the channel post. An agent can never delete or publish anything.
+
+### Changed
+- **A run's comments open from an icon in the header instead of a Results card.** The comments icon shows the total and turns red while there are comments you have not read, for example "5 unread (3 from AI)". It opens a dialog with all comments, filters, Next unread and Show in context, and a second tab for the run's investigations.
+- **Upgrading: run the database migrations before starting the new API.** Migrations 1829 to 1834 add the columns and tables these features read; an API started first fails every comment and investigation read until they have run.
+
 ## [0.2.97.91] - 2026-11-20
 
 ### Fixed

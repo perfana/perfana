@@ -94,7 +94,7 @@ describe('CommentsService against a real database', () => {
     await expect(service.create(runUuid, { card: 'slo', body: 'x' }, outsider)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.counts(runUuid, outsider)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.markSeen(runUuid, 'slo', outsider)).rejects.toBeInstanceOf(NotFoundException);
-    await expect(service.update(c.id, 'x', { ...outsider, userId: anna.userId })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.update(c.id, { body: 'x' }, { ...outsider, userId: anna.userId })).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.remove(c.id, outsider)).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -108,7 +108,7 @@ describe('CommentsService against a real database', () => {
     await expect(service.counts(runUuid, tom)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.itemCounts(runUuid, 'graphs', tom)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.markSeen(runUuid, 'slo', tom)).rejects.toBeInstanceOf(NotFoundException);
-    await expect(service.update(c.id, 'x', { ...tom, userId: 'comments-spec-tom' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.update(c.id, { body: 'x' }, { ...tom, userId: 'comments-spec-tom' })).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.remove(c.id, tom)).rejects.toBeInstanceOf(NotFoundException);
     expect(canViewTeamResources).toHaveBeenCalledWith('comments-spec-tom', teamA);
   });
@@ -129,10 +129,45 @@ describe('CommentsService against a real database', () => {
 
   it('lets only the author edit, and marks the edit', async () => {
     const c = await service.create(runUuid, { card: 'trends', body: 'typo' }, anna);
-    await expect(service.update(c.id, 'hijack', mark)).rejects.toBeInstanceOf(ForbiddenException);
-    const edited = await service.update(c.id, 'fixed', anna);
+    await expect(service.update(c.id, { body: 'hijack' }, mark)).rejects.toBeInstanceOf(ForbiddenException);
+    const edited = await service.update(c.id, { body: 'fixed' }, anna);
     expect(edited).toMatchObject({ body: 'fixed' });
     expect(edited.editedAt).not.toBeNull();
+  });
+
+  // Tags design (migration 1829): the service rules and the CHECKs, against the real schema.
+  it('tags a root, lets only its author retag or clear it, and never marks a retag as an edit', async () => {
+    const c = await service.create(runUuid, { card: 'graphs', body: 'p95 jumps at 14:32', tag: 'symptom' }, anna);
+    expect(c.tag).toBe('symptom');
+    await expect(service.update(c.id, { tag: 'root-cause' }, mark)).rejects.toBeInstanceOf(ForbiddenException);
+    const retagged = await service.update(c.id, { tag: 'root-cause' }, anna);
+    expect(retagged).toMatchObject({ tag: 'root-cause', body: 'p95 jumps at 14:32', editedAt: null });
+    const cleared = await service.update(c.id, { tag: null }, anna);
+    expect(cleared).toMatchObject({ tag: null, editedAt: null });
+    // The same body sent beside a tag (what the drawer's edit mode does) is not an edit either.
+    expect(await service.update(c.id, { body: 'p95 jumps at 14:32', tag: 'evidence' }, anna)).toMatchObject({ tag: 'evidence', editedAt: null });
+  });
+
+  it('refuses a tag on a reply, on create and on edit; the CHECK refuses one written past the service', async () => {
+    const root = await service.create(runUuid, { card: 'graphs', body: 'GC?', tag: 'hypothesis' }, anna);
+    await expect(service.create(runUuid, { card: 'graphs', body: 'no', parentId: root.id, tag: 'ruled-out' }, mark))
+      .rejects.toBeInstanceOf(BadRequestException);
+    const reply = await service.create(runUuid, { card: 'graphs', body: 'no', parentId: root.id }, mark);
+    expect(reply.tag).toBeNull();
+    await expect(service.update(reply.id, { tag: 'ruled-out' }, mark)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(ds.query(`UPDATE test_run_comments SET tag = 'evidence' WHERE id = $1`, [reply.id]))
+      .rejects.toThrow(/ck_test_run_comments_tag_root/);
+    await expect(ds.query(`UPDATE test_run_comments SET tag = 'rootcause' WHERE id = $1`, [root.id]))
+      .rejects.toThrow(/ck_test_run_comments_tag/);
+  });
+
+  it('keeps the tag of a soft-deleted root, in the list and in the stored row', async () => {
+    const root = await service.create(runUuid, { card: 'graphs', body: 'heap.max halved', tag: 'root-cause' }, anna);
+    await service.create(runUuid, { card: 'graphs', body: 'agreed', parentId: root.id }, mark);
+    await service.remove(root.id, anna);
+    const { threads } = await service.listThreads(runUuid, 'graphs', mark);
+    expect(threads.find((t) => t.id === root.id)).toMatchObject({ deleted: true, body: null, tag: 'root-cause' });
+    expect((await ds.query(`SELECT tag FROM test_run_comments WHERE id = $1`, [root.id]))[0].tag).toBe('root-cause');
   });
 
   it('soft-deletes a root with replies (body wiped, thread kept) and hard-deletes a lone reply', async () => {
@@ -148,7 +183,7 @@ describe('CommentsService against a real database', () => {
 
     await expect(service.create(runUuid, { card: 'events', body: 'late', parentId: root.id }, mark))
       .rejects.toBeInstanceOf(BadRequestException);
-    await expect(service.update(root.id, 'revive', anna)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.update(root.id, { body: 'revive' }, anna)).rejects.toBeInstanceOf(NotFoundException);
 
     await service.remove(reply.id, mark);
     expect((await ds.query(`SELECT 1 FROM test_run_comments WHERE id = $1`, [reply.id])).length).toBe(0);
@@ -174,13 +209,13 @@ describe('CommentsService against a real database', () => {
     );
 
     // total: mine + theirs + the ancient one (all live); unread: only theirs within the window.
-    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 1 });
+    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 1, unreadAgent: 0 });
     expect((await commentCountsByRun(ds, [runUuid], anna.userId)).get(runUuid)?.unread).toBeGreaterThanOrEqual(1);
 
     await service.markSeen(runUuid, card, anna);
     expect((await service.listThreads(runUuid, card, anna)).lastSeenAt).not.toBeNull();
     // Seen: nothing unread, but the comments are still there to show on the collapsed card.
-    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 0 });
+    expect((await commentCountsByCard(ds, runUuid, anna.userId))[card]).toEqual({ total: 3, unread: 0, unreadAgent: 0 });
 
     await service.markSeen(runUuid, card, anna); // upsert, not a duplicate-key error
   });

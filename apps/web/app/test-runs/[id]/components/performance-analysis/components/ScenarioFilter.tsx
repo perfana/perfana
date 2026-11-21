@@ -1,8 +1,9 @@
 'use client';
 
+import { TRANSACTION_NO_SCENARIO_GROUP } from '@perfana/shared/constants/comment-cards';
 import { Box, Typography, Chip } from '@mui/material';
 
-export const NO_SCENARIO_LABEL = 'No Scenario';
+export const NO_SCENARIO_LABEL = TRANSACTION_NO_SCENARIO_GROUP;
 
 interface ScenarioFilterProps {
   availableScenarios: string[];

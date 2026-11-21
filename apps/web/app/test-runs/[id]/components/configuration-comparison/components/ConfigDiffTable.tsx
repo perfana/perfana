@@ -14,6 +14,9 @@ import {
 } from '@mui/icons-material';
 import { ConfigDiffTableProps, ConfigComparison } from '../types';
 import { getEffectiveTags } from '../utils/comparison-formatters';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import RowCommentButton from '../../comments/RowCommentButton';
+import { configCommentAnchor } from '../hooks/useConfigComments';
 
 /**
  * Get background color for a comparison row based on status
@@ -93,6 +96,7 @@ interface ConfigDiffRowProps {
   testRunConfigs: { key: string; tags?: string[] }[];
   expectedChangesLoading: boolean;
   onToggleExpectedChange: (configKey: string, isExpected: boolean) => void;
+  commentCounts?: CommentItemCounts;
 }
 
 /**
@@ -104,7 +108,10 @@ function ConfigDiffRow({
   testRunConfigs,
   expectedChangesLoading,
   onToggleExpectedChange,
+  commentCounts,
 }: ConfigDiffRowProps) {
+  // One thread per config key: rows that share a key (different tags) share the control.
+  const anchor = commentCounts ? configCommentAnchor(comparison.key) : null;
   const effectiveTags = getEffectiveTags(comparison);
   const config = testRunConfigs.find(c => c.key === comparison.key);
   const hasGitHubTag = config?.tags?.some(tag => tag.toLowerCase() === 'github');
@@ -122,22 +129,36 @@ function ConfigDiffRow({
             backgroundColor: getRowHoverColor(comparison.status),
           },
         },
+        // The row is display:contents, but :hover and :focus-within still match it through its cells.
+        '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 },
       }}
     >
-      {/* Key Column */}
-      <Box sx={{ p: 2, borderRight: '1px solid', borderColor: 'divider' }}>
-        <Typography
-          variant="body2"
-          sx={{
-            fontWeight: 500,
-            color: 'text.primary',
-            mb: 1,
-            wordBreak: 'break-word',
-            lineHeight: 1.4,
-          }}
-        >
-          {comparison.key}
-        </Typography>
+      {/* Key Column. It carries the comment anchor: a display:contents row has no box to scroll to or flash. */}
+      <Box
+        sx={{ p: 2, borderRight: '1px solid', borderColor: 'divider' }}
+        data-comment-item={anchor?.itemKey}
+        data-testid="config-row-key"
+      >
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mb: 1 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              fontWeight: 500,
+              color: 'text.primary',
+              wordBreak: 'break-word',
+              lineHeight: 1.4,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {comparison.key}
+          </Typography>
+          {anchor && commentCounts && (
+            <Box sx={{ mt: -0.5, mr: -1, flexShrink: 0 }}>
+              <RowCommentButton card="config" itemKey={anchor.itemKey} itemLabel={anchor.itemLabel} counts={commentCounts} />
+            </Box>
+          )}
+        </Box>
         {effectiveTags.length > 0 && (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
             {effectiveTags.map((tag, tagIndex) => (
@@ -322,6 +343,7 @@ export function ConfigDiffTable({
   testRunConfigs,
   expectedChangesLoading,
   onToggleExpectedChange,
+  commentCounts,
 }: ConfigDiffTableProps) {
   return (
     <Box
@@ -396,6 +418,7 @@ export function ConfigDiffTable({
           testRunConfigs={testRunConfigs}
           expectedChangesLoading={expectedChangesLoading}
           onToggleExpectedChange={onToggleExpectedChange}
+          commentCounts={commentCounts}
         />
       ))}
     </Box>

@@ -18,6 +18,8 @@ import { ConfigurationComparisonSectionProps } from './types';
 
 // Hooks
 import { useConfigComparison } from './hooks';
+import { useConfigComments } from './hooks/useConfigComments';
+import CommentFilterChip from '../comments/CommentFilterChip';
 
 // Components
 import { ConfigDiffTable, ConfigCollapsedView, ConfigFilterControls } from './components';
@@ -38,6 +40,9 @@ export default function ConfigurationComparisonSection({
     configExpanded,
     showToast,
   });
+  const configComments = useConfigComments(configData, configExpanded, showToast);
+  const commentFilter = configComments.filter;
+  const shown = configComments.visibleComparisons;
 
   // Handle expand/collapse
   const handleConfigExpand = () => {
@@ -215,13 +220,22 @@ export default function ConfigurationComparisonSection({
               configLoading={configData.configLoading}
             />
 
+            {commentFilter && (
+              <CommentFilterChip
+                label={commentFilter.label}
+                missing={commentFilter.ready && !commentFilter.exists ? `${commentFilter.label} is not in this comparison` : null}
+                onShowAll={configComments.clearCommentFocus}
+              />
+            )}
+
             {configData.configLoading ? (
               <Box display="flex" justifyContent="center" py={2}>
                 <CircularProgress size={24} />
               </Box>
-            ) : configData.filteredComparisons.length > 0 ? (
+            ) : shown.length > 0 ? (
               <ConfigDiffTable
-                comparisons={configData.filteredComparisons}
+                comparisons={shown}
+                commentCounts={configComments.counts}
                 selectedRelatedTestRun={configData.selectedRelatedTestRun}
                 testRunConfigs={configData.testRunConfigs}
                 expectedChangesLoading={configData.expectedChangesLoading}
@@ -234,9 +248,11 @@ export default function ConfigurationComparisonSection({
                     ? "No configuration items found for this test run."
                     : configData.configComparisons.length === 0
                       ? "No configuration comparisons available."
-                      : "No configuration items match the selected filters."}
+                      : commentFilter
+                        ? "No configuration items to show."
+                        : "No configuration items match the selected filters."}
                 </Typography>
-                {configData.filteredComparisons.length === 0 && configData.configComparisons.length > 0 && (
+                {!commentFilter && configData.filteredComparisons.length === 0 && configData.configComparisons.length > 0 && (
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                     Try selecting different status filters or clearing all filters.
                   </Typography>

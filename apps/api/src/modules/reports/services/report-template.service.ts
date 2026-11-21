@@ -9,6 +9,7 @@ import {
 } from '@perfana/shared';
 import type { OwnedResource } from '@perfana/shared';
 import { MAX_REPORT_SECTIONS, REPORT_SECTION_TYPES } from '@perfana/shared/types';
+import { COMMENTS_SECTION_LAYOUTS } from '@perfana/shared/constants/comment-cards';
 import { withRequestEm } from '../../../common/db/request-em';
 import {
   ResourceNotFoundException,
@@ -780,6 +781,15 @@ export class ReportTemplateService {
       if (section.type === 'text_block' && section.text) {
         throw new ValidationException(
           `Accompanying text is not allowed on 'text_block' sections (index ${i})`,
+        );
+      }
+
+      // An absent layout is 'by-card' (every template stored before the option existed).
+      const layout = section.config?.layout;
+      if (section.type === 'comments' && layout !== undefined
+        && !(COMMENTS_SECTION_LAYOUTS as readonly unknown[]).includes(layout)) {
+        throw new ValidationException(
+          `Invalid comments layout at index ${i}. Valid layouts: ${COMMENTS_SECTION_LAYOUTS.join(', ')}`,
         );
       }
     }

@@ -30,7 +30,7 @@ import {
   SECTION_ANCHOR_PREFIX,
 } from '@perfana/shared/utils';
 import { SECTION_RENDER_TITLES, isLinkableSection, DEFAULT_DYNATRACE_HOST_COLUMNS, type DynatraceHostColumn } from '@perfana/shared/types';
-import { COMMENT_CARD_KEYS, COMMENT_CARD_LABELS, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_CARD_KEYS, COMMENT_CARD_LABELS, commentsSectionLayout, type CommentCardKey, type CommentsSectionLayout } from '@perfana/shared/constants/comment-cards';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
@@ -1920,8 +1920,10 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
 
 /** @public */
 export interface CommentsConfig {
-  /** Card keys whose threads to include; empty or absent = every card. */
+  /** Card keys whose threads to include; empty or absent = every card. `by-card` layout only. */
   cards?: string[];
+  /** `by-card` (absent) lists threads per card; `stories` walks the run's published analysis stories. */
+  layout?: CommentsSectionLayout;
 }
 
 interface CommentsConfigFormProps {
@@ -1936,6 +1938,7 @@ interface CommentsConfigFormProps {
 export function CommentsConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: CommentsConfigFormProps) {
   const known = new Set<string>(COMMENT_CARD_KEYS);
   const selected = (Array.isArray(config.cards) ? config.cards : []).filter((c): c is CommentCardKey => known.has(c));
+  const layout = commentsSectionLayout(config as Record<string, unknown>);
   return (
     <SectionConfigShell
       sectionTitle="Comments"
@@ -1947,7 +1950,24 @@ export function CommentsConfigForm({ config, onChange, text, onTextChange, testR
       testRunId={testRunId}
       allSections={allSections}
     >
-      <Autocomplete
+      <FormControl fullWidth size="small">
+        <InputLabel id="comments-layout-label">Layout</InputLabel>
+        <Select
+          labelId="comments-layout-label"
+          label="Layout"
+          value={layout}
+          onChange={(e) => onChange({ ...config, layout: e.target.value as CommentsSectionLayout })}
+        >
+          <MenuItem value="by-card">By card</MenuItem>
+          <MenuItem value="stories">Investigations</MenuItem>
+        </Select>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+          {layout === 'stories'
+            ? 'Every published investigation of the run, step by step. Comments in no investigation are left out.'
+            : 'Every comment thread, grouped by the card it was written on.'}
+        </Typography>
+      </FormControl>
+      {layout === 'by-card' && <Autocomplete
         multiple
         size="small"
         options={[...COMMENT_CARD_KEYS]}
@@ -1962,7 +1982,7 @@ export function CommentsConfigForm({ config, onChange, text, onTextChange, testR
             helperText="Empty = threads from every card. Graphs markers are drawn on their chart."
           />
         )}
-      />
+      />}
     </SectionConfigShell>
   );
 }

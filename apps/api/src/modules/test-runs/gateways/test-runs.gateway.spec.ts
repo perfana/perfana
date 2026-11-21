@@ -269,6 +269,22 @@ describe('TestRunsGateway tenant isolation', () => {
       expect(to).not.toHaveBeenCalled();
       expect(serverEmit).not.toHaveBeenCalled();
     });
+
+    // Stories design, Realtime: a draft's body must not reach everyone in the run room.
+    it('sends story:changed body-free to the per-run room only', () => {
+      gateway.emitStoryChanged({ testRunId: 'run-uuid', organizationId: 'org-a' }, 'story-1');
+
+      expect(serverEmit).not.toHaveBeenCalled();
+      expect(to).toHaveBeenCalledTimes(1);
+      expect(to).toHaveBeenCalledWith('test-run:run-uuid');
+      expect(emit).toHaveBeenCalledWith('story:changed', { testRunId: 'run-uuid', storyId: 'story-1' });
+      expect(Object.keys(emit.mock.calls[0][1]).sort()).toEqual(['storyId', 'testRunId']);
+    });
+
+    it('emits no story:changed without an organization', () => {
+      gateway.emitStoryChanged({ testRunId: 'run-uuid', organizationId: null }, 'story-1');
+      expect(to).not.toHaveBeenCalled();
+    });
   });
 
   describe('event fan-out', () => {

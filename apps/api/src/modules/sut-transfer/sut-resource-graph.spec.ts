@@ -21,7 +21,7 @@ describe('SUT_RESOURCES', () => {
       'ds_compare_config', 'provisioned_template_ds_compare_configs',
       'ds_control_groups', 'ds_control_group_statistics',
       'ds_metrics', 'test_run_configs', 'awr_reports', 'generated_reports',
-      'test_run_alerts', 'test_run_events', 'test_run_comments', 'graph_presets',
+      'test_run_alerts', 'test_run_events', 'test_run_comments', 'test_run_stories', 'test_run_story_steps', 'graph_presets',
       'requests_raw', 'requests_error', 'transactions', 'virtual_users',
       'ds_adapt_results', 'ds_adapt_conclusion', 'ds_adapt_tracked_results',
       'ds_change_points', 'check_results', 'ds_metric_statistics',
@@ -112,8 +112,21 @@ describe('SUT_RESOURCES', () => {
       expect(comments()!.orderBy).toMatch(/^\(t\.parent_id IS NOT NULL\)/);
     });
 
+    it('exports stories after comments and steps after both, as core data', () => {
+      expect(idx('test_run_stories')).toBeGreaterThan(idx('test_run_comments'));
+      expect(idx('test_run_story_steps')).toBeGreaterThan(idx('test_run_stories'));
+      expect(SUT_RESOURCES.find((r) => r.table === 'test_run_stories')).toMatchObject({ filter: 'byTestRunUuid', group: 'core' });
+      expect(SUT_RESOURCES.find((r) => r.table === 'test_run_story_steps')).toMatchObject({ filter: 'byStoryOfTestRun', group: 'core' });
+      const tables = selectResources({ includeOptional: false, includeRaw: false }).map((r) => r.table);
+      expect(tables).toEqual(expect.arrayContaining(['test_run_stories', 'test_run_story_steps']));
+    });
+
     it('does not export test_run_comment_reads', () => {
       expect(SUT_RESOURCES.map((r) => r.table)).not.toContain('test_run_comment_reads');
+    });
+
+    it('does not export test_run_story_reads', () => {
+      expect(SUT_RESOURCES.map((r) => r.table)).not.toContain('test_run_story_reads');
     });
   });
 

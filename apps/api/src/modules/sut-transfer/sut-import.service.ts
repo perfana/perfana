@@ -108,6 +108,14 @@ const PURGE_SCOPE_COLUMN = 'test_run_id';
  * the column is stamped the same way.
  */
 const COMMENTS_TABLE = 'test_run_comments';
+/**
+ * Analysis stories are stamped announced on import for the same reason as comments: a published
+ * story the source had not announced yet (or one from a bundle exported before migration 1832,
+ * which carries no `notified_at`) must not be posted to the target's channels as a new analysis.
+ */
+const STORIES_TABLE = 'test_run_stories';
+/** Story steps reference comments and stories; see insertBatch. */
+const STORY_STEPS_TABLE = 'test_run_story_steps';
 
 @Injectable()
 export class SutImportService {
@@ -221,6 +229,7 @@ export class SutImportService {
           if ('organization_id' in obj) obj.organization_id = targetOrganizationId;
           if ('team_id' in obj) obj.team_id = null;
           if (currentTable === COMMENTS_TABLE) obj.notified_at = importedAt;
+          if (currentTable === STORIES_TABLE) obj.notified_at = importedAt;
           batch.push(obj);
           if (batch.length >= BATCH_SIZE) await flush();
         }
@@ -302,6 +311,16 @@ export class SutImportService {
     }
 
     if (table === COMMENTS_TABLE) return this.insertComments(manager, toInsert);
+    if (table === STORY_STEPS_TABLE) {
+      // A step whose comment did not land (it lost ON CONFLICT to a different comment holding its
+      // marker number, see insertComments) or whose story did not would FK-violate at commit and
+      // abort the whole import; drop it instead. The story keeps its other steps.
+      const reason = 'their comment or story was not imported.';
+      const withComment = await this.dropRowsMissingParent(manager, table, toInsert, 'comment_id', COMMENTS_TABLE, reason);
+      const kept = await this.dropRowsMissingParent(manager, table, withComment, 'story_id', 'test_run_stories', reason);
+      const stepsDropped = dropped + toInsert.length - kept.length;
+      return { inserted: kept.length > 0 ? await this.writeRows(manager, table, kept) : 0, dropped: stepsDropped };
+    }
 
     return { inserted: await this.writeRows(manager, table, toInsert), dropped };
   }

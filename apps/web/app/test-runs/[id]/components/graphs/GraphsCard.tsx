@@ -146,11 +146,13 @@ export default function GraphsCard({
       title: ctx.title ?? null,
     })
       .then((missing) => {
+        // A story walk (silent) shows no per-step Undo; its Exit restores the whole walk.
+        if (viewRequest.silent) return;
         const lost = missing > 0 ? ` · ${missing} of ${ctx.series.length} series have no data in this window` : '';
         showToast(`Showing ${seq != null ? `marker ${seq}'s` : "the comment's"} view${lost}`, undo);
       })
       // loadView already replaced the chart before the fetch failed, so the way back matters most here.
-      .catch(() => showToast('That view could not be loaded', undo));
+      .catch(() => (viewRequest.silent ? showToast('That view could not be loaded') : showToast('That view could not be loaded', undo)));
   }, [viewRequest, showToast]);
 
   return (

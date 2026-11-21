@@ -81,6 +81,10 @@ export function useCompareCommentView(compare: CompareData, showToast: (message:
       baseline: baseline ?? c.selectedTestRun,
     });
     const lost = wanted && !baseline && !pendingBaseline.current ? ` · baseline ${wanted} is no longer available` : '';
+    if (request.silent) {
+      if (lost) showToast(`Baseline ${wanted} is no longer available`);
+      return;
+    }
     showToast(`Showing the comment's view${lost}`, {
       label: 'Undo',
       onClick: () => {

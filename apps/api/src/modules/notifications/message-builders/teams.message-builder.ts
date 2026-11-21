@@ -1,5 +1,6 @@
 import { TestRun } from '@perfana/shared';
 import { CommentDigest, commentDetail, commentHeadline } from './comment-digest';
+import { StoryAnnouncement, storyDetail, storyHeadline } from './comment-digest';
 
 /**
  * Microsoft Teams MessageCard format
@@ -105,6 +106,25 @@ export class TeamsMessageBuilder {
           '@type': 'OpenUri',
           name: 'View comments in Perfana',
           targets: [{ os: 'default', uri: digest.link }],
+        },
+      ],
+    };
+  }
+
+  /** One post per published story: who, where, its title and step count, and a reader link. */
+  buildStoryMessage(story: StoryAnnouncement): TeamsMessage {
+    const headline = storyHeadline(story);
+    return {
+      '@type': 'MessageCard',
+      '@context': 'http://schema.org/extensions',
+      themeColor: '0076D7',
+      summary: headline,
+      sections: [{ activityTitle: headline, text: storyDetail(story), markdown: true }],
+      potentialAction: [
+        {
+          '@type': 'OpenUri',
+          name: 'Read the investigation in Perfana',
+          targets: [{ os: 'default', uri: story.link }],
         },
       ],
     };

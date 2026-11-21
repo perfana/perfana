@@ -1651,7 +1651,45 @@ export class MetricsService {
     );
 
     // `members` is the per-pod view: raw names, and no lookup.
-    return members ? rows : this.groupAvailableDashboards(testRunId, rows);
+    const out = members ? rows : await this.groupAvailableDashboards(testRunId, rows);
+    return this.withApplicationDashboardIds(testRunId, out);
+  }
+
+  /**
+   * Add, additively, the application dashboard id(s) behind each row's `dashboard_label`, so an
+   * MCP agent can anchor a dashboard comment or disambiguate a marker series. A label is not
+   * unique across Grafana instances (root CLAUDE.md #51): `application_dashboard_ids` lists every
+   * dashboard of the run's system and environment with that label, and `application_dashboard_id`
+   * is set only when there is exactly one. A row whose label matches none is returned untouched.
+   * Read from `application_dashboards` in its own small query, so the `ds_metrics` statement above
+   * keeps its index-only plan.
+   */
+  private async withApplicationDashboardIds(
+    testRunId: string,
+    rows: Record<string, unknown>[],
+  ): Promise<Record<string, unknown>[]> {
+    if (rows.length === 0) return rows;
+    const labels = [...new Set(rows.map((r) => r.dashboard_label).filter((l): l is string => typeof l === 'string'))];
+    if (labels.length === 0) return rows;
+    const found = (await this.metricsRepo.query(
+      `SELECT ad.id::text AS id, ad.dashboard_label
+         FROM application_dashboards ad
+         JOIN test_runs tr ON tr.system_under_test_id = ad.system_under_test_id AND tr.test_environment = ad.test_environment
+        WHERE tr.test_run_id = $1 AND ad.dashboard_label = ANY($2::text[])
+        ORDER BY ad.id`,
+      [testRunId, labels],
+    )) as Array<{ id?: unknown; dashboard_label?: unknown }>;
+    const byLabel = new Map<string, string[]>();
+    for (const f of Array.isArray(found) ? found : []) {
+      if (typeof f.id !== 'string' || typeof f.dashboard_label !== 'string') continue;
+      byLabel.set(f.dashboard_label, [...(byLabel.get(f.dashboard_label) ?? []), f.id]);
+    }
+    if (byLabel.size === 0) return rows;
+    return rows.map((row) => {
+      const ids = byLabel.get(row.dashboard_label as string);
+      if (!ids) return row;
+      return { ...row, application_dashboard_id: ids.length === 1 ? ids[0] : null, application_dashboard_ids: ids };
+    });
   }
 
   /**

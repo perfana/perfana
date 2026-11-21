@@ -1,5 +1,5 @@
 import { authenticatedFetch } from '@/lib/api';
-import type { CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_UNREAD_WINDOW_DAYS, type CommentAuthorKind, type CommentCardKey, type CommentTag, type ConfigCommentView } from '@perfana/shared/constants/comment-cards';
 import type { SeriesConfig as PresetSeries } from '@/lib/graph-presets';
 
 /**
@@ -47,11 +47,17 @@ export interface CompareView {
   baselineTestRunId?: string;
 }
 
-/** What a Graphs, Trends or Compare comment records about its card's view (design: PR2). */
-export type CommentView = MarkerChartContext | TrendsView | CompareView;
+/**
+ * The comparison a Configuration item comment was written against (design:
+ * test-run-analysis-stories.md, "Item-level comments").
+ */
+export type ConfigView = ConfigCommentView & { kind: 'config' };
+
+/** What a Graphs, Trends or Compare comment, or a Configuration item comment, records about its card's view. */
+export type CommentView = MarkerChartContext | TrendsView | CompareView | ConfigView;
 
 /** The comment's view if it was recorded on `card`; Graphs views from before `kind` existed count as Graphs. */
-export function viewOf<C extends 'graphs' | 'trends' | 'compare'>(
+export function viewOf<C extends 'graphs' | 'trends' | 'compare' | 'config'>(
   comment: Pick<RunComment, 'chartContext'>,
   card: C,
 ): Extract<CommentView, { kind?: C }> | null {
@@ -73,16 +79,25 @@ export interface RunComment {
   deleted: boolean;
   authorId: string;
   authorName: string;
+  /**
+   * `agent` when an AI agent wrote it through an API key with the comments:write role; shown with
+   * an AI chip. Absent from an API older than migration 1831, which reads as a person.
+   */
+  authorKind?: CommentAuthorKind;
   markerSeq: number | null;
   markerTime: string | null;
   /** The card's view when the root was written (Graphs, Trends, Compare); null once deleted and elsewhere. */
   chartContext: CommentView | null;
+  /** Analysis tag on a root (design: test-run-analysis-stories.md); null when untagged, always null on a reply. Kept on a deleted root. */
+  tag: CommentTag | null;
   createdAt: string;
   editedAt: string | null;
 }
 
 export interface RunCommentThread extends RunComment {
   replies: RunComment[];
+  /** The stories this root is a step of, among those the caller can see; absent when none. */
+  stories?: { id: string; title: string; position: number }[];
 }
 
 async function json<T>(res: Response, what: string): Promise<T> {
@@ -106,11 +121,58 @@ const send = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-export const fetchCommentThreads = async (runId: string, card: CommentCardKey) =>
-  json<{ threads: RunCommentThread[]; lastSeenAt: string | null; canModerate?: boolean }>(await authenticatedFetch(`${base(runId)}?card=${encodeURIComponent(card)}`), 'Loading comments');
+/**
+ * One card's threads, or with no `card` every thread on the run (then `lastSeenAt` is null and
+ * `lastSeenByCard` carries the caller's last look at every card; absent from an older API).
+ */
+export const fetchCommentThreads = async (runId: string, card?: CommentCardKey) =>
+  json<{ threads: RunCommentThread[]; lastSeenAt: string | null; lastSeenByCard?: Partial<Record<CommentCardKey, string | null>>; canModerate?: boolean }>(
+    await authenticatedFetch(card ? `${base(runId)}?card=${encodeURIComponent(card)}` : base(runId)),
+    'Loading comments',
+  );
 
-/** Per card: comments that are not deleted, and how many of those are unread for the caller. */
-export type CardCommentCounts = Partial<Record<CommentCardKey, { total: number; unread: number }>>;
+/**
+ * Per card: comments that are not deleted, how many of those are unread for the caller, and how
+ * many of the unread an AI agent wrote (`unreadAgent`, absent from an API older than 1831).
+ */
+export type CardCommentCounts = Partial<Record<CommentCardKey, { total: number; unread: number; unreadAgent?: number }>>;
+
+/** `5 unread`, or `5 unread (3 from AI)` when agents wrote some of them. */
+export function unreadCommentsLabel(unread: number, unreadFromAgents: number): string {
+  return unreadFromAgents > 0 ? `${unread} unread (${unreadFromAgents} from AI)` : `${unread} unread`;
+}
+
+/**
+ * The counts' unread rule, client-side: by someone else, not deleted, within
+ * COMMENT_UNREAD_WINDOW_DAYS, and newer than the caller's last look at the comment's card (`null`:
+ * never looked). False while the caller is not known yet, so nothing flashes as unread.
+ */
+export function isUnreadComment(
+  c: Pick<RunComment, 'authorId' | 'deleted' | 'createdAt'>,
+  me: string,
+  lastSeen: string | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (!me || c.deleted || c.authorId === me) return false;
+  const t = Date.parse(c.createdAt);
+  if (!Number.isFinite(t) || t <= now - COMMENT_UNREAD_WINDOW_DAYS * 86_400_000) return false;
+  return !lastSeen || t > Date.parse(lastSeen);
+}
+
+/**
+ * A root is unread when it, or a reply under it, is unread for the caller. Without `lastSeenByCard`
+ * (an API older than this client) nothing is marked: guessing would mark everything.
+ */
+export function isUnreadThread(
+  t: RunCommentThread,
+  me: string,
+  lastSeenByCard: Partial<Record<CommentCardKey, string | null>> | undefined,
+  now = Date.now(),
+): boolean {
+  if (!lastSeenByCard) return false;
+  const seen = lastSeenByCard[t.cardKey] ?? null;
+  return isUnreadComment(t, me, seen, now) || t.replies.some((r) => isUnreadComment(r, me, seen, now));
+}
 
 export const fetchCommentCounts = async (runId: string) =>
   json<CardCommentCounts>(await authenticatedFetch(`${base(runId)}/counts`), 'Loading comment counts');
@@ -127,11 +189,13 @@ export const postComment = async (
   parentId?: string,
   anchor?: CommentAnchor,
   chartContext?: CommentView,
-) => json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card, body, parentId, ...anchor, chartContext })), 'Posting comment');
+  /** Roots only; the API refuses a tag on a reply. */
+  tag?: CommentTag | null,
+) => json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card, body, parentId, ...anchor, chartContext, tag: tag ?? undefined })), 'Posting comment');
 
 /** Post a numbered marker on the Graphs card; the server assigns its number. */
-export async function postMarker(runId: string, body: string, markerTime: string, chartContext: MarkerChartContext) {
-  const c = await json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card: 'graphs', body, markerTime, chartContext })), 'Posting marker');
+export async function postMarker(runId: string, body: string, markerTime: string, chartContext: MarkerChartContext, tag?: CommentTag | null) {
+  const c = await json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card: 'graphs', body, markerTime, chartContext, tag: tag ?? undefined })), 'Posting marker');
   // An API older than this client strips the marker fields (whitelist validation) and saves a plain
   // comment with a 201. Say so instead of letting the marker vanish without a word.
   if (c.markerSeq == null) {
@@ -148,8 +212,16 @@ export const fetchCommentItemCounts = async (runId: string, card: CommentCardKey
 export const markCommentsSeen = async (runId: string, card: CommentCardKey) =>
   json<void>(await authenticatedFetch(`${base(runId)}/seen`, send('PUT', { card })), 'Marking comments seen');
 
-export const editComment = async (id: string, body: string) =>
-  json<RunComment>(await authenticatedFetch(`/comments/${encodeURIComponent(id)}`, send('PATCH', { body })), 'Saving comment');
+/**
+ * Edit the author's own comment. `tag` undefined leaves the stored tag alone, null clears it. The
+ * server marks the comment "(edited)" only when the body actually changed, so sending the same body
+ * beside a new tag is a retag, not an edit.
+ */
+export const editComment = async (id: string, body: string, tag?: CommentTag | null) =>
+  json<RunComment>(
+    await authenticatedFetch(`/comments/${encodeURIComponent(id)}`, send('PATCH', tag === undefined ? { body } : { body, tag })),
+    'Saving comment',
+  );
 
 export const deleteComment = async (id: string) =>
   json<void>(await authenticatedFetch(`/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }), 'Deleting comment');

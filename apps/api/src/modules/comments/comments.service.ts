@@ -1,6 +1,9 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -21,9 +24,17 @@ import {
   type CommentResponse,
   type CommentThreadResponse,
   type CreateCommentDto,
+  type UpdateCommentDto,
 } from './dto/comment.dto';
 import { commentCountsByCard, type CommentCounts } from './comment-unread.sql';
-import { COMMENT_UNREAD_WINDOW_DAYS } from '@perfana/shared/constants/comment-cards';
+import {
+  AGENT_COMMENT_LIMITS,
+  COMMENT_CARD_KEYS,
+  COMMENT_ITEM_KEY_MAX_LENGTH,
+  COMMENT_UNREAD_WINDOW_DAYS,
+  type CommentAuthorKind,
+} from '@perfana/shared/constants/comment-cards';
+import { anchorCard, loadAnchorRun, parseAnchor, resolveAnchor } from './comment-anchor.resolver';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,6 +49,16 @@ export interface CommentCaller {
   userId: string;
   displayName?: string;
   orgIds: string[] | null;
+  /** `agent` for an API key with the comments:write role; absent means a person. */
+  authorKind?: CommentAuthorKind;
+}
+
+/** A unique violation on the agent idempotency index. */
+export function isClientRefConflict(err: unknown): boolean {
+  const e = err as { code?: string; constraint?: string; driverError?: { code?: string; constraint?: string } } | null;
+  const code = e?.code ?? e?.driverError?.code;
+  const constraint = e?.constraint ?? e?.driverError?.constraint;
+  return code === '23505' && constraint === 'uq_test_run_comments_client_ref';
 }
 
 /**
@@ -125,7 +146,7 @@ export class CommentsService {
     runIdOrTestRunId: string,
     card: string | undefined,
     caller: CommentCaller,
-  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; canModerate: boolean }> {
+  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; lastSeenByCard?: Record<string, string | null>; canModerate: boolean }> {
     const run = await this.resolveRun(runIdOrTestRunId, caller);
     const where: Record<string, unknown> = { testRunId: run.id };
     if (card) where.cardKey = card;
@@ -140,18 +161,168 @@ export class CommentsService {
     const read = card
       ? await em.getRepository(TestRunCommentRead).findOne({ where: { userId: caller.userId, testRunId: run.id, cardKey: card } })
       : null;
+    // The stories each root is a step of, as far as the caller can see them (published, or their
+    // own drafts, or an AI agent's draft, which everyone who can see the run sees), so the drawer's
+    // delete confirmation can name them.
+    if (threads.size > 0) {
+      const steps: { comment_id: string; story_id: string; title: string; position: number }[] = await em.query(
+        `SELECT st.comment_id, s.id AS story_id, s.title, st.position
+           FROM test_run_story_steps st
+           JOIN test_run_stories s ON s.id = st.story_id
+          WHERE s.test_run_id = $1 AND (s.status = 'published' OR s.author_kind = 'agent' OR s.author_id = $2)
+          ORDER BY s.created_at, s.id`,
+        [run.id, caller.userId],
+      );
+      for (const st of steps) {
+        const root = threads.get(st.comment_id);
+        if (root) (root.stories ??= []).push({ id: st.story_id, title: st.title, position: st.position });
+      }
+    }
     const canModerate =
       !caller.userId.startsWith('api-key:') &&
       (caller.orgIds === null || (await this.authzService.isOrganizationAdmin(caller.userId, run.organizationId)));
-    return { threads: [...threads.values()], lastSeenAt: read ? new Date(read.lastSeenAt).toISOString() : null, canModerate };
+    const lastSeenAt = read ? new Date(read.lastSeenAt).toISOString() : null;
+    if (card) return { threads: [...threads.values()], lastSeenAt, canModerate };
+    // The whole run: the caller's look at every card, so the Comments dialog can mark unread
+    // threads by the counts' rule without marking anything seen itself.
+    const reads = await em.getRepository(TestRunCommentRead).find({ where: { userId: caller.userId, testRunId: run.id } });
+    const lastSeenByCard: Record<string, string | null> = Object.fromEntries(COMMENT_CARD_KEYS.map((k) => [k, null]));
+    for (const r of reads) lastSeenByCard[r.cardKey] = new Date(r.lastSeenAt).toISOString();
+    return { threads: [...threads.values()], lastSeenAt, lastSeenByCard, canModerate };
   }
 
   // audit-skip: user discussion, not configuration; the row records its author and time itself
   async create(runIdOrTestRunId: string, dto: CreateCommentDto, caller: CommentCaller): Promise<CommentResponse> {
-    const saved = await this.tx(async (em) => {
+    return (await this.createOrReplay(runIdOrTestRunId, dto, caller)).comment;
+  }
+
+  /**
+   * Create a comment, or for an agent repeating a `clientRef` return the comment it already
+   * wrote (`created: false`, answered 200 rather than 201, nothing emitted). An agent's comment
+   * is stamped `author_kind = 'agent'` and `notified_at = now()`, so the channel sweep never
+   * announces it, and is capped per key per run (AGENT_COMMENT_LIMITS).
+   */
+  async createOrReplay(
+    runIdOrTestRunId: string,
+    rawDto: CreateCommentDto,
+    caller: CommentCaller,
+  ): Promise<{ comment: CommentResponse; created: boolean }> {
+    const isAgent = caller.authorKind === 'agent';
+    // Users never send a clientRef; one is ignored rather than refused, so a field a person's
+    // client cannot produce changes nothing for them.
+    const clientRef = isAgent ? (rawDto.clientRef ?? null) : null;
+    const outcome = await this.tx(async (em) => {
       const run = await this.resolveRun(runIdOrTestRunId, caller, em);
+      const dto = await this.applyAnchor(em, run.id, rawDto);
+      if (isAgent) {
+        // One writer per (run, key) at a time: the replay check, the limit count and the insert
+        // below cannot interleave with a retry of the same request.
+        await em.query(`SELECT pg_advisory_xact_lock(hashtextextended('test_run_comments:agent:' || $1 || ':' || $2, 0))`, [
+          run.id,
+          caller.userId,
+        ]);
+        if (clientRef) {
+          const existing = await em.getRepository(TestRunComment).findOne({ where: { testRunId: run.id, authorId: caller.userId, clientRef } });
+          if (existing) return { row: existing, created: false };
+        }
+        const isReply = Boolean(dto.parentId);
+        const counted: { n: number }[] = await em.query(
+          `SELECT count(*)::int AS n FROM test_run_comments
+            WHERE test_run_id = $1 AND author_id = $2 AND parent_id IS ${isReply ? 'NOT ' : ''}NULL`,
+          [run.id, caller.userId],
+        );
+        const limit = isReply ? AGENT_COMMENT_LIMITS.replies : AGENT_COMMENT_LIMITS.roots;
+        if (Number(counted[0]?.n ?? 0) >= limit) {
+          throw new HttpException(
+            `This API key has reached its limit of ${limit} ${isReply ? 'replies' : 'root comments'} on this test run`,
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+      }
+      const row = await this.insertComment(em, run, dto, caller, clientRef);
+      return { row, created: row !== null };
+    });
+    if (outcome.created === false && outcome.row === null) {
+      // Lost a unique-index race on client_ref (insertComment rolled back to its savepoint).
+      const run = await this.resolveRun(runIdOrTestRunId, caller);
+      const existing = await this.em().getRepository(TestRunComment).findOne({ where: { testRunId: run.id, authorId: caller.userId, clientRef: clientRef! } });
+      if (!existing) throw new ConflictException('A comment with this clientRef is being written; retry');
+      return { comment: toResponse(existing), created: false };
+    }
+    const response = toResponse(outcome.row!);
+    if (outcome.created) this.emit('comment:created', outcome.row!, response);
+    return { comment: response, created: outcome.created };
+  }
+
+  /**
+   * A reply addressed by its root's id: the run and card come from the root, which must be one
+   * the caller can read (else 404). The usual reply rules then apply in createOrReplay.
+   */
+  async replyTo(
+    rootId: string,
+    dto: { body: string; clientRef?: string },
+    caller: CommentCaller,
+  ): Promise<{ comment: CommentResponse; created: boolean }> {
+    const root = await this.loadComment(rootId, caller);
+    if (root.parentId) throw new BadRequestException('Reply to the root comment; threads are one level deep');
+    return this.createOrReplay(
+      root.testRunId,
+      { card: root.cardKey as CreateCommentDto['card'], parentId: root.id, body: dto.body, clientRef: dto.clientRef },
+      caller,
+    );
+  }
+
+  /**
+   * Resolve `anchor` into the fields a web client would have sent, after checking it is used
+   * alone. Without an anchor the DTO is returned as it came, with its card required.
+   */
+  private async applyAnchor(em: EntityManager, runUuid: string, dto: CreateCommentDto): Promise<CreateCommentDto> {
+    if (!dto.anchor) {
+      if (!dto.card) throw new BadRequestException('card is required without an anchor');
+      return dto;
+    }
+    if (dto.parentId) throw new BadRequestException('A reply takes its anchor from the root; send anchor only on a root comment');
+    if (dto.itemKey !== undefined || dto.itemLabel !== undefined || dto.markerTime !== undefined || dto.chartContext !== undefined) {
+      throw new BadRequestException('anchor replaces itemKey, itemLabel, markerTime and chartContext; send one or the other');
+    }
+    const anchor = parseAnchor(dto.anchor);
+    const card = anchorCard(anchor);
+    if (dto.card && dto.card !== card) throw new BadRequestException(`anchor.type ${anchor.type} belongs to the ${card} card, not ${dto.card}`);
+    const resolved =
+      anchor.type === 'card'
+        ? { card, itemKey: null, itemLabel: null, markerTime: null, chartContext: null }
+        : await resolveAnchor(em, await loadAnchorRun(em, runUuid), anchor);
+    if (resolved.itemKey && Array.from(resolved.itemKey).length > COMMENT_ITEM_KEY_MAX_LENGTH) {
+      throw new BadRequestException('The anchored item\'s name is too long to anchor a comment');
+    }
+    return {
+      ...dto,
+      card: resolved.card,
+      itemKey: resolved.itemKey ?? undefined,
+      itemLabel: resolved.itemLabel ?? undefined,
+      markerTime: resolved.markerTime ?? undefined,
+      chartContext: resolved.chartContext ?? undefined,
+    };
+  }
+
+  /**
+   * Validate and insert one comment. Returns null only when an agent's insert lost the
+   * `uq_test_run_comments_client_ref` race, rolled back to a savepoint so the request's
+   * transaction survives (a failed INSERT would otherwise abort it, 25P02).
+   */
+  // audit-skip: user or agent discussion, not configuration; the row records its author, kind and time itself
+  private async insertComment(
+    em: EntityManager,
+    run: RunOwner,
+    dto: CreateCommentDto,
+    caller: CommentCaller,
+    clientRef: string | null,
+  ): Promise<TestRunComment | null> {
       if (dto.parentId && dto.itemKey) {
         throw new BadRequestException('A reply takes its anchor from the root; send itemKey only on a root comment');
+      }
+      if (dto.parentId && dto.tag) {
+        throw new BadRequestException('Only a root comment takes a tag; a reply discusses its root');
       }
       if (Boolean(dto.itemKey) !== Boolean(dto.itemLabel)) {
         throw new BadRequestException('itemKey and itemLabel go together');
@@ -165,6 +336,10 @@ export class CommentsService {
         // @IsISO8601 accepts forms Date cannot read (week dates such as 2026-W01): refuse them
         // here rather than let the INSERT fail with a 500 inside the request transaction.
         if (Number.isNaN(Date.parse(dto.markerTime!))) throw new BadRequestException('markerTime must be a readable timestamp');
+      }
+      if (dto.card === 'config' && dto.chartContext && !dto.parentId && !dto.itemKey) {
+        // A Configuration view is one item's comparison; a card-level comment has none to record.
+        throw new BadRequestException('A Configuration view belongs to a comment on a configuration item');
       }
       const chartContext = dto.chartContext ? validateChartContext(dto.card, dto.parentId, dto.chartContext) : null;
       if (dto.parentId) {
@@ -193,37 +368,63 @@ export class CommentsService {
         markerSeq = Number(next!.seq);
       }
       const repo = em.getRepository(TestRunComment);
-      return repo.save(
-        repo.create({
-          testRunId: run.id,
-          cardKey: dto.card,
-          parentId: dto.parentId ?? null,
-          itemKey: dto.itemKey ?? null,
-          itemLabel: dto.itemLabel ?? null,
-          markerSeq,
-          markerTime: isMarker ? new Date(dto.markerTime!) : null,
-          chartContext,
-          body: dto.body,
-          authorId: caller.userId,
-          authorName: (caller.displayName || caller.userId).slice(0, 255),
-          organizationId: run.organizationId,
-          teamId: run.teamId,
-        }),
-      );
-    });
-    const response = toResponse(saved);
-    this.emit('comment:created', saved, response);
-    return response;
+      const isAgent = caller.authorKind === 'agent';
+      const row = repo.create({
+        testRunId: run.id,
+        cardKey: dto.card,
+        parentId: dto.parentId ?? null,
+        itemKey: dto.itemKey ?? null,
+        itemLabel: dto.itemLabel ?? null,
+        markerSeq,
+        markerTime: isMarker ? new Date(dto.markerTime!) : null,
+        chartContext,
+        tag: dto.tag ?? null,
+        body: dto.body,
+        authorId: caller.userId,
+        // Server-set from the principal, never from the request: an agent is named by its key.
+        authorName: (caller.displayName || caller.userId).slice(0, 255),
+        authorKind: isAgent ? 'agent' : 'user',
+        clientRef,
+        // No per-comment channel post for an agent (design: "Retries, limits and notifications").
+        notifiedAt: isAgent ? new Date() : null,
+        organizationId: run.organizationId,
+        teamId: run.teamId,
+      });
+      if (!clientRef) return repo.save(row);
+      // The advisory lock in createOrReplay makes this unreachable through this service; the
+      // savepoint still keeps a unique violation from aborting the request's transaction.
+      await em.query('SAVEPOINT comment_client_ref');
+      try {
+        const saved = await repo.save(row);
+        await em.query('RELEASE SAVEPOINT comment_client_ref');
+        return saved;
+      } catch (err) {
+        await em.query('ROLLBACK TO SAVEPOINT comment_client_ref');
+        if (isClientRefConflict(err)) return null;
+        throw err;
+      }
   }
 
-  // audit-skip: author-only text edit of their own comment; the row carries edited_at
-  async update(id: string, body: string, caller: CommentCaller): Promise<CommentResponse> {
+  /**
+   * Author-only edit of the text and/or the tag (design R5; tags design). An absent field is left
+   * alone and `tag: null` clears the tag. Only a text change sets `editedAt`: "(edited)" is about
+   * the text, so retagging a comment does not mark it edited.
+   */
+  // audit-skip: author-only edit of their own comment; the row carries edited_at
+  async update(id: string, dto: UpdateCommentDto, caller: CommentCaller): Promise<CommentResponse> {
+    if (dto.body === undefined && dto.tag === undefined) throw new BadRequestException('Send body, tag or both');
     const saved = await this.tx(async (em) => {
       const comment = await this.loadComment(id, caller, em, true);
       if (comment.deletedAt) throw new NotFoundException('Comment not found');
       if (comment.authorId !== caller.userId) throw new ForbiddenException('Only the author can edit a comment');
-      comment.body = body;
-      comment.editedAt = new Date();
+      if (dto.tag && comment.parentId) {
+        throw new BadRequestException('Only a root comment takes a tag; a reply discusses its root');
+      }
+      if (dto.body !== undefined && dto.body !== comment.body) {
+        comment.body = dto.body;
+        comment.editedAt = new Date();
+      }
+      if (dto.tag !== undefined) comment.tag = dto.tag;
       return em.getRepository(TestRunComment).save(comment);
     });
     const response = toResponse(saved);
@@ -231,9 +432,15 @@ export class CommentsService {
     return response;
   }
 
+  private async isStoryStep(em: EntityManager, commentId: string): Promise<boolean> {
+    const rows: unknown[] = await em.query(`SELECT 1 FROM test_run_story_steps WHERE comment_id = $1 LIMIT 1`, [commentId]);
+    return rows.length > 0;
+  }
+
   /**
-   * Delete rule: a marker root or a root with replies is soft-deleted (body wiped, number and
-   * thread kept); a plain root and any reply are hard-deleted.
+   * Delete rule: a marker root, a root with replies, or a root that is a step of any story is
+   * soft-deleted (body wiped, number, tag and thread kept); a plain root and any reply are
+   * hard-deleted.
    */
   async remove(id: string, caller: CommentCaller): Promise<void> {
     const outcome = await this.tx(async (em) => {
@@ -248,7 +455,12 @@ export class CommentsService {
       const repo = em.getRepository(TestRunComment);
       this.auditService.logDelete(comment as unknown as OwnedResource, { organizationIdOverride: comment.organizationId });
       const hasReplies = !comment.parentId && (await repo.count({ where: { parentId: comment.id } })) > 0;
-      if (comment.markerSeq !== null || hasReplies) {
+      // A step of any story (drafts included, whoever wrote them) keeps its row, so the story keeps
+      // its shape and the step reads "comment deleted". The FK on test_run_story_steps.comment_id
+      // is NO ACTION as a backstop; this is the rule. A concurrent step insert holds FOR SHARE on
+      // this row, so this count runs after it committed.
+      const inStory = !comment.parentId && (await this.isStoryStep(em, comment.id));
+      if (comment.markerSeq !== null || hasReplies || inStory) {
         comment.deletedAt = new Date();
         comment.body = '';
         // The recorded view is the author's content too; the greyed pin needs only marker_seq/time.
@@ -322,11 +534,11 @@ export class CommentsService {
 /**
  * Check a comment's recorded view against its card's shape and return what to store: the
  * validated, whitelisted fields plus `kind` (the card), stamped here rather than trusted from
- * the body. Only Graphs, Trends and Compare roots record a view.
+ * the body. Only Graphs, Trends and Compare roots, and Configuration item roots, record a view.
  */
 export function validateChartContext(card: string, parentId: string | undefined, raw: Record<string, unknown>): Record<string, unknown> {
   const cls = (CHART_CONTEXT_DTO_BY_CARD as Record<string, new () => object>)[card];
-  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends or Compare records a view');
+  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends, Compare or a Configuration item records a view');
   if (Buffer.byteLength(JSON.stringify(raw)) > CHART_CONTEXT_MAX_BYTES) throw new BadRequestException('chartContext is too large');
   const view = plainToInstance(cls, raw);
   const errors = validateSync(view, { whitelist: true });
@@ -359,9 +571,12 @@ export function toResponse(row: TestRunComment): CommentResponse {
     deleted,
     authorId: row.authorId,
     authorName: row.authorName,
+    authorKind: row.authorKind === 'agent' ? 'agent' : 'user',
     markerSeq: row.markerSeq ?? null,
     markerTime: row.markerTime ? new Date(row.markerTime).toISOString() : null,
     chartContext: deleted ? null : (row.chartContext ?? null),
+    // Kept on a deleted comment: a story step still reads "Root cause · comment deleted".
+    tag: row.tag ?? null,
     createdAt: new Date(row.createdAt).toISOString(),
     editedAt: row.editedAt ? new Date(row.editedAt).toISOString() : null,
   };

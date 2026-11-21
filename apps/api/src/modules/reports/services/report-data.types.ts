@@ -600,6 +600,8 @@ export interface ReportCommentRow {
   parentId: string | null;
   body: string;
   authorName: string;
+  /** `agent` when an AI agent wrote it through an API key (migration 1831); printed as an AI chip. */
+  authorKind?: 'user' | 'agent';
   itemLabel: string | null;
   markerSeq: number | null;
   markerTime: Date | null;
@@ -607,4 +609,33 @@ export interface ReportCommentRow {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
+  /** A root's tag key (`COMMENT_TAGS`, migration 1829); kept on a soft-deleted root. */
+  tag: string | null;
+}
+
+/** One step of a published analysis story, as the Comments section's `stories` layout reads it. */
+export interface ReportStoryStep {
+  /** 1-based, dense. */
+  position: number;
+  /** The story author's connecting words for this step. */
+  note: string | null;
+  /**
+   * The step's root comment (soft-deleted roots included, body wiped). Null when the row is not
+   * readable as this run's: a comment of another run or organization never prints.
+   */
+  comment: ReportCommentRow | null;
+}
+
+/** One published `test_run_stories` row with its steps in order (migration 1830). */
+export interface ReportStory {
+  id: string;
+  title: string;
+  summary: string | null;
+  authorName: string;
+  /** `agent` for an AI agent's investigation (migration 1833); printed as "proposed by <agent> [AI]". */
+  authorKind: 'user' | 'agent';
+  /** Who published it; for an agent's investigation, the person who reviewed it. */
+  publishedByName: string | null;
+  publishedAt: Date | null;
+  steps: ReportStoryStep[];
 }

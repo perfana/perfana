@@ -15,6 +15,7 @@ jest.mock('../../../comments/CommentsContext', () => ({ useComments: () => ctx }
 const series = (id: string) => ({ id, dashboardId: 'd', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: id, source: 'grafana' as const });
 const week = TIME_RANGE_OPTIONS[3];
 const requestKey = (id: string) => `comment:${id}:1`;
+const restoreKey = (n: number) => `restore:trends:${n}`;
 const custom = TIME_RANGE_OPTIONS.find((o) => o.label === 'Custom')!;
 
 function trendsData(over: Record<string, unknown> = {}) {
@@ -109,5 +110,33 @@ describe('useTrendsCommentView', () => {
     expect(d.setAddedSeries!).toHaveBeenLastCalledWith([expect.objectContaining({ metricName: 'used' })]);
     expect(d.handleTimeRangeChange!).toHaveBeenLastCalledWith(week);
     expect(d.handleEvaluateTypeChange!).toHaveBeenLastCalledWith('avg');
+  });
+
+  // Stories design, "View preservation": a story step replays silently, and its Exit can put back an
+  // empty chart without touching the range or the aggregation.
+  it('replays a silent request without the Undo toast, and clears the series for the empty restore view', () => {
+    const data = trendsData();
+    const showToast = jest.fn();
+    ctx.viewRequest = {
+      card: 'trends',
+      key: requestKey('c3'),
+      silent: true,
+      comment: { id: 'c3', cardKey: 'trends', chartContext: { kind: 'trends', series: [series('rt')], timeRange: 'Last month', evaluateType: 'p99' } } as unknown as RunComment,
+    };
+    const { rerender } = renderHook(() => useTrendsCommentView(data, showToast));
+    const d = data as unknown as Record<string, jest.Mock>;
+    expect(d.setAddedSeries!).toHaveBeenCalledTimes(1);
+    expect(showToast).not.toHaveBeenCalled();
+
+    ctx.viewRequest = {
+      card: 'trends',
+      key: restoreKey(2),
+      silent: true,
+      comment: { id: 'restore-2', cardKey: 'trends', chartContext: { kind: 'trends', series: [], timeRange: '', evaluateType: '' } } as unknown as RunComment,
+    };
+    rerender();
+    expect(d.setAddedSeries!).toHaveBeenLastCalledWith([]);
+    expect(d.handleEvaluateTypeChange!).toHaveBeenCalledTimes(1);
+    expect(showToast).not.toHaveBeenCalled();
   });
 });

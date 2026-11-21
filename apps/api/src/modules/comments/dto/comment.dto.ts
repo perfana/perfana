@@ -13,6 +13,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -21,8 +22,17 @@ import { CompareSeriesConfig } from '../../compare-presets/dto/create-compare-pr
 import {
   COMMENT_BODY_MAX_LENGTH,
   COMMENT_CARD_KEYS,
+  CONFIG_VIEW_VALUE_MAX_LENGTH,
+  COMMENT_TAGS,
+  COMMENT_CLIENT_REF_MAX_LENGTH,
+  type CommentAuthorKind,
   type CommentCardKey,
+  type CommentTag,
 } from '@perfana/shared/constants/comment-cards';
+
+const TAG_DESCRIPTION =
+  'What the root comment is in an analysis: symptom, hypothesis, evidence, ruled-out, root-cause or action. ' +
+  'Roots only (a tag on a reply is a 400).';
 
 /** Most series a marker records; mirrors the web's LINK_WILDCARD_MAX_SERIES. */
 export const MARKER_MAX_SERIES = 50;
@@ -123,15 +133,47 @@ export class CompareChartContextDto {
   baselineTestRunId?: string;
 }
 
+/**
+ * What a Configuration item comment was written against: the run the card compared with and
+ * the item's status and values in that comparison, so the comment stays readable after the
+ * comparison moves on. Values are null when the key is absent from that side.
+ */
+export class ConfigChartContextDto {
+  @ApiPropertyOptional({ description: 'The run the card compared with; absent = none picked', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  comparedToTestRunId?: string;
+
+  @ApiProperty({ enum: ['changed', 'expected', 'new', 'removed', 'same'] })
+  @IsIn(['changed', 'expected', 'new', 'removed', 'same'])
+  status!: 'changed' | 'expected' | 'new' | 'removed' | 'same';
+
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: CONFIG_VIEW_VALUE_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @Length(0, CONFIG_VIEW_VALUE_MAX_LENGTH)
+  currentValue?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: CONFIG_VIEW_VALUE_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @Length(0, CONFIG_VIEW_VALUE_MAX_LENGTH)
+  previousValue?: string | null;
+}
+
 /** Which view shape a card's comments record. Other cards record none. */
 export const CHART_CONTEXT_DTO_BY_CARD = {
   graphs: ChartContextDto,
   trends: TrendsChartContextDto,
   compare: CompareChartContextDto,
+  config: ConfigChartContextDto,
 } as const;
 
 export class CreateCommentDto {
-  @ApiProperty({ enum: COMMENT_CARD_KEYS, description: 'The card the comment belongs to' })
+  @ApiPropertyOptional({ enum: COMMENT_CARD_KEYS, description: 'The card the comment belongs to. Required unless `anchor` names it.' })
+  // Optional only with an anchor, which implies its card; the service checks the two agree.
+  @ValidateIf((o: CreateCommentDto) => o.anchor === undefined || o.card !== undefined)
   @IsIn(COMMENT_CARD_KEYS as string[])
   card!: CommentCardKey;
 
@@ -167,21 +209,79 @@ export class CreateCommentDto {
 
   @ApiPropertyOptional({
     description:
-      "The card's view when the comment was written (Graphs, Trends, Compare roots only; required with markerTime). " +
-      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto or CompareChartContextDto. ' +
+      "The card's view when the comment was written (Graphs, Trends and Compare roots, and Configuration item roots; required with markerTime). " +
+      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto, CompareChartContextDto or ConfigChartContextDto. ' +
       'Validated by the service against that class, because one nested type here would have the whitelist strip the other cards\' fields.',
   })
   @IsOptional()
   @IsObject()
   chartContext?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ enum: COMMENT_TAGS, nullable: true, description: `${TAG_DESCRIPTION} Absent or null = untagged.` })
+  @IsOptional()
+  @IsIn(COMMENT_TAGS as readonly string[] as string[])
+  tag?: CommentTag | null;
+
+  @ApiPropertyOptional({
+    description:
+      'What a root comment is about, named rather than keyed: the API resolves it into the card, item key, label and ' +
+      'recorded view, and answers 400 naming anything not found in the run. One of ' +
+      "`{type:'card',card}`, `{type:'transaction',name,scenario?}`, `{type:'config',key,comparedToTestRunId?}`, " +
+      "`{type:'dashboard',applicationDashboardId}`, `{type:'slo',checkResultId}`, " +
+      "`{type:'marker',time,series:[{dashboardLabel,panelId,metricName,applicationDashboardId?}],range?}`. " +
+      'Not allowed with itemKey, itemLabel, markerTime, chartContext or parentId.',
+  })
+  @IsOptional()
+  @IsObject()
+  anchor?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description:
+      'Idempotency key, for API keys with the comments:write role: a repeat with the same value on the same run ' +
+      'returns the first comment (200) instead of a second one. Ignored for signed-in users.',
+    maxLength: COMMENT_CLIENT_REF_MAX_LENGTH,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, COMMENT_CLIENT_REF_MAX_LENGTH)
+  clientRef?: string;
 }
 
-/** Only the body is editable (design R5); any other key is stripped by the global ValidationPipe. */
+/**
+ * The author's own text and tag (design R5, grown by the tags design); any other key is stripped
+ * by the global ValidationPipe. At least one of the two must be sent. An absent key leaves the
+ * stored value alone; `tag: null` clears the tag, `body: null` is refused.
+ */
 export class UpdateCommentDto {
+  @ApiPropertyOptional({ minLength: 1, maxLength: COMMENT_BODY_MAX_LENGTH, description: 'New text; sets editedAt.' })
+  // ValidateIf rather than IsOptional: IsOptional would also let an explicit null through.
+  @ValidateIf((o: UpdateCommentDto) => o.body !== undefined)
+  @IsString()
+  @Length(1, COMMENT_BODY_MAX_LENGTH)
+  body?: string;
+
+  @ApiPropertyOptional({
+    enum: COMMENT_TAGS,
+    nullable: true,
+    description: `${TAG_DESCRIPTION} null clears it. A tag-only change does not set editedAt: "(edited)" is about the text.`,
+  })
+  @IsOptional()
+  @IsIn(COMMENT_TAGS as readonly string[] as string[])
+  tag?: CommentTag | null;
+}
+
+/** A reply addressed by its root's id (`POST /comments/:id/replies`). */
+export class ReplyCommentDto {
   @ApiProperty({ minLength: 1, maxLength: COMMENT_BODY_MAX_LENGTH })
   @IsString()
   @Length(1, COMMENT_BODY_MAX_LENGTH)
   body!: string;
+
+  @ApiPropertyOptional({ description: 'Idempotency key, for API keys; ignored for signed-in users', maxLength: COMMENT_CLIENT_REF_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @Length(1, COMMENT_CLIENT_REF_MAX_LENGTH)
+  clientRef?: string;
 }
 
 export class MarkSeenDto {
@@ -203,13 +303,22 @@ export interface CommentResponse {
   deleted: boolean;
   authorId: string;
   authorName: string;
+  /** `agent` when an API key with the comments:write role wrote it; the UI shows an AI chip. */
+  authorKind: CommentAuthorKind;
   markerSeq: number | null;
   markerTime: string | null;
   chartContext: Record<string, unknown> | null;
+  /** A root's tag; null when untagged and on every reply. Kept when the comment is deleted. */
+  tag: CommentTag | null;
   createdAt: string;
   editedAt: string | null;
 }
 
 export interface CommentThreadResponse extends CommentResponse {
   replies: CommentResponse[];
+  /**
+   * The stories this root is a step of, among those the caller can see (published, or their own
+   * drafts); absent when none. Lets the drawer name them before a delete.
+   */
+  stories?: { id: string; title: string; position: number }[];
 }

@@ -1,3 +1,4 @@
+import { API_KEY_COMMENTS_WRITE_ROLE } from '@perfana/shared/constants/comment-cards';
 import { Injectable, Logger, ForbiddenException, ConflictException } from '@nestjs/common';
 import { In } from 'typeorm';
 import { ResourceNotFoundException, ValidationException, DatabaseException } from '../../common/exceptions/business.exception';
@@ -469,7 +470,10 @@ export class ApiKeysService {
     if (isGlobalAdmin) return;
 
     const safeCreatorRoles = creatorRoles ?? [];
-    const disallowed = requestedRoles.filter(r => !safeCreatorRoles.includes(r));
+    // `comments:write` is a scope, not a role a person holds: it maps to no capability and lets
+    // a key do only what its creator can already do on their own runs (write comments), so any
+    // user who may create a key may opt into it (design: test-run-analysis-stories.md, "MCP").
+    const disallowed = requestedRoles.filter(r => r !== API_KEY_COMMENTS_WRITE_ROLE && !safeCreatorRoles.includes(r));
     if (disallowed.length > 0) {
       throw new ValidationException(
         `Cannot assign roles you do not have: ${disallowed.join(', ')}`

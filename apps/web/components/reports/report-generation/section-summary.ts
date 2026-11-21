@@ -96,6 +96,7 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
     }
     case 'comments': {
       const cfg = (section.config ?? {}) as CommentsConfig;
+      if (cfg.layout === 'stories') return ['Investigations', text].filter(Boolean).join(' · ');
       const cards = Array.isArray(cfg.cards)
         ? cfg.cards.map((c) => (COMMENT_CARD_LABELS as Record<string, string>)[c]).filter(Boolean)
         : [];

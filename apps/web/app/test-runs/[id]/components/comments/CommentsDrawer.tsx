@@ -18,7 +18,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { COMMENT_BODY_MAX_LENGTH, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_BODY_MAX_LENGTH, describeConfigCommentView, type CommentCardKey, type CommentTag } from '@perfana/shared/constants/comment-cards';
 import { useAuth } from '@/contexts/auth-context';
 import {
   deleteComment,
@@ -35,6 +35,12 @@ import {
 } from '@/lib/test-run-comments';
 import { CONTROL_GROUP_BASELINE } from '@/lib/control-group-baseline';
 import { CARD_LABELS, useComments, type MarkerDraft } from './CommentsContext';
+import { CommentTagChip } from './CommentTagChip';
+import { CommentTagPicker } from './CommentTagPicker';
+import { AddToStoryMenu } from '../stories/AddToStoryMenu';
+import { useOpenStory } from '../stories/StoriesPanel';
+import { StoryChips } from './run-comments/CommentRow';
+import CommentAuthor from './CommentAuthor';
 
 /** Cards whose single thread opens (and focuses its item) as soon as the comments open. */
 const AUTO_OPEN_SINGLE_THREAD = new Set<CommentCardKey>(['distributed-tracing']);
@@ -50,6 +56,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 
 
 /** One line saying what view a comment recorded, shown beside its "Restore view". */
 export function describeView(view: CommentView, marker: boolean): string {
+  if (view.kind === 'config') return describeConfigCommentView(view);
   const n = `${view.series.length} series`;
   if (view.kind === 'trends') {
     const dates = view.customRange ? `${day(view.customRange[0])}–${day(view.customRange[1])}` : null;
@@ -69,6 +76,8 @@ function Composer({
   submitLabel,
   initial = '',
   autoFocus,
+  withTag,
+  initialTag = null,
   onSubmit,
   onCancel,
 }: {
@@ -76,10 +85,14 @@ function Composer({
   submitLabel: string;
   initial?: string;
   autoFocus?: boolean;
-  onSubmit: (body: string) => Promise<void>;
+  /** Offer the analysis tag picker: new roots, and a root's edit mode. Never a reply. */
+  withTag?: boolean;
+  initialTag?: CommentTag | null;
+  onSubmit: (body: string, tag: CommentTag | null) => Promise<void>;
   onCancel?: () => void;
 }) {
   const [text, setText] = useState(initial);
+  const [tag, setTag] = useState<CommentTag | null>(initialTag);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const trimmed = text.trim();
@@ -88,8 +101,9 @@ function Composer({
     setBusy(true);
     setError(null);
     try {
-      await onSubmit(trimmed);
+      await onSubmit(trimmed, withTag ? tag : null);
       setText('');
+      setTag(initialTag);
     } catch (e) {
       setError(errorText(e)); // the text stays in the box
     } finally {
@@ -119,6 +133,7 @@ function Composer({
         inputProps={{ maxLength: COMMENT_BODY_MAX_LENGTH, 'aria-label': placeholder }}
       />
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.75 }}>
+        {withTag && <CommentTagPicker value={tag} onChange={setTag} disabled={busy} />}
         {error && (
           <Typography variant="caption" color="error" sx={{ flex: 1 }} role="alert">
             Not posted: {error}
@@ -148,15 +163,21 @@ function CommentItem({
   isNew,
   mine,
   canDelete,
+  taggable,
+  stories,
   onEdit,
   onDelete,
 }: {
   comment: RunComment;
+  /** The stories a root is a step of (the delete confirmation names them). */
+  stories?: { id: string; title: string; position: number }[];
   isNew: boolean;
   mine: boolean;
   /** Author, or an organization admin moderating someone else's comment. */
   canDelete: boolean;
-  onEdit: (body: string) => Promise<void>;
+  /** A root: its edit mode also edits the tag (author only, like the text). */
+  taggable?: boolean;
+  onEdit: (body: string, tag: CommentTag | null) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -175,7 +196,7 @@ function CommentItem({
       <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
         {isNew && <Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0, alignSelf: 'center' }} />}
         {isNew && <Box component="span" sx={visuallyHidden}>unread</Box>}
-        <Typography variant="body2" sx={{ fontWeight: isNew ? 600 : 500 }}>{comment.authorName}</Typography>
+        <CommentAuthor name={comment.authorName} kind={comment.authorKind} sx={{ fontWeight: isNew ? 600 : 500 }} />
         <Tooltip title={new Date(comment.createdAt).toLocaleString()}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: isNew ? 600 : 400 }}>
             {formatCommentTime(comment.createdAt)}
@@ -190,8 +211,10 @@ function CommentItem({
             submitLabel="Save"
             initial={comment.body ?? ''}
             autoFocus
-            onSubmit={async (body) => {
-              await onEdit(body);
+            withTag={taggable}
+            initialTag={comment.tag}
+            onSubmit={async (body, tag) => {
+              await onEdit(body, tag);
               setEditing(false);
             }}
             onCancel={() => setEditing(false)}
@@ -206,7 +229,11 @@ function CommentItem({
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mt: 0.25 }}>
           {confirming ? (
             <>
-              <Typography variant="caption">Delete this comment?</Typography>
+              <Typography variant="caption" data-testid="comment-delete-confirm">
+                {stories && stories.length > 0
+                  ? `Delete this comment? It is ${stories.map((st) => `step ${st.position} of the investigation “${st.title}”`).join(', ')}; ${stories.length === 1 ? 'the investigation keeps' : 'they keep'} the step as “comment deleted”.`
+                  : 'Delete this comment?'}
+              </Typography>
               <Button size="small" color="error" onClick={() => onDelete().catch((e) => { setError(errorText(e)); setConfirming(false); })}>
                 Delete
               </Button>
@@ -240,7 +267,7 @@ function MarkerComposer({
   runStart?: string | null;
   onMove: (time: string) => void;
   onCancel: () => void;
-  onSubmit: (body: string) => Promise<void>;
+  onSubmit: (body: string, tag: CommentTag | null) => Promise<void>;
 }) {
   const i = draft.steps.indexOf(draft.time);
   const at = formatMarkerTime(draft.time, runStart);
@@ -259,7 +286,22 @@ function MarkerComposer({
       <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
         Click the chart to move it.
       </Typography>
-      <Composer placeholder={`Describe what happens at ${at}…`} submitLabel="Place marker" autoFocus onSubmit={onSubmit} onCancel={onCancel} />
+      <Composer placeholder={`Describe what happens at ${at}…`} submitLabel="Place marker" autoFocus withTag onSubmit={onSubmit} onCancel={onCancel} />
+    </Box>
+  );
+}
+
+/** What view a root recorded, with its "Restore view". Nothing for a deleted root or one without a view. */
+function ViewLine({ thread, onRestore }: { thread: RunCommentThread; onRestore: () => void }) {
+  if (!thread.chartContext || thread.deleted) return null;
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }} data-testid={`comment-view-${thread.id}`}>
+      <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+        {describeView(thread.chartContext, thread.markerSeq != null)}
+      </Typography>
+      <Button size="small" onClick={onRestore} sx={{ flexShrink: 0 }}>
+        Restore view
+      </Button>
     </Box>
   );
 }
@@ -283,6 +325,7 @@ const visuallyHidden = {
  */
 export default function CommentsDrawer() {
   const ctx = useComments();
+  const openStory = useOpenStory();
   const { user } = useAuth();
   const me = user?.id ?? '';
   const card = ctx?.openCard ?? null;
@@ -365,6 +408,25 @@ export default function CommentsDrawer() {
     load();
     setTimeout(() => titleRef.current?.focus(), 50);
   }, [card, load]);
+
+  // An investigation was created, edited or deleted (here, in the Comments dialog, or by someone
+  // else): refresh which investigations each thread is in, quietly, without reloading the list,
+  // collapsing the open thread or marking anything seen.
+  const storySeq = ctx?.storyEvent?.seq;
+  useEffect(() => {
+    if (!card || storySeq === undefined) return;
+    let cancelled = false;
+    fetchCommentThreads(runId, card)
+      .then((res) => {
+        if (cancelled) return;
+        const byId = new Map(res.threads.map((t) => [t.id, t.stories]));
+        setThreads((prev) => prev?.map((t) => (byId.has(t.id) ? { ...t, stories: byId.get(t.id) } : t)) ?? prev);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [card, runId, storySeq]);
 
   // Apply live events for this card.
   const lastEvent = ctx?.lastEvent;
@@ -481,10 +543,10 @@ export default function CommentsDrawer() {
             runStart={runStart}
             onMove={ctx.moveMarker}
             onCancel={ctx.cancelMarker}
-            onSubmit={async (body) => {
+            onSubmit={async (body, tag) => {
               let c: RunComment;
               try {
-                c = await postMarker(runId, body, draft.time, draft.capture());
+                c = await postMarker(runId, body, draft.time, draft.capture(), tag);
               } catch (e) {
                 // An older API saved it as a plain comment: list it, so a retry is not mistaken for a lost post.
                 const saved = (e as { saved?: RunComment }).saved;
@@ -502,19 +564,20 @@ export default function CommentsDrawer() {
           placeholder={anchor ? `Comment on ${anchor.itemLabel}…` : 'New comment on this card…'}
           submitLabel="Comment"
           autoFocus={Boolean(anchor) || threads?.length === 0}
-          onSubmit={async (body) => {
+          withTag
+          onSubmit={async (body, tag) => {
             // The card's view goes with a new root (Graphs, Trends, Compare), so it can be restored.
             // The view is an extra: one that cannot be read, or that the server refuses, never
             // stops the comment itself from posting.
             let view: CommentView | undefined;
             try {
-              view = ctx.captureView(card) ?? undefined;
+              view = ctx.captureView(card, anchor?.itemKey ?? null) ?? undefined;
             } catch {
               view = undefined;
             }
             const where = anchor ? { itemKey: anchor.itemKey, itemLabel: anchor.itemLabel } : undefined;
-            const c = await postComment(runId, card, body, undefined, where, view).catch((e: unknown) => {
-              if (view && e instanceof Error && e.message.includes('chartContext')) return postComment(runId, card, body, undefined, where);
+            const c = await postComment(runId, card, body, undefined, where, view, tag).catch((e: unknown) => {
+              if (view && e instanceof Error && e.message.includes('chartContext')) return postComment(runId, card, body, undefined, where, undefined, tag);
               throw e;
             });
             upsert(c);
@@ -569,10 +632,18 @@ export default function CommentsDrawer() {
                     author, anchor, body, count and time onto one line left room for a few words. */}
                 <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-                    <Typography variant="body2" noWrap sx={{ fontWeight: unreadThread ? 600 : 500, flex: 1, minWidth: 0 }}>{t.authorName}</Typography>
+                    <Box sx={{ flex: 1, minWidth: 0, display: 'flex' }}>
+                      <CommentAuthor name={t.authorName} kind={t.authorKind} noWrap sx={{ fontWeight: unreadThread ? 600 : 500, minWidth: 0 }} />
+                    </Box>
                     <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{formatCommentTime(lastActivity(t))}</Typography>
                     {unreadThread && <Box aria-label="unread" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0 }} />}
                   </Box>
+                  {/* Kept on a deleted root: it still says what the thread was in the analysis. */}
+                  {t.tag && (
+                    <Box>
+                      <CommentTagChip tag={t.tag} />
+                    </Box>
+                  )}
                   {t.markerTime && (
                     <Typography variant="caption" color="primary" component="div" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                       {formatMarkerTime(t.markerTime, runStart)}
@@ -597,26 +668,29 @@ export default function CommentsDrawer() {
                   )}
                 </Box>
               </ButtonBase>
+              {/* Outside the row's button: a chip is a button of its own. It opens the investigation. */}
+              {t.stories && t.stories.length > 0 && (
+                <Box data-testid="drawer-thread-stories" sx={{ px: 1, pb: 0.75, pl: 4.5 }}>
+                  <StoryChips stories={t.stories} onRead={openStory} />
+                </Box>
+              )}
               {open && (
                 <Box sx={{ px: 1, pb: 1.5 }}>
-                  {t.chartContext && !t.deleted && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0 }}>
-                        {describeView(t.chartContext, t.markerSeq != null)}
-                      </Typography>
-                      <Button size="small" onClick={() => ctx.restoreView(t)} sx={{ flexShrink: 0 }}>
-                        Restore view
-                      </Button>
-                    </Box>
-                  )}
+                  {/* A chart view heads its comment; a Configuration comparison is a fact about
+                      the comment, so it sits under it. */}
+                  {t.chartContext?.kind !== 'config' && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
                   <CommentItem
                     comment={t}
                     isNew={isNew(t)}
                     mine={t.authorId === me}
                     canDelete={canModerate || t.authorId === me}
-                    onEdit={async (body) => upsert(await editComment(t.id, body))}
+                    taggable
+                    stories={t.stories}
+                    // The tag goes only when it changed, so a text edit never resends it.
+                    onEdit={async (body, tag) => upsert(await editComment(t.id, body, tag !== t.tag ? tag : undefined))}
                     onDelete={() => remove(t)}
                   />
+                  {t.chartContext?.kind === 'config' && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
                   <Box sx={{ pl: 2, borderLeft: 1, borderColor: 'divider', ml: 0.5 }}>
                     {t.replies.map((r) => (
                       <CommentItem
@@ -637,6 +711,9 @@ export default function CommentsDrawer() {
                         submitLabel="Reply"
                         onSubmit={async (body) => upsert(await postComment(runId, card, body, t.id))}
                       />
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
+                        <AddToStoryMenu commentId={t.id} />
+                      </Box>
                     </Box>
                   )}
                 </Box>

@@ -1,12 +1,16 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { COMMENT_CARD_KEYS } from '@perfana/shared/constants/comment-cards';
+import { API_KEY_COMMENTS_WRITE_ROLE, COMMENT_CARD_KEYS } from '@perfana/shared/constants/comment-cards';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { CommentCaller, CommentsService } from './comments.service';
-import { CreateCommentDto, MarkSeenDto, UpdateCommentDto } from './dto/comment.dto';
+import { CreateCommentDto, MarkSeenDto, ReplyCommentDto, UpdateCommentDto } from './dto/comment.dto';
 import type { CommentResponse, CommentThreadResponse } from './dto/comment.dto';
+import { CreateStoryDto, ReplaceStoryStepsDto, UpdateStoryDto } from './dto/story.dto';
+import type { StoryResponse, StorySummaryResponse } from './dto/story.dto';
+import { StoriesService } from './stories.service';
 
 @ApiTags('Test Run Comments')
 @ApiBearerAuth()
@@ -15,34 +19,51 @@ export class CommentsController {
   constructor(
     private readonly comments: CommentsService,
     private readonly authzService: AuthorizationService,
+    private readonly stories: StoriesService,
   ) {}
 
-  private async caller(ctx: UserContext, write = false): Promise<CommentCaller> {
-    // Comments are human-authored: an API key has no person behind it (design R3).
-    if (write && ctx.userId.startsWith('api-key:')) {
-      throw new ForbiddenException('API keys can read comments but not write them');
+  /**
+   * `write`: `true` refuses every API key (delete, seen and anything not opened to agents);
+   * `'agent'` admits a key that carries the opt-in `comments:write` role (design:
+   * test-run-analysis-stories.md, "Reversing v1 R3, for opted-in keys only"). Such a key writes
+   * as an agent, signed with its description; the role grants nothing outside these routes.
+   */
+  private async caller(ctx: UserContext, write: boolean | 'agent' = false): Promise<CommentCaller> {
+    const isKey = ctx.userId.startsWith('api-key:');
+    if (isKey && write === true) {
+      throw new ForbiddenException('API keys cannot do this: they never delete comments or investigations, mark anything read or publish an investigation');
+    }
+    if (isKey && write === 'agent' && !ctx.roles.includes(API_KEY_COMMENTS_WRITE_ROLE)) {
+      throw new ForbiddenException(
+        `This API key can read comments but not write them: create a key with the ${API_KEY_COMMENTS_WRITE_ROLE} role`,
+      );
     }
     return {
       userId: ctx.userId,
-      displayName: ctx.displayName,
+      displayName: isKey ? ctx.apiKeyDescription : ctx.displayName,
       orgIds: await withOrgFilter(ctx.userId, ctx.roles, this.authzService),
+      ...(isKey ? { authorKind: 'agent' as const } : {}),
     };
   }
 
   @Get('test-runs/:id/comments')
-  @ApiOperation({ summary: 'List comment threads on a test run', description: '`:id` is the run uuid or its test_run_id. Threads are roots with their replies, oldest first. With `card`, `lastSeenAt` is the caller\'s previous look at that card. `canModerate`: the caller may delete other people\'s comments here (organization admin or global admin).' })
+  @ApiOperation({ summary: 'List comment threads on a test run', description: '`:id` is the run uuid or its test_run_id. Threads are roots with their replies, oldest first; each root carries `stories`, the investigations it is a step of that the caller can see. With `card`, `lastSeenAt` is the caller\'s previous look at that card. Without `card` (the whole run), `lastSeenByCard` maps every card to the caller\'s previous look at it (null: never), so a client can mark unread threads with the same rule as the counts. `canModerate`: the caller may delete other people\'s comments here (organization admin or global admin).' })
   @ApiQuery({ name: 'card', required: false, enum: COMMENT_CARD_KEYS })
   @ApiResponse({ status: 404, description: 'Run not found or outside your organizations' })
-  async list(@Param('id') id: string, @UserCtx() ctx: UserContext, @Query('card') card?: string): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; canModerate: boolean }> {
+  async list(
+    @Param('id') id: string,
+    @UserCtx() ctx: UserContext,
+    @Query('card') card?: string,
+  ): Promise<{ threads: CommentThreadResponse[]; lastSeenAt: string | null; lastSeenByCard?: Record<string, string | null>; canModerate: boolean }> {
     return this.comments.listThreads(id, card, await this.caller(ctx));
   }
 
   @Get('test-runs/:id/comments/counts')
   @ApiOperation({
     summary: 'Comment counts per card for the caller',
-    description: '`{ <card>: { total, unread } }`: `total` counts every comment that is not deleted, `unread` those by others since the caller last opened that card\'s comments (last 30 days). Cards without comments are absent.',
+    description: '`{ <card>: { total, unread, unreadAgent } }`: `total` counts every comment that is not deleted, `unread` those by others since the caller last opened that card\'s comments (last 30 days), `unreadAgent` how many of those an AI agent wrote. Cards without comments are absent.',
   })
-  async counts(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<Record<string, { total: number; unread: number }>> {
+  async counts(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<Record<string, { total: number; unread: number; unreadAgent: number }>> {
     return this.comments.counts(id, await this.caller(ctx));
   }
 
@@ -55,11 +76,53 @@ export class CommentsController {
   }
 
   @Post('test-runs/:id/comments')
-  @ApiOperation({ summary: 'Post a comment or a reply' })
-  @ApiResponse({ status: 400, description: 'Invalid card, or the parent is not a live root on the same run and card' })
-  @ApiResponse({ status: 403, description: 'API keys cannot write comments' })
-  async create(@Param('id') id: string, @Body() dto: CreateCommentDto, @UserCtx() ctx: UserContext): Promise<CommentResponse> {
-    return this.comments.create(id, dto, await this.caller(ctx, true));
+  @ApiOperation({
+    summary: 'Post a comment or a reply',
+    description:
+      'A root may carry one `tag` (symptom, hypothesis, evidence, ruled-out, root-cause, action); a reply may not. ' +
+      'A root may name what it is about with `anchor` instead of `itemKey`/`markerTime`/`chartContext`. ' +
+      `An API key needs the ${API_KEY_COMMENTS_WRITE_ROLE} role; its comments are marked as written by an AI agent, ` +
+      'are never announced to notification channels, and are capped at 100 roots and 200 replies per key per run. ' +
+      'A key repeating a `clientRef` gets the comment it already wrote, with 200 instead of 201.',
+  })
+  @ApiResponse({ status: 201, description: 'Created' })
+  @ApiResponse({ status: 200, description: 'An API key repeated a clientRef: the comment it already wrote' })
+  @ApiResponse({ status: 400, description: 'Invalid card or tag, a tag on a reply, the parent is not a live root on the same run and card, or the anchor names something not in the run' })
+  @ApiResponse({ status: 403, description: `An API key without the ${API_KEY_COMMENTS_WRITE_ROLE} role` })
+  @ApiResponse({ status: 429, description: "The API key reached its per-run limit of root comments or replies" })
+  async create(
+    @Param('id') id: string,
+    @Body() dto: CreateCommentDto,
+    @UserCtx() ctx: UserContext,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<CommentResponse> {
+    const { comment, created } = await this.comments.createOrReplay(id, dto, await this.caller(ctx, 'agent'));
+    if (!created) res.status(HttpStatus.OK);
+    return comment;
+  }
+
+  @Post('comments/:id/replies')
+  @ApiOperation({
+    summary: 'Reply to a root comment by its id',
+    description:
+      'The same as posting with `parentId`, for a client that holds only the comment id (the MCP server): the run and ' +
+      'card come from the root. Takes `body` and, for an API key, an optional `clientRef`.',
+  })
+  @ApiResponse({ status: 201, description: 'Created' })
+  @ApiResponse({ status: 200, description: 'An API key repeated a clientRef: the reply it already wrote' })
+  @ApiResponse({ status: 400, description: 'The comment is a reply or deleted' })
+  @ApiResponse({ status: 403, description: `An API key without the ${API_KEY_COMMENTS_WRITE_ROLE} role` })
+  @ApiResponse({ status: 404, description: 'Not found, or outside your organizations' })
+  @ApiResponse({ status: 429, description: 'The API key reached its per-run limit of replies' })
+  async reply(
+    @Param('id') id: string,
+    @Body() dto: ReplyCommentDto,
+    @UserCtx() ctx: UserContext,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<CommentResponse> {
+    const { comment, created } = await this.comments.replyTo(id, dto, await this.caller(ctx, 'agent'));
+    if (!created) res.status(HttpStatus.OK);
+    return comment;
   }
 
   @Put('test-runs/:id/comments/seen')
@@ -70,10 +133,15 @@ export class CommentsController {
   }
 
   @Patch('comments/:id')
-  @ApiOperation({ summary: "Edit a comment's text (author only)" })
+  @ApiOperation({
+    summary: "Edit a comment's text and/or tag (author only)",
+    description: 'Send `body`, `tag` or both; an absent field is left alone and `tag: null` clears the tag. Only a text change sets `editedAt`.',
+  })
+  @ApiResponse({ status: 400, description: 'Neither body nor tag sent, an invalid tag, or a tag on a reply' })
+  @ApiResponse({ status: 403, description: `Not the author, or an API key without the ${API_KEY_COMMENTS_WRITE_ROLE} role` })
   @ApiResponse({ status: 404, description: 'Not found, deleted, or outside your organizations' })
   async update(@Param('id') id: string, @Body() dto: UpdateCommentDto, @UserCtx() ctx: UserContext): Promise<CommentResponse> {
-    return this.comments.update(id, dto.body, await this.caller(ctx, true));
+    return this.comments.update(id, dto, await this.caller(ctx, 'agent'));
   }
 
   @Delete('comments/:id')
@@ -81,5 +149,100 @@ export class CommentsController {
   @ApiOperation({ summary: 'Delete a comment (author, org admin of its organization, or global admin)' })
   async remove(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<void> {
     return this.comments.remove(id, await this.caller(ctx, true));
+  }
+
+  // --- Analysis stories (design: docs/designs/test-run-analysis-stories.md, "Stories") ---
+
+  @Get('test-runs/:id/stories')
+  @ApiTags('Test Run Investigations')
+  @ApiOperation({
+    summary: "List a test run's investigations (stored as analysis stories)",
+    description: "`:id` is the run uuid or its test_run_id. Published investigations, AI agents' drafts (`authorKind: 'agent'`, visible to everyone who can see the run) and the caller's own drafts, oldest first, without steps. `canEdit` / `canDelete` say what the caller may do with each; `publishedByName` names who published it; `unread` whether it is new to the caller (published or, an AI agent's draft, changed by the agent since they last opened it, within 30 days; never for its author or an API key).",
+  })
+  @ApiResponse({ status: 404, description: 'Run not found or outside your organizations' })
+  async listStories(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<StorySummaryResponse[]> {
+    return this.stories.list(id, await this.caller(ctx));
+  }
+
+  @Get('stories/:id')
+  @ApiTags('Test Run Investigations')
+  @ApiOperation({
+    summary: 'Read one investigation with its steps',
+    description: 'Each step carries its comment as it reads now: the redacted shape (`deleted: true`, no body) when the comment was deleted, with its tag kept.',
+  })
+  @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
+  async getStory(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
+    return this.stories.get(id, await this.caller(ctx));
+  }
+
+  @Put('stories/:id/seen')
+  @ApiTags('Test Run Investigations')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Mark an investigation as read by the caller',
+    description: 'The reader calls it when the investigation opens. It is then read until it is published again, its steps change while published, or (an AI agent\'s draft) the agent changes it.',
+  })
+  @ApiResponse({ status: 403, description: 'An API key: an agent has no unread state' })
+  @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
+  async storySeen(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<void> {
+    return this.stories.markSeen(id, await this.caller(ctx, true));
+  }
+
+  @Post('test-runs/:id/stories')
+  @ApiTags('Test Run Investigations')
+  @ApiOperation({
+    summary: 'Start an investigation (a draft)',
+    description:
+      'Optionally with initial steps. Each step is a live root comment on the same run (any author), at most once; at most 50 steps. ' +
+      `An API key needs the ${API_KEY_COMMENTS_WRITE_ROLE} role; its investigation is an AI draft, visible to everyone who can see the run, ` +
+      'which any user may edit, publish or delete. A key may create at most 10 investigations per run.',
+  })
+  @ApiResponse({ status: 400, description: 'Empty title, more than 50 steps, or a step that is a reply, on another run, deleted or repeated' })
+  @ApiResponse({ status: 403, description: `An API key without the ${API_KEY_COMMENTS_WRITE_ROLE} role` })
+  @ApiResponse({ status: 404, description: 'Run not found or outside your organizations' })
+  @ApiResponse({ status: 429, description: 'The API key reached its limit of 10 investigations on this run' })
+  async createStory(@Param('id') id: string, @Body() dto: CreateStoryDto, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
+    return this.stories.create(id, dto, await this.caller(ctx, 'agent'));
+  }
+
+  @Patch('stories/:id')
+  @ApiTags('Test Run Investigations')
+  @ApiOperation({
+    summary: "Edit an investigation's title, summary or status",
+    description:
+      "An absent field is left alone; `summary: null` clears it. `status: 'published'` publishes (refused with no steps; `publishedAt` is set on the first publish and kept on unpublish, `publishedBy*` on every publish), `status: 'draft'` unpublishes. " +
+      "The author may edit; any user may edit and publish an AI agent's draft, and its publisher keeps it after publishing. " +
+      `An API key with ${API_KEY_COMMENTS_WRITE_ROLE} may change the title and summary of its own draft only, and never sends status.`,
+  })
+  @ApiResponse({ status: 400, description: 'Nothing sent, an empty title, or publishing an investigation with no steps' })
+  @ApiResponse({ status: 403, description: 'Not allowed to edit it, an API key sending status or editing a published investigation, or a key without the role' })
+  @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
+  async updateStory(@Param('id') id: string, @Body() dto: UpdateStoryDto, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
+    return this.stories.update(id, dto, await this.caller(ctx, 'agent'));
+  }
+
+  @Put('stories/:id/steps')
+  @ApiTags('Test Run Investigations')
+  @ApiOperation({
+    summary: "Replace an investigation's steps",
+    description:
+      '`{ steps: [{ commentId, note? }] }` is the full ordered list and replaces every step in one transaction: reorder, add and remove are all this call. A comment already in the investigation may stay after it was deleted; a newly added one must be live. ' +
+      `Who may: as for PATCH; an API key with ${API_KEY_COMMENTS_WRITE_ROLE} only on its own draft.`,
+  })
+  @ApiResponse({ status: 400, description: 'More than 50 steps, a step that is a reply, on another run, newly added but deleted, or repeated, or emptying a published investigation' })
+  @ApiResponse({ status: 403, description: 'Not allowed to edit it, an API key editing a published investigation, or a key without the role' })
+  @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
+  async replaceStorySteps(@Param('id') id: string, @Body() dto: ReplaceStoryStepsDto, @UserCtx() ctx: UserContext): Promise<StoryResponse> {
+    return this.stories.replaceSteps(id, dto.steps, await this.caller(ctx, 'agent'));
+  }
+
+  @Delete('stories/:id')
+  @ApiTags('Test Run Investigations')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: "Delete an investigation (author, any user for an AI agent's draft, org admin of its organization, or global admin)", description: 'Its steps go with it; the comments are never touched. API keys never delete.' })
+  @ApiResponse({ status: 403, description: 'Not allowed, or an API key' })
+  @ApiResponse({ status: 404, description: "Not found, outside your organizations, or someone else's draft" })
+  async removeStory(@Param('id') id: string, @UserCtx() ctx: UserContext): Promise<void> {
+    return this.stories.remove(id, await this.caller(ctx, true));
   }
 }

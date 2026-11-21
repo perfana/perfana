@@ -444,6 +444,20 @@ export class TestRunsGateway
   }
 
   /**
+   * An analysis story changed (created, edited, re-stepped, published or deleted). Body-free on
+   * purpose: drafts are private to their author, and everyone in the run room would receive a
+   * body. Clients refetch through the access-checked GET, which is where draft visibility is
+   * enforced. Per-run room only, never a broadcast; nothing is sent without an owning organization.
+   */
+  emitStoryChanged(owner: { testRunId: string; organizationId?: string | null }, storyId: string): void {
+    if (!owner.organizationId) {
+      this.logger.warn(`story:changed on run ${owner.testRunId} has no organization; not emitted`);
+      return;
+    }
+    this.server.to(TestRunRooms.testRun(owner.testRunId)).emit('story:changed', { testRunId: owner.testRunId, storyId });
+  }
+
+  /**
    * Organization ids this socket's identity is actually a member of.
    *
    * Delegates to AuthorizationService rather than querying

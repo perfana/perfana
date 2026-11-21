@@ -241,18 +241,96 @@ export class PerfanaClient {
     );
   }
 
+  // ─── Comments ──────────────────────────────────────────────────────────────
+
+  /** Threads on a run (optionally one card), roots with their replies, oldest first. */
+  async getTestRunComments(testRunId: string, card?: string): Promise<CommentThreadsResponse> {
+    const q = card ? `?card=${encodeURIComponent(card)}` : '';
+    return this.get<CommentThreadsResponse>(`/test-runs/${encodeURIComponent(testRunId)}/comments${q}`);
+  }
+
+  /**
+   * Post a root comment. The anchor is passed through untouched: the API resolves it into the
+   * card's item key and view, so this client never needs the web's key formats.
+   */
+  async addTestRunComment(testRunId: string, input: AddCommentInput): Promise<RunComment> {
+    return this.send<RunComment>('POST', `/test-runs/${encodeURIComponent(testRunId)}/comments`, input);
+  }
+
+  async replyToTestRunComment(commentId: string, input: { body: string; clientRef?: string }): Promise<RunComment> {
+    return this.send<RunComment>('POST', `/comments/${encodeURIComponent(commentId)}/replies`, input);
+  }
+
+  async updateTestRunComment(commentId: string, input: { body?: string; tag?: string | null }): Promise<RunComment> {
+    return this.send<RunComment>('PATCH', `/comments/${encodeURIComponent(commentId)}`, input);
+  }
+
+  // ─── Analysis stories ──────────────────────────────────────────────────────
+
+  /** Published stories, AI agents' drafts and this key's own drafts on a run, without steps. */
+  async getAnalysisStories(testRunId: string): Promise<RunStorySummary[]> {
+    return this.get<RunStorySummary[]>(`/test-runs/${encodeURIComponent(testRunId)}/stories`);
+  }
+
+  async getAnalysisStory(storyId: string): Promise<RunStory> {
+    return this.get<RunStory>(`/stories/${encodeURIComponent(storyId)}`);
+  }
+
+  /** Start a draft; the API marks it as an AI agent's and caps a key at 10 per run. */
+  async createAnalysisStory(testRunId: string, input: { title: string; summary?: string | null; steps: StoryStepInput[] }): Promise<RunStory> {
+    return this.send<RunStory>('POST', `/test-runs/${encodeURIComponent(testRunId)}/stories`, input);
+  }
+
+  /** Title and summary only: a key never publishes, so this never sends `status`. */
+  async updateAnalysisStory(storyId: string, input: { title?: string; summary?: string | null }): Promise<RunStory> {
+    return this.send<RunStory>('PATCH', `/stories/${encodeURIComponent(storyId)}`, input);
+  }
+
+  /** Replace every step, in order. */
+  async replaceAnalysisStorySteps(storyId: string, steps: StoryStepInput[]): Promise<RunStory> {
+    return this.send<RunStory>('PUT', `/stories/${encodeURIComponent(storyId)}/steps`, { steps });
+  }
+
   // ─── HTTP ──────────────────────────────────────────────────────────────────
 
-  private async get<T>(path: string): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
+  private headers(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
+    return headers;
+  }
 
-    const res = await fetch(url, { headers });
+  /**
+   * A write. A 403 for a missing role is answered with what the key lacks; any other 403 (editing a
+   * story a person already published, say) is passed through as the API words it.
+   */
+  private async send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${this.baseUrl}${path}`, { method, headers: this.headers(), body: JSON.stringify(body) });
+    const text = await res.text().catch(() => '');
+    if (!res.ok) {
+      const message = apiMessage(text);
+      if (res.status === 403 && lacksWriteRole(message)) {
+        throw new Error(
+          `Perfana refused the write (403): ${message}. Writing comments needs an API key with the ` +
+            `${COMMENTS_WRITE_ROLE} role (it also covers stories); ask a Perfana user to create one (Settings, API keys, "Allow writing comments") and set PERFANA_API_KEY to it.`,
+        );
+      }
+      if (res.status === 403) throw new Error(`Perfana refused the write (403): ${message}`);
+      throw new Error(`Perfana API error ${res.status} for ${path}: ${message}`);
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`Perfana API returned invalid JSON for ${path}: ${text.slice(0, 200)}`);
+    }
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const res = await fetch(url, { headers: this.headers() });
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -272,6 +350,112 @@ export class PerfanaClient {
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+/**
+ * The API-key role that lets a key write comments. A copy of `API_KEY_COMMENTS_WRITE_ROLE` in
+ * `@perfana/shared/constants/comment-cards`: apps/mcp cannot import the shared package.
+ */
+export const COMMENTS_WRITE_ROLE = 'comments:write';
+
+/** True when a 403's text says the key lacks the write role, rather than refusing this one write. */
+export function lacksWriteRole(message: string): boolean {
+  return message.includes(COMMENTS_WRITE_ROLE) || /can read comments but not write/i.test(message);
+}
+
+/** The API's error text out of a NestJS error body, or the raw text. */
+export function apiMessage(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown };
+    if (typeof parsed.message === 'string') return parsed.message;
+    if (Array.isArray(parsed.message)) return parsed.message.join('; ');
+  } catch {
+    /* not JSON */
+  }
+  return text || 'no details';
+}
+
+/** What a root comment is about; resolved by the API (see add_test_run_comment). */
+export type CommentAnchor =
+  | { type: 'card'; card: string }
+  | { type: 'transaction'; name: string; scenario?: string }
+  | { type: 'config'; key: string; comparedToTestRunId?: string }
+  | { type: 'dashboard'; applicationDashboardId: string }
+  | { type: 'slo'; checkResultId: string }
+  | {
+      type: 'marker';
+      time: string;
+      series: Array<{ dashboardLabel: string; panelId: number; metricName: string; applicationDashboardId?: string }>;
+      range?: [string, string];
+    };
+
+export interface AddCommentInput {
+  body: string;
+  /** Required unless `anchor` names it. */
+  card?: string;
+  tag?: string;
+  anchor?: CommentAnchor;
+  clientRef?: string;
+}
+
+export interface RunComment {
+  id: string;
+  testRunId: string;
+  cardKey: string;
+  parentId: string | null;
+  itemKey: string | null;
+  itemLabel: string | null;
+  body: string | null;
+  deleted: boolean;
+  authorId: string;
+  authorName: string;
+  authorKind?: 'user' | 'agent';
+  markerSeq: number | null;
+  markerTime: string | null;
+  chartContext: Record<string, unknown> | null;
+  tag: string | null;
+  createdAt: string;
+  editedAt: string | null;
+}
+
+export interface CommentThread extends RunComment {
+  replies: RunComment[];
+}
+
+/** One step as the API takes it: a root comment on the same run (any author) and optional connecting words. */
+export interface StoryStepInput {
+  commentId: string;
+  note?: string | null;
+}
+
+export interface RunStorySummary {
+  id: string;
+  testRunId: string;
+  title: string;
+  summary: string | null;
+  status: 'draft' | 'published';
+  authorId: string;
+  authorName: string;
+  authorKind: 'user' | 'agent';
+  publishedAt: string | null;
+  publishedById?: string | null;
+  publishedByName?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  stepCount: number;
+  /** For an API key: true only on its own drafts. */
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface RunStory extends RunStorySummary {
+  steps: Array<{ position: number; note: string | null; comment: RunComment & { replyCount?: number } }>;
+}
+
+export interface CommentThreadsResponse {
+  threads: CommentThread[];
+  lastSeenAt: string | null;
+  canModerate: boolean;
+}
 
 export interface TestRun {
   test_run_id: string;
@@ -332,6 +516,8 @@ export interface TestRunConfigItem {
 }
 
 export interface CheckResult {
+  /** The check result's id: what an `slo` comment anchor names (`checkResultId`). */
+  id?: string;
   checkName: string;
   passed: boolean;
   description?: string;
@@ -401,6 +587,10 @@ export interface AvailablePanel {
   unit: string | null;
   metric_count: string;
   metric_names: string[];
+  /** The application dashboard behind the label, when exactly one has it. */
+  application_dashboard_id?: string | null;
+  /** Every application dashboard with this label (more than one: name the id in a marker series). */
+  application_dashboard_ids?: string[];
 }
 
 export interface MetricDataPoint {

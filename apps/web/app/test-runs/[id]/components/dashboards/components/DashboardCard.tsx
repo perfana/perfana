@@ -15,18 +15,32 @@ import {
 } from '@mui/icons-material';
 import { Dashboard } from '../types';
 import { filterSystemTags } from '@perfana/shared/utils';
+import { dashboardCommentAnchor as sharedDashboardCommentAnchor } from '@perfana/shared/constants/comment-cards';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import RowCommentButton from '../../comments/RowCommentButton';
 
 interface DashboardCardProps {
   dashboard: Dashboard;
   onView: (dashboard: Dashboard) => void;
   onOpenInGrafana: (dashboard: Dashboard) => void;
+  /** Per dashboard thread counts; absent outside the run page's comments provider. */
+  commentCounts?: CommentItemCounts;
+}
+
+/** What a dashboard comment is anchored to and called (design: test-run-analysis-stories.md). */
+export function dashboardCommentAnchor(dashboard: Dashboard): { itemKey: string; itemLabel: string } {
+  // The application dashboard id, never the Grafana uid: a uid is unique only within one Grafana.
+  // One definition in the shared package, so the API's agent anchors build the same key.
+  return sharedDashboardCommentAnchor(dashboard);
 }
 
 export function DashboardCard({
   dashboard,
   onView,
   onOpenInGrafana,
+  commentCounts,
 }: DashboardCardProps) {
+  const anchor = dashboardCommentAnchor(dashboard);
   // Filter out system variables to display
   const displayVariables = dashboard.variables?.filter((variable) =>
     variable.name &&
@@ -37,10 +51,14 @@ export function DashboardCard({
   return (
     <Card
       variant="outlined"
+      data-comment-item={anchor.itemKey}
+      data-testid={`dashboard-tile-${dashboard.id}`}
       sx={{
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
+        // Always visible, like a section header's control (ItemCommentHeader): a tile has no row hover.
+        '& .row-comment-button': { opacity: 1 },
         '&:hover': {
           boxShadow: 2,
           borderColor: 'primary.main'
@@ -50,9 +68,14 @@ export function DashboardCard({
       <CardContent sx={{ flexGrow: 1 }}>
         <Box display="flex" alignItems="flex-start" mb={1}>
           <MonitorHeart color="primary" sx={{ mr: 1 }} />
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, flexGrow: 1 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
             {dashboard.dashboard_label}
           </Typography>
+          {commentCounts && (
+            <Box sx={{ mt: -0.5, mr: -1, flexShrink: 0 }}>
+              <RowCommentButton card="dashboards" itemKey={anchor.itemKey} itemLabel={anchor.itemLabel} counts={commentCounts} />
+            </Box>
+          )}
         </Box>
 
         {dashboard.tags && dashboard.tags.length > 0 && (

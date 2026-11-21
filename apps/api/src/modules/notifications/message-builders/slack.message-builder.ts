@@ -1,5 +1,6 @@
 import { TestRun } from '@perfana/shared';
 import { CommentDigest, commentDetail, commentHeadline } from './comment-digest';
+import { StoryAnnouncement, storyDetail, storyHeadline } from './comment-digest';
 
 /**
  * Slack Block Kit message format
@@ -136,6 +137,19 @@ export class SlackMessageBuilder {
         { type: 'section', text: { type: 'mrkdwn', text: `:speech_balloon: *${headline}*` } },
         { type: 'context', elements: [{ type: 'mrkdwn', text: commentDetail(digest) }] },
         { type: 'section', text: { type: 'mrkdwn', text: `<${digest.link}|View comments in Perfana>` } },
+      ],
+    };
+  }
+
+  /** One post per published story: who, where, its title and step count, and a reader link. */
+  buildStoryMessage(story: StoryAnnouncement): SlackMessage {
+    const headline = storyHeadline(story);
+    return {
+      text: `${headline}: ${storyDetail(story)}`,
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: `:books: *${headline}*` } },
+        { type: 'context', elements: [{ type: 'mrkdwn', text: storyDetail(story) }] },
+        { type: 'section', text: { type: 'mrkdwn', text: `<${story.link}|Read the investigation in Perfana>` } },
       ],
     };
   }
