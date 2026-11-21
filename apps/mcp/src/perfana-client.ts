@@ -265,6 +265,32 @@ export class PerfanaClient {
     return this.send<RunComment>('PATCH', `/comments/${encodeURIComponent(commentId)}`, input);
   }
 
+  // ─── Analysis stories ──────────────────────────────────────────────────────
+
+  /** Published stories, AI agents' drafts and this key's own drafts on a run, without steps. */
+  async getAnalysisStories(testRunId: string): Promise<RunStorySummary[]> {
+    return this.get<RunStorySummary[]>(`/test-runs/${encodeURIComponent(testRunId)}/stories`);
+  }
+
+  async getAnalysisStory(storyId: string): Promise<RunStory> {
+    return this.get<RunStory>(`/stories/${encodeURIComponent(storyId)}`);
+  }
+
+  /** Start a draft; the API marks it as an AI agent's and caps a key at 10 per run. */
+  async createAnalysisStory(testRunId: string, input: { title: string; summary?: string | null; steps: StoryStepInput[] }): Promise<RunStory> {
+    return this.send<RunStory>('POST', `/test-runs/${encodeURIComponent(testRunId)}/stories`, input);
+  }
+
+  /** Title and summary only: a key never publishes, so this never sends `status`. */
+  async updateAnalysisStory(storyId: string, input: { title?: string; summary?: string | null }): Promise<RunStory> {
+    return this.send<RunStory>('PATCH', `/stories/${encodeURIComponent(storyId)}`, input);
+  }
+
+  /** Replace every step, in order. */
+  async replaceAnalysisStorySteps(storyId: string, steps: StoryStepInput[]): Promise<RunStory> {
+    return this.send<RunStory>('PUT', `/stories/${encodeURIComponent(storyId)}/steps`, { steps });
+  }
+
   // ─── HTTP ──────────────────────────────────────────────────────────────────
 
   private headers(): Record<string, string> {
@@ -277,18 +303,22 @@ export class PerfanaClient {
     return headers;
   }
 
-  /** A write. A 403 is answered with what the key lacks, since that is the likely cause. */
-  private async send<T>(method: 'POST' | 'PATCH', path: string, body: unknown): Promise<T> {
+  /**
+   * A write. A 403 for a missing role is answered with what the key lacks; any other 403 (editing a
+   * story a person already published, say) is passed through as the API words it.
+   */
+  private async send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, { method, headers: this.headers(), body: JSON.stringify(body) });
     const text = await res.text().catch(() => '');
     if (!res.ok) {
       const message = apiMessage(text);
-      if (res.status === 403) {
+      if (res.status === 403 && lacksWriteRole(message)) {
         throw new Error(
           `Perfana refused the write (403): ${message}. Writing comments needs an API key with the ` +
-            `${COMMENTS_WRITE_ROLE} role; ask a Perfana user to create one (Settings, API keys, "Allow writing comments") and set PERFANA_API_KEY to it.`,
+            `${COMMENTS_WRITE_ROLE} role (it also covers stories); ask a Perfana user to create one (Settings, API keys, "Allow writing comments") and set PERFANA_API_KEY to it.`,
         );
       }
+      if (res.status === 403) throw new Error(`Perfana refused the write (403): ${message}`);
       throw new Error(`Perfana API error ${res.status} for ${path}: ${message}`);
     }
     try {
@@ -326,6 +356,11 @@ export class PerfanaClient {
  * `@perfana/shared/constants/comment-cards`: apps/mcp cannot import the shared package.
  */
 export const COMMENTS_WRITE_ROLE = 'comments:write';
+
+/** True when a 403's text says the key lacks the write role, rather than refusing this one write. */
+export function lacksWriteRole(message: string): boolean {
+  return message.includes(COMMENTS_WRITE_ROLE) || /can read comments but not write/i.test(message);
+}
 
 /** The API's error text out of a NestJS error body, or the raw text. */
 export function apiMessage(text: string): string {
@@ -384,6 +419,36 @@ export interface RunComment {
 
 export interface CommentThread extends RunComment {
   replies: RunComment[];
+}
+
+/** One step as the API takes it: a root comment on the same run (any author) and optional connecting words. */
+export interface StoryStepInput {
+  commentId: string;
+  note?: string | null;
+}
+
+export interface RunStorySummary {
+  id: string;
+  testRunId: string;
+  title: string;
+  summary: string | null;
+  status: 'draft' | 'published';
+  authorId: string;
+  authorName: string;
+  authorKind: 'user' | 'agent';
+  publishedAt: string | null;
+  publishedById?: string | null;
+  publishedByName?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  stepCount: number;
+  /** For an API key: true only on its own drafts. */
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface RunStory extends RunStorySummary {
+  steps: Array<{ position: number; note: string | null; comment: RunComment & { replyCount?: number } }>;
 }
 
 export interface CommentThreadsResponse {
