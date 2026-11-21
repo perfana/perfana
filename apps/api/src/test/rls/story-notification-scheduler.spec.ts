@@ -122,7 +122,7 @@ describe('CommentNotificationScheduler stories against a real database', () => {
     const [channel, story] = send.mock.calls[0];
     expect(channel.id).toBe(channelId);
     expect(story).toEqual({
-      systemName: `story-notify-spec-sut-${suffix}`, testRunId: runHuman, authorName: 'Daniel',
+      systemName: `story-notify-spec-sut-${suffix}`, testRunId: runHuman, authorName: 'Daniel', authorKind: 'user', publishedByName: null,
       title: 'Checkout latency after deploy', stepCount: 2,
       link: `https://perfana.example/test-runs/${runUuid}?story=${published}`,
     });
