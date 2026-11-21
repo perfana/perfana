@@ -290,11 +290,16 @@ export const STORY_STATUSES = Object.freeze(['draft', 'published'] as const);
 export type StoryStatus = (typeof STORY_STATUSES)[number];
 
 /**
- * Who wrote a story, stored in `test_run_stories.author_kind`. Only 'user' is written until agent
- * authoring through MCP ships; the API never reads it from a request.
+ * Who wrote a story, stored in `test_run_stories.author_kind`: 'agent' for a story an API key with
+ * `API_KEY_COMMENTS_WRITE_ROLE` created through the MCP server. The API never reads it from a
+ * request. An agent's story is a proposal: its draft is visible to everyone who can see the run,
+ * any user who may comment can edit, publish or delete it, and only a person can publish it.
  */
 export const STORY_AUTHOR_KINDS = Object.freeze(['user', 'agent'] as const);
 export type StoryAuthorKind = (typeof STORY_AUTHOR_KINDS)[number];
+
+/** Per API key per run: most stories an agent may create (design: "Retries, limits and notifications"). */
+export const AGENT_STORY_LIMIT = 10;
 
 /**
  * The suggested story order (design: "Suggest order"): by tag in `COMMENT_TAGS` order, untagged
