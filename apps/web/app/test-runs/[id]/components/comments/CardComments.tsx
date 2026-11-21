@@ -3,8 +3,7 @@
 import React, { useEffect } from 'react';
 import { Box, useMediaQuery } from '@mui/material';
 import CommentCountBadge from './CommentCountBadge';
-import type { ExpansionState } from '../../types';
-import { CARD_LABELS, cardKeyOf, useComments } from './CommentsContext';
+import { CARD_LABELS, cardKeyOf, useComments, type CommentableExpansionKey } from './CommentsContext';
 import CommentsPanel, { COMMENTS_PANEL_WIDTH } from './CommentsDrawer';
 
 /**
@@ -23,7 +22,7 @@ export default function CardComments({
   expanded,
   children,
 }: {
-  card: keyof ExpansionState;
+  card: CommentableExpansionKey;
   expanded: boolean;
   children: React.ReactNode;
 }) {

@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { COMMENT_CARD_BY_EXPANSION_KEY } from '@perfana/shared/constants/comment-cards';
 import { TAB_CARDS } from '../../../hooks/useExpansionState';
-import { CommentsProvider, useCommentItemFocus, useComments, useGraphMarkers } from '../CommentsContext';
+import { CommentsProvider, NON_COMMENTABLE_EXPANSION_KEYS, PAGE_ORDER, cardKeyOf, useCommentItemFocus, useComments, useGraphMarkers } from '../CommentsContext';
 import CardComments from '../CardComments';
 import CommentsDrawer, { describeView } from '../CommentsDrawer';
 import RunCommentsButton from '../RunCommentsButton';
@@ -49,11 +49,38 @@ beforeEach(() => {
 
 // Design R11: a stored card key must never depend on a React state name. Every card the page
 // renders needs a permanent key, and no two cards may share one.
+// Only the explicit allowlist (the run-wide Comments card) may go without one.
 it('maps every expansion key on the page to a distinct permanent card key', () => {
-  const pageKeys = Object.values(TAB_CARDS).flat().sort();
-  expect(Object.keys(COMMENT_CARD_BY_EXPANSION_KEY).sort()).toEqual(pageKeys);
+  const pageKeys = Object.values(TAB_CARDS).flat();
+  expect(NON_COMMENTABLE_EXPANSION_KEYS).toEqual(['commentsExpanded']);
+  const commentable = pageKeys.filter((k) => !(NON_COMMENTABLE_EXPANSION_KEYS as readonly string[]).includes(k)).sort();
+  expect(Object.keys(COMMENT_CARD_BY_EXPANSION_KEY).sort()).toEqual(commentable);
+  for (const k of NON_COMMENTABLE_EXPANSION_KEYS) {
+    expect(pageKeys).toContain(k);
+    expect(cardKeyOf(k)).toBeUndefined();
+  }
   const values = Object.values(COMMENT_CARD_BY_EXPANSION_KEY);
   expect(new Set(values).size).toBe(values.length);
+});
+
+it('builds the next-unread page order from commentable cards only', () => {
+  expect(PAGE_ORDER).not.toContain(undefined);
+  expect(PAGE_ORDER).toEqual(
+    Object.values(TAB_CARDS).flat().filter((k) => k !== 'commentsExpanded').map((k) => COMMENT_CARD_BY_EXPANSION_KEY[k as keyof typeof COMMENT_CARD_BY_EXPANSION_KEY]),
+  );
+  expect(PAGE_ORDER.slice(0, 2)).toEqual(['details', 'config']); // the Comments card sits between them
+});
+
+it('next-unread steps over the Comments card from Test run details to Configuration', async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ config: { total: 1, unread: 1 }, graphs: { total: 1, unread: 1 } });
+  mocked.fetchCommentThreads.mockResolvedValue({ threads: [], lastSeenAt: null });
+  const reveal = jest.fn();
+  renderPage(reveal);
+  const button = await screen.findByTestId('run-comments-button');
+  await waitFor(() => expect(button).toHaveAccessibleName('2 unread · next: Configuration (1)'));
+  fireEvent.click(button);
+  expect(reveal).toHaveBeenCalledWith('configExpanded');
+  expect(reveal).not.toHaveBeenCalledWith('commentsExpanded');
 });
 
 it('shows a red unread count, a neutral total when all is read, and nothing when a card has no comments', async () => {

@@ -15,17 +15,36 @@ export type CommentEvent =
   | { type: 'comment:created' | 'comment:updated'; comment: RunComment; seq: number }
   | { type: 'comment:deleted'; comment: RunComment & { hardDeleted?: boolean }; seq: number };
 
-/** Every card in page order (Results, then RCA, then Reporting), for the header's next-unread jump. */
-const PAGE_ORDER: (keyof ExpansionState)[] = Object.values(TAB_CARDS).flat();
+/** An expansion key whose card takes comments. */
+export type CommentableExpansionKey = keyof typeof COMMENT_CARD_BY_EXPANSION_KEY;
+
+/**
+ * The page's cards that take no comments of their own. Every other expansion key must have a
+ * stored card key in COMMENT_CARD_BY_EXPANSION_KEY (the comments test asserts it).
+ */
+export const NON_COMMENTABLE_EXPANSION_KEYS: readonly Exclude<keyof ExpansionState, CommentableExpansionKey>[] = Object.freeze([
+  'commentsExpanded', // the run-wide Comments card lists the other cards' comments
+]);
 
 export const CARD_LABELS: Readonly<Record<CommentCardKey, string>> = COMMENT_CARD_LABELS;
 
-export function cardKeyOf(expansionKey: keyof ExpansionState): CommentCardKey {
-  return COMMENT_CARD_BY_EXPANSION_KEY[expansionKey];
+export function cardKeyOf(expansionKey: CommentableExpansionKey): CommentCardKey;
+export function cardKeyOf(expansionKey: keyof ExpansionState): CommentCardKey | undefined;
+export function cardKeyOf(expansionKey: keyof ExpansionState): CommentCardKey | undefined {
+  return (COMMENT_CARD_BY_EXPANSION_KEY as Partial<Record<keyof ExpansionState, CommentCardKey>>)[expansionKey];
 }
 
-export function expansionKeyOf(card: string): keyof ExpansionState | undefined {
-  return (Object.keys(COMMENT_CARD_BY_EXPANSION_KEY) as (keyof ExpansionState)[]).find(
+/**
+ * Every commentable card in page order (Results, then RCA, then Reporting), for the header's
+ * next-unread jump. Cards without a comment card key (the Comments card) are skipped.
+ */
+export const PAGE_ORDER: CommentCardKey[] = Object.values(TAB_CARDS)
+  .flat()
+  .map((k) => cardKeyOf(k))
+  .filter((c): c is CommentCardKey => c !== undefined);
+
+export function expansionKeyOf(card: string): CommentableExpansionKey | undefined {
+  return (Object.keys(COMMENT_CARD_BY_EXPANSION_KEY) as CommentableExpansionKey[]).find(
     (k) => COMMENT_CARD_BY_EXPANSION_KEY[k] === card,
   );
 }
@@ -66,6 +85,11 @@ interface CommentsContextValue {
   jumpToFirstCommented: () => void;
   /** Switch to a card's tab, expand it and scroll to it. */
   reveal: (expansionKey: keyof ExpansionState) => void;
+  /**
+   * Show one comment where it was written: reveal its card, open the drawer on its thread and
+   * replay its view (the `?card=&comment=` deep link). False when `card` is not a comment card.
+   */
+  showComment: (card: string, commentId: string) => boolean;
   /** The item the drawer's new-comment box is anchored to, if the user started from a row. */
   composeAnchor: { card: CommentCardKey; itemKey: string; itemLabel: string } | null;
   /** Open the card's drawer with the new-comment box anchored to one row. */
@@ -234,8 +258,19 @@ export function CommentsProvider({
     [reveal],
   );
 
+  const showComment = useCallback(
+    (card: string, commentId: string) => {
+      const key = expansionKeyOf(card);
+      if (!key) return false;
+      reveal(key);
+      openDrawer(cardKeyOf(key), commentId, true); // a view is replayed (premise 6)
+      return true;
+    },
+    [reveal, openDrawer],
+  );
+
   const nextUnreadCard = useMemo(
-    () => PAGE_ORDER.map(cardKeyOf).find((c) => (unread[c] ?? 0) > 0) ?? null,
+    () => PAGE_ORDER.find((c) => (unread[c] ?? 0) > 0) ?? null,
     [unread],
   );
   const jumpToNextUnread = useCallback(() => {
@@ -246,7 +281,7 @@ export function CommentsProvider({
   }, [nextUnreadCard, reveal, openDrawer]);
 
   const jumpToFirstCommented = useCallback(() => {
-    const card = PAGE_ORDER.map(cardKeyOf).find((c) => (counts[c]?.total ?? 0) > 0);
+    const card = PAGE_ORDER.find((c) => (counts[c]?.total ?? 0) > 0);
     const key = card && expansionKeyOf(card);
     if (!card || !key) return;
     reveal(key);
@@ -256,8 +291,8 @@ export function CommentsProvider({
   const totalUnread = Object.values(unread).reduce<number>((a, b) => a + (b ?? 0), 0);
 
   const value = useMemo(
-    () => ({ runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, registerViewCapture, captureView }),
-    [runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, registerViewCapture, captureView],
+    () => ({ runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, registerViewCapture, captureView }),
+    [runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, registerViewCapture, captureView],
   );
   return <CommentsContext.Provider value={value}>{children}</CommentsContext.Provider>;
 }

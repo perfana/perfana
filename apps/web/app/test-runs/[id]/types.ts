@@ -40,6 +40,8 @@ export interface ExpansionState {
   awrExpanded: boolean;
   reportExpanded: boolean;
   eventsExpanded: boolean;
+  /** The run-wide Comments card; not itself commentable. */
+  commentsExpanded: boolean;
 }
 
 /**

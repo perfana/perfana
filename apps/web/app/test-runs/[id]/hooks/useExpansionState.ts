@@ -52,7 +52,7 @@ export type TabIndex = (typeof TAB)[keyof typeof TAB];
  * render each card by hand: collapseTab and revealCard both trust this list.
  */
 export const TAB_CARDS: Record<TabIndex, (keyof ExpansionState)[]> = {
-  [TAB.results]: ['expanded', 'configExpanded', 'dashboardsExpanded', 'anomalyExpanded', 'performanceExpanded', 'sloExpanded', 'deepLinksExpanded', 'eventsExpanded'],
+  [TAB.results]: ['expanded', 'commentsExpanded', 'configExpanded', 'dashboardsExpanded', 'anomalyExpanded', 'performanceExpanded', 'sloExpanded', 'deepLinksExpanded', 'eventsExpanded'],
   [TAB.rca]: ['dynatraceExpanded', 'distributedTracingExpanded', 'pyroscopeExpanded', 'splunkExpanded', 'awrExpanded'],
   [TAB.reporting]: ['reportExpanded', 'trendsExpanded', 'compareExpanded', 'graphsExpanded'],
 };
@@ -79,6 +79,7 @@ const ALL_COLLAPSED: ExpansionState = {
   awrExpanded: false,
   reportExpanded: false,
   eventsExpanded: false,
+  commentsExpanded: false,
 };
 
 /**

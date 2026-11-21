@@ -108,8 +108,12 @@ const send = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-export const fetchCommentThreads = async (runId: string, card: CommentCardKey) =>
-  json<{ threads: RunCommentThread[]; lastSeenAt: string | null; canModerate?: boolean }>(await authenticatedFetch(`${base(runId)}?card=${encodeURIComponent(card)}`), 'Loading comments');
+/** One card's threads, or with no `card` every thread on the run (then `lastSeenAt` is null). */
+export const fetchCommentThreads = async (runId: string, card?: CommentCardKey) =>
+  json<{ threads: RunCommentThread[]; lastSeenAt: string | null; canModerate?: boolean }>(
+    await authenticatedFetch(card ? `${base(runId)}?card=${encodeURIComponent(card)}` : base(runId)),
+    'Loading comments',
+  );
 
 /** Per card: comments that are not deleted, and how many of those are unread for the caller. */
 export type CardCommentCounts = Partial<Record<CommentCardKey, { total: number; unread: number }>>;
