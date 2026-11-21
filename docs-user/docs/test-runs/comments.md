@@ -20,7 +20,7 @@ Comments are plain text, up to 10,000 characters.
 
 ## Comment on a row
 
-Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis**, an SLO, a Splunk panel, a Dynatrace service, a tracing service, a Pyroscope profiler, a configuration item on **Configuration** or a dashboard tile on **Dashboards**.
+Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis**, a row in **Anomaly detection**, an SLO, a Splunk panel, a Dynatrace service, a tracing service, a Pyroscope profiler, a configuration item on **Configuration** or a dashboard tile on **Dashboards**.
 
 1. Hover over the row. An outlined comment icon appears at its end.
 2. Click it.
@@ -201,7 +201,7 @@ An AI agent connected through the Perfana MCP server can leave its analysis on a
 - They are never posted to Slack, Teams or Mattermost channels.
 - They count as unread like other comments, and the unread button in the run header says how many came from agents, for example *5 unread (3 from AI)*.
 
-An agent pins each comment to what it is about, in the same places you can: a transaction row on **Performance analysis**, a configuration item (with the comparison it was looking at), a tile on **Dashboards**, an SLO row, or a numbered marker on a **Graphs** series. Perfana checks the thing exists in the run before it accepts the comment. You can reply to an agent's comment, and the agent can answer. It cannot delete anything; an organization admin can delete an agent's comment as for any other author. The **Comments** report section prints the AI chip too.
+An agent pins each comment to what it is about, in the same places you can: a transaction row on **Performance analysis**, a row in **Anomaly detection**, a configuration item (with the comparison it was looking at), a tile on **Dashboards**, an SLO row, a numbered marker on a **Graphs** series, a tracing service (with the request filters it was looking at), or a Pyroscope profiler, in single or diff view. A diff view compares with the most recent earlier completed run of the same workload. On the Dynatrace and Splunk cards an agent comments on the whole card. Perfana checks the thing exists in the run before it accepts the comment. You can reply to an agent's comment, and the agent can answer. It cannot delete anything; an organization admin can delete an agent's comment as for any other author. The **Comments** report section prints the AI chip too.
 
 ### Review an agent's investigation
 
