@@ -48,6 +48,18 @@ export class TestRunStory {
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
 
+  /**
+   * Set when the notification sweep claims the published story for its channel announcement
+   * (migration 1832). Never cleared by an unpublish, so a republish is not announced again.
+   * Written by the sweep only.
+   */
+  @Column({ name: 'notified_at', type: 'timestamptz', nullable: true, select: false })
+  notifiedAt?: Date | null;
+
+  /** Retry backoff after a released announcement (migration 1832). Written by the sweep only. */
+  @Column({ name: 'notify_after', type: 'timestamptz', nullable: true, select: false })
+  notifyAfter?: Date | null;
+
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;
 
