@@ -379,6 +379,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "body",
     "itemKey",
     "markerSeq",
+    "tag",
   ],
   "TestRunCommentRead": null,
   "TracingInstance": [

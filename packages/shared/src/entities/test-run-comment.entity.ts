@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import type { CommentTag } from '../constants/comment-cards';
 
 /**
  * A comment on a card of the test-run details page (migration 1827; design:
@@ -13,8 +14,12 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 @Index('idx_test_run_comments_run_created', ['testRunId', 'createdAt'])
 @Index('idx_test_run_comments_parent', ['parentId'])
 export class TestRunComment {
-  /** Audited on delete only: a delete may be an org admin moderating someone else's comment. */
-  static auditableFields = ['testRunId', 'cardKey', 'parentId', 'authorId', 'authorName', 'body', 'itemKey', 'markerSeq'] as const;
+  /**
+   * Audited on delete only: a delete may be an org admin moderating someone else's comment.
+   * `tag` is part of what the author wrote (it claims "root cause", "ruled out"), so the record
+   * of a moderated comment keeps it beside the body. Tag edits are not audited, like body edits.
+   */
+  static auditableFields = ['testRunId', 'cardKey', 'parentId', 'authorId', 'authorName', 'body', 'itemKey', 'markerSeq', 'tag'] as const;
 
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -54,6 +59,13 @@ export class TestRunComment {
 
   @Column({ name: 'chart_context', type: 'jsonb', nullable: true })
   chartContext!: Record<string, unknown> | null;
+
+  /**
+   * One of `COMMENT_TAGS` (migration 1829), roots only; null = untagged. Kept on soft delete, so
+   * a story step still reads "Root cause · comment deleted". Changing it does not set `editedAt`.
+   */
+  @Column({ name: 'tag', type: 'varchar', length: 32, nullable: true })
+  tag!: CommentTag | null;
 
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;
