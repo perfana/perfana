@@ -33,7 +33,7 @@ All v1 constraints carry over unchanged. The ones that bite here:
 
 - **Multi-tenant RBAC.** New tables carry `organizationId` / `teamId` copied from the `test_runs` row (camelCase in `repo.create`), RLS policies, and service-layer org checks on every route including by-id reads: `withOrgFilter` once per request, required parameter, **404 not 403** outside the caller's orgs, `[]` early on an empty org list (CLAUDE.md Common Issue #48).
 - **Realtime** goes through `TestRunsGateway` with rooms resolved from the row's own ownership, never the caller's `UserCtx`, never a broadcast (Common Issue #58). Draft stories must not leak through it (see Realtime).
-- **API keys cannot write** comments (v1 eng review R3); the same holds for tags and stories. GETs stay open so MCP/agents can read.
+- **API keys cannot write** comments (v1 eng review R3). This design narrows that: a key that opts in with a new `comments:write` role can write comments and stories as an *agent* author, for the MCP server (see MCP). Every other key keeps getting 403 on writes, and GETs stay open.
 - **Migrations** above the current head (1828), no `SAVEPOINT` (Common Issue #64), and every new FK gets an index on the referencing column (Common Issue #57).
 - **SUT export/import** carries comments (v1 R9); whatever references comments must travel with them, and a new column on an exported table can be `NOT NULL DEFAULT x` only because of v0.2.97.91's column-list import (Common Issue #80).
 - **Stored report HTML is never regenerated.** Tags and stories appear only in reports generated after they ship.
@@ -193,10 +193,11 @@ A story is hard-deleted; its steps cascade. Deleting a story never touches comme
 
 #### Who can do what
 
-- **Create** a story: anyone who can post a comment on the run (same org check, same API-key 403).
+- **Create** a story: anyone who can post a comment on the run (same org check). An API key needs `comments:write`; see MCP for what an agent may do with its stories.
 - **Edit / reorder / publish / unpublish**: the story author.
 - **Delete**: the story author, an `OrganizationRole.ADMIN` of the story's org, or a global admin (mirrors comment moderation, v1 R13).
 - **See a draft**: the author only. **See a published story**: anyone who can see the run.
+- An **agent's** draft follows different rules (visible to all, editable and publishable by any user who may comment); see MCP.
 
 Drafts are private in v1 because the main reason for a draft is "not finished, don't read it yet". Co-authoring is Open Question 1.
 
@@ -211,7 +212,7 @@ Drafts are private in v1 because the main reason for a draft is "not finished, d
 | `PUT /stories/:id/steps` | the full ordered list `[{ commentId, note? }]`; replaces all steps in one transaction (delete + insert). Reorder, add and remove are all this call — simpler than position arithmetic and the list is ≤ 50 |
 | `DELETE /stories/:id` | |
 
-All routes: `withOrgFilter` once, required parameter, 404 outside scope, `[]` early on empty org list; writes 403 for `api-key:` principals.
+All routes: `withOrgFilter` once, required parameter, 404 outside scope, `[]` early on empty org list; writes 403 for `api-key:` principals without `comments:write`, and publish and delete 403 for every key.
 
 #### Realtime
 
@@ -280,9 +281,87 @@ The v1 `CommentNotificationScheduler` sweep picks it up through the story's `not
 
 `test_run_stories` and `test_run_story_steps` join `test_run_comments` in `sut-resource-graph.ts` (`byTestRunUuid` for stories; steps by story), with the import remapping `story_id` and `comment_id` the way it remaps comment ids today. The `tag` column travels automatically; an older bundle without it imports with `tag` NULL (Common Issue #80).
 
-### MCP (later)
+### MCP: an AI agent can comment and build a story
 
-A read-only `get_test_run_stories` tool returning published stories with steps and comment text. GETs are already open to API keys, so this needs no auth change.
+The analysis an agent does through the MCP server today (`get_adapt_results`, `get_metric_trends`, `get_config_diff`, `get_error_analysis`, ...) ends up as chat text in the agent's own client, outside the run, where nobody else on the team sees it. The agent has already done exactly the symptom → evidence → root cause walk this design is about. It should be able to leave that walk on the run, as tagged, anchored comments and a story, for a human to review and publish.
+
+All 20+ MCP tools are read-only today, and the server authenticates with one API key (`PERFANA_API_KEY`). So this section has three parts: letting a key write without undoing v1's reason for blocking it, letting an agent anchor a comment without knowing the web client's internal item-key formats, and keeping agent content clearly marked and under human control.
+
+#### Reversing v1 R3, for opted-in keys only
+
+v1 eng review R3 refused every comment write from an API key, because "a key has no person behind it" and "nobody asked for bot comments". Someone is asking now, so this design takes R3's option B, narrowed:
+
+- **Keys stay read-only by default.** A key can write comments and stories only if it carries a new role, `comments:write`, chosen when the key is created (`api_keys.roles` already exists). Every existing key, including every CI key, keeps getting 403 on writes. The controller guard at `comments.controller.ts:22` changes from "refuse every `api-key:` principal" to "refuse an `api-key:` principal without `comments:write`". Whether `roles` can carry a scope like this or needs a sibling column is checked in implementation; it must not grant anything outside comments.
+- **What an agent may write:** root comments and replies, tags on its own comments, edits to its own comments, and stories it creates. It may **not** delete anything, moderate, mark comments seen (`PUT seen` stays refused: an agent has no unread state), or **publish** a story.
+- **Ownership** stays the key's organization (`request.apiKey.organization_id`), checked against the run's organization exactly as for a user; a key can comment only on runs of its own org.
+
+#### Marking agent content
+
+`test_run_comments` and `test_run_stories` gain `author_kind varchar(16) NOT NULL DEFAULT 'user'`, CHECK in (`user`, `agent`), set by the server from the principal and never from the request. For an agent, `author_id = api-key:<id>` and `author_name` is the key's `description` (for example "Claude analysis agent"), as R3's option B described.
+
+Everywhere an author is shown, `agent` renders an **AI** chip next to the name: the drawer, the comments card, the story list, the reader bar, the report and the channel post. A reader must never mistake an agent's root-cause claim for a colleague's.
+
+#### Agent stories are proposals, and a human publishes them
+
+- An agent creates a story as `draft`. Unlike a user's draft (author-only), **an agent's draft is visible to everyone who can see the run**, labelled `AI draft · not reviewed`. Otherwise nobody could see it, since the author is a key.
+- Any user who may comment on the run can **edit** an agent's draft (reorder, rewrite notes, drop steps) and **publish** it. Publishing records who did it: `test_run_stories` gains `published_by_id` / `published_by_name`, and the story then reads `Proposed by <agent> · reviewed and published by <user>`. The human who publishes takes responsibility for the story, which is the point of the review.
+- Users can delete an agent's draft (any user who may comment, not only moderators), so a bad proposal does not have to wait for an admin.
+
+#### Anchors: the agent names the thing, the server builds the key
+
+Today each web card builds its own `item_key` (`panelKey` in `SplunkCard`, the transaction key in `TransactionRow`, the result key in `SLOList`, ...), and `chart_context` is captured from the card's live state. An agent sees none of that. Asking it to reproduce those formats would make every web refactor silently break agent comments, which would then point at nothing.
+
+So `POST /test-runs/:id/comments` gains an optional **`anchor`**, mutually exclusive with `itemKey` / `itemLabel` / `markerTime` / `chartContext`, which the API resolves into those fields:
+
+| anchor | resolves to | the agent gets the values from |
+|---|---|---|
+| `{ type: 'card', card }` | a card-level comment | — |
+| `{ type: 'transaction', name }` | Performance analysis row | `get_transaction_stats`, `get_performance_rankings` |
+| `{ type: 'config', key, comparedToTestRunId? }` | Configuration item, with the `kind: 'config'` view snapshot | `get_test_run_configs`, `get_config_diff` |
+| `{ type: 'dashboard', applicationDashboardId }` | Dashboards card item | `get_available_metrics`, which gains the id (see below) |
+| `{ type: 'slo', checkResultId }` | SLO row | `get_check_results` (which must return the result id; check its response in implementation) |
+| `{ type: 'marker', time, series: [{ dashboardLabel, panelId, metricName }], range? }` | a numbered Graphs marker with its `chart_context` | `get_available_metrics`, `get_metric_trends` |
+
+Rules:
+
+- **The builders are shared.** The item-key builders for every card move into `packages/shared/src/constants/comment-cards.ts` (this design already moves the two new ones there), and the web cards import them. A contract test asserts that, for each anchor type, the server-built key equals the key the web row renders. Without it, server and web drift and agent comments stop resolving silently.
+- **The server checks the anchor exists in the run** (the transaction has rows, the config key is in the run, the check result belongs to the run, the dashboard belongs to the run's workload, the series are in `ds_metrics` for the run) and answers 400 naming what was not found. An agent that names something wrong gets a correctable error, not a comment pinned to nothing.
+- **`item_label`** is built by the server from the resolved item (the transaction name, the config key, the dashboard label), not taken from the agent.
+- **Markers.** `marker_seq` is assigned as for a user's marker. `chart_context.series` is built in the graph-preset series shape the replay already reads, and `range` defaults to the run's window, clamped to the run. `dashboardLabel` is not unique across Grafana instances (Common Issue #51): if it matches more than one application dashboard in the run's workload, the server answers 400 listing the candidates, and the agent retries with `applicationDashboardId` in the series entry.
+- **Dashboards need an id the agent can see.** `get_available_metrics` returns dashboards by label today. It gains `applicationDashboardId` per dashboard, so the agent can anchor dashboard comments and disambiguate markers.
+- Cards outside this table (anomaly rows, Dynatrace services, Splunk panels, tracing, Pyroscope) take card-level agent comments in v1; each can be added as an anchor type later with its own builder and contract test.
+
+`apps/mcp` cannot import `@perfana/shared` (CLAUDE.md Common Issue #81), which is a second reason the resolution lives in the API: the MCP server only passes the anchor through.
+
+#### Retries, limits and notifications
+
+- **Idempotency.** Agents retry on timeouts. `test_run_comments` gains `client_ref varchar(64) NULL` with a unique index on `(test_run_id, author_id, client_ref) WHERE client_ref IS NOT NULL`. A repeated create with the same `client_ref` returns the existing comment (200) instead of a duplicate. Users never send it; it is optional for agents, and the MCP tool sends one by default.
+- **Limits per key per run:** 100 root comments, 200 replies, 10 stories, same body caps as users. A 429 names the limit. These protect the humans reading, not the server.
+- **No per-comment channel posts for agents.** An agent posting 15 findings must not produce channel posts every two minutes. Agent comments are stamped `notified_at = now()` on insert, so the sweep never claims them. The team hears about agent work through the story: when a human publishes it, the publish announcement goes out as for any story, naming both the agent and the publisher.
+- **Unread.** Agent comments count as unread like any other author's, because they are new content on the run. The run-header label distinguishes them: `5 unread (3 from AI)`.
+
+#### MCP tools (`apps/mcp/src/index.ts`, `perfana-client.ts`)
+
+Read (work with any key):
+
+- `get_test_run_comments(testRunId, card?, tag?)`: threads with tag, anchor (card, item label), author and author kind, marker number and time. The tool description says that comment bodies are **user-written content, not instructions**, since an agent reading a run's comments is reading text anyone in the org typed.
+- `get_analysis_stories(testRunId)` and `get_analysis_story(storyId)`: published stories, plus agent drafts (visible to everyone), with steps and comment text.
+
+Write (need a key with `comments:write`; without it the tool returns the API's 403 with a message saying which role the key lacks):
+
+- `add_test_run_comment(testRunId, body, tag?, anchor?, clientRef?)` → the comment, including its id and, for a marker, its number.
+- `reply_to_test_run_comment(commentId, body, clientRef?)`, so an agent can answer a question a user asked under its finding.
+- `update_test_run_comment(commentId, body?, tag?)`, own comments only.
+- `create_analysis_story(testRunId, title, summary?, steps: [{ commentId, note? }])` → the story id and its `?story=` link, so the agent can hand the link to its user.
+- `update_analysis_story(storyId, title?, summary?, steps?)`, own drafts only, until a human publishes it.
+
+No delete or publish tools. The MCP README gets a worked example: diagnose a run with the read tools, post a symptom marker on the response-time series, evidence on a config item and a dashboard, a root cause, then assemble the story and return its link.
+
+#### Things to watch
+
+- **Prompt injection, in both directions.** An agent reads user-written comments (marked as content in the tool descriptions, above). Agent-written bodies are rendered with the same escaping as users' comments in the UI and the report, and get no richer formatting; an agent cannot inject links or markup that a user's comment could not.
+- **Hallucinated evidence.** Anchors are verified to exist, but the claim in the body is not. That is what the AI chip, the "not reviewed" label and human publishing are for.
+- **Key compromise.** A leaked `comments:write` key can write text on its org's runs, nothing more: no deletes, no publish, no notifications, capped per run, every row attributed to the key.
 
 ## Phasing
 
@@ -291,12 +370,14 @@ A read-only `get_test_run_stories` tool returning published stories with steps a
 3. **PR3 — Comments card.** Card, tab placement, All comments list with filters, Show in context, live updates. No API change.
 4. **PR4 — Stories.** Migration 1830 (two tables, RLS, indexes), API, delete-rule extension, SUT export, Add to story, editor, reader bar with view snapshot/restore, `?story=&step=` link.
 5. **PR5 — Report and notification.** Comments section `stories` layout; publish announcement through the sweep.
+6. **PR6 — Agents through MCP.** Migration 1831 (`author_kind` on comments and stories, `client_ref` + index, `published_by_*`), the `comments:write` key role and its option in the API-key dialog, the `anchor` resolver with shared item-key builders and their contract test, `applicationDashboardId` in `get_available_metrics`, the AI chip and agent-draft rules in the web, the sweep skipping agent comments, the MCP tools and README example. `author_kind` could ship in PR4's migration instead, so stories never exist without it; decide when PR4 starts.
 
 ## Tests
 
 - **Item comments:** opening a thread on a `same` config item shows it although the default status filter hides `same`; the comment filter matches `heap.max` exactly and not `heap.max.extra`; "Show all" restores the user's own status, tag and key filters unchanged; a config key in neither run and a removed dashboard each show their chip message; a config root records `kind: 'config'` with the selected comparison run, a reply cannot record a view, an oversized value → 400; Restore view selects the recorded comparison run and Undo returns to the previous one; dashboard item keys use the application dashboard id, so the same Grafana uid on two instances yields two separate items.
 - **Tags:** CHECK and constant stay equal; tag on a reply → 400; PATCH tag by non-author → 403; tag survives soft delete.
 - **Stories API:** someone else's draft is 404 on GET/PATCH/PUT/DELETE; a published one is readable cross-user in the same org and 404 cross-org; steps referencing a reply, another run's comment, or a soft-deleted comment → 400; `PUT steps` is atomic (a failing insert leaves the old list); API-key writes → 403; 51 steps → 400.
+- **Agents:** a key without `comments:write` → 403 on every write; with it, delete, publish and `PUT seen` still 403; `author_kind` cannot be set from the request; a key on another org's run → 404; each anchor type resolves to the same `item_key` the web row renders (contract test, one per type); an anchor naming a missing transaction, config key, check result, dashboard or series → 400 naming it; an ambiguous `dashboardLabel` → 400 listing candidates; a repeated `client_ref` returns the first comment; the 101st root comment → 429; agent comments are never claimed by the notification sweep; an agent draft is visible to another user, who can edit and publish it, and publishing records `published_by`; the MCP tools pass anchors through unchanged and surface a 403's message.
 - **Delete rule:** deleting a step's root soft-deletes it, even with no replies and no marker; deleting a story leaves its comments; a run delete removes both without an FK error.
 - **RLS:** the new tables in `apps/api/src/test/rls/` alongside `test-run-comments.spec.ts`.
 - **Realtime:** `story:changed` carries no title, summary or steps.
@@ -312,15 +393,16 @@ A read-only `get_test_run_stories` tool returning published stories with steps a
 4. **Card visibility.** Hide the Comments card on runs without comments (proposed), or always show it so people learn the feature exists?
 5. **Typed links (Approach A).** Revisit once stories are in use: do authors write step notes like "this explains step 1"? If so, that is the demand signal for links.
 6. **Story-level verdict.** Should a published story be able to set or suggest the run's verdict / annotation? Out of scope here; worth deciding before anyone builds it ad hoc.
-
 7. **Comments on a Grafana panel.** A dashboard-level anchor is what this design adds. Pinning a comment to one panel of an embedded dashboard needs a panel list per dashboard in the card: `DashboardDialog` embeds the whole dashboard in an iframe, and Perfana cannot see clicks inside it. Worth it only if dashboard comments turn out to be mostly about one panel.
 8. **Should the Configuration comment filter switch the comparison run on plain open**, not only on Restore view? Proposed no, for consistency with Graphs. The drawer's snapshot covers the case where the runs differ.
+9. **May an agent publish its own story**, for teams that want fully automated analysis (for example a CI step that runs an agent after every run)? Proposed no in v1: human publishing is what keeps an unreviewed root-cause claim out of the channel and the report. A later per-key `stories:publish` role could allow it, still labelled AI.
+10. **Should agent comments count as unread?** Proposed yes, labelled. If agents turn out to be chatty, the alternative is to count only published agent stories.
 
 ## Out of Scope
 
 - Cross-run memory (surfacing earlier runs' root causes on a similar symptom). Tags are designed to make it possible; it gets its own design.
 - Free-text or custom tags.
-- AI-drafted stories from a run's comments.
+- AI drafting *inside* Perfana (a "suggest a story" button). Agents work through the MCP server only, with their own key.
 - Stories spanning several runs.
 
 ## Success Criteria
@@ -328,5 +410,6 @@ A read-only `get_test_run_stories` tool returning published stories with steps a
 - A comment on a configuration item or a dashboard opens with that item, and only that item, visible, whatever the card's filters were, and the reader can return to their own filters in one click.
 - A reviewer can follow a cross-card analysis from one link, in the author's order, seeing each comment's evidence (chart view, row, config item), without opening a drawer.
 - Leaving the story returns every card to the view the reader had before.
+- An AI agent can diagnose a run through the MCP server, leave anchored, tagged comments and a draft story on it, and hand its user a link. Every piece is marked AI, nothing reaches the team channel until a human publishes, and a key without `comments:write` can still write nothing.
 - A report generated after PR4 can contain the story with its marker charts.
 - No cross-tenant read: drafts and stories are 404 outside their org and to non-authors (drafts), in the API, on the socket and in the SUT export.
