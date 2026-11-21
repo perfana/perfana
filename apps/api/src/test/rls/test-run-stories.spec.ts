@@ -130,6 +130,7 @@ describe('StoriesService against a real database', () => {
     expect(first).not.toBeNull();
     const unpublished = await stories.update(empty.id, { status: 'draft' }, anna);
     expect(unpublished).toMatchObject({ status: 'draft', publishedAt: first });
+    // gstack-timing-ok: the wait only makes a re-stamped publishedAt differ; the pass does not depend on timing.
     await new Promise((r) => setTimeout(r, 10));
     expect((await stories.update(empty.id, { status: 'published' }, anna)).publishedAt).toBe(first);
     // A published story cannot be emptied in place.

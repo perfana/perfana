@@ -163,6 +163,25 @@ describe('StoryReader', () => {
     expect(ctx.closeDrawer).toHaveBeenCalled(); // a previous step's drawer does not linger
   });
 
+  // Value: protects=the bar centres on the page's content column, never on the window, so it does
+  // not sit on the sidebar at laptop widths; fails_when=the bar goes back to left 50% of the window;
+  // why_new=found by /ship QA at 1280px; seam=none; no_claim=real layout (jsdom rect is stubbed).
+  it('centres the bar on the content column beside the sidebar', async () => {
+    const main = document.createElement('main');
+    main.className = 'content-area';
+    main.getBoundingClientRect = () => ({ left: 280, width: 1000, top: 0, right: 1280, bottom: 900, height: 900, x: 280, y: 0, toJSON: () => ({}) });
+    document.body.appendChild(main);
+    try {
+      setUrl('story=s1&step=3');
+      render(<StoryReader />);
+      const bar = await screen.findByTestId('story-bar');
+      const style = window.getComputedStyle(bar);
+      expect(style.left).toBe('780px');
+    } finally {
+      main.remove();
+    }
+  });
+
   it('says so when the step\'s card is not on this run', async () => {
     jest.useFakeTimers();
     try {

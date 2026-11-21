@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -294,8 +294,35 @@ export default function StoryReader() {
   );
 }
 
+/**
+ * The page's content column (`main.content-area`, beside the sidebar) in viewport pixels, kept
+ * current on resize and on the sidebar's collapse. Null where the shell is absent (tests): the bar
+ * then centres on the window.
+ */
+function useContentColumn(): { left: number; width: number } | null {
+  const [rect, setRect] = useState<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = document.querySelector('main.content-area');
+    if (!el) return;
+    const read = () => {
+      const r = el.getBoundingClientRect();
+      setRect((prev) => (prev && prev.left === r.left && prev.width === r.width ? prev : { left: r.left, width: r.width }));
+    };
+    read();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(read) : null;
+    ro?.observe(el);
+    window.addEventListener('resize', read);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', read);
+    };
+  }, []);
+  return rect;
+}
+
 /** The bar's frame plus an in-flow spacer of the bar's height, so the page can scroll past it. */
 function StoryBarFrame({ barRef, barHeight, children }: { barRef: (el: HTMLDivElement | null) => void; barHeight: number; children: React.ReactNode }) {
+  const content = useContentColumn();
   return (
     <>
       <Box aria-hidden data-testid="story-bar-spacer" sx={{ height: barHeight ? barHeight + 24 : 0 }} />
@@ -307,10 +334,11 @@ function StoryBarFrame({ barRef, barHeight, children }: { barRef: (el: HTMLDivEl
         data-testid="story-bar"
         sx={{
           position: 'fixed',
-          left: '50%',
+          // Centred on the page's content column, not the window, so it never sits on the sidebar.
+          left: content ? content.left + content.width / 2 : '50%',
           transform: 'translateX(-50%)',
           bottom: 16,
-          width: 'min(1040px, calc(100vw - 32px))',
+          width: content ? `min(1040px, ${Math.max(content.width - 32, 0)}px)` : 'min(1040px, calc(100vw - 32px))',
           maxHeight: '45vh',
           overflowY: 'auto',
           zIndex: (t) => t.zIndex.snackbar - 1,
