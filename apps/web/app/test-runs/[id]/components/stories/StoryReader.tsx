@@ -20,6 +20,8 @@ import { fetchStory, storyHref, type RunStory, type RunStoryStep } from '@/lib/t
 import { expansionKeyOf, useComments } from '../comments/CommentsContext';
 import { CommentTagChip } from '../comments/CommentTagChip';
 import { firstLine, isTypingTarget, stepWhere, tagOf } from './story-format';
+import { AI_DRAFT_LABEL, StoryAuthorLine } from './StoryAuthorLine';
+import CommentAuthor from '../comments/CommentAuthor';
 
 /** How long a revealed card gets to appear before the bar says it is not on this run. */
 const CARD_PRESENCE_TIMEOUT_MS = 1500;
@@ -208,8 +210,14 @@ export default function StoryReader() {
         <DialogTitle id="story-intro-title">{story.title}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            A story by {story.authorName}
-            {story.status === 'draft' ? ' · draft, visible only to you' : story.publishedAt ? ` · published ${formatCommentTime(story.publishedAt)}` : ''}
+            {story.authorKind === 'agent' && story.status === 'published' ? <StoryAuthorLine story={story} /> : <>A story by <StoryAuthorLine story={story} /></>}
+            {story.status === 'draft'
+              ? story.authorKind === 'agent'
+                ? ` · ${AI_DRAFT_LABEL}, visible to everyone who can see this run`
+                : ' · draft, visible only to you'
+              : story.publishedAt
+                ? ` · published ${formatCommentTime(story.publishedAt)}`
+                : ''}
             {` · ${count} ${count === 1 ? 'step' : 'steps'}`}
           </Typography>
           <StepList story={story} onPick={(i) => go(i + 1)} />
@@ -359,7 +367,7 @@ function StepBar({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           {!c.deleted && (
             <Typography variant="caption" color="text.secondary">
-              {c.authorName}, {formatCommentTime(c.createdAt)}
+              <CommentAuthor name={c.authorName} kind={c.authorKind} variant="inherit" />, {formatCommentTime(c.createdAt)}
               {c.editedAt ? ' (edited)' : ''}
               {c.replyCount > 0 ? ` · ${c.replyCount} ${c.replyCount === 1 ? 'reply' : 'replies'}` : ''}
             </Typography>

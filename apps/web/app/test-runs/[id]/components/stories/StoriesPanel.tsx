@@ -12,6 +12,7 @@ import { deleteStory, fetchStories, storyHref, type RunStorySummary } from '@/li
 import { formatCommentTime } from '@/lib/test-run-comments';
 import { useComments } from '../comments/CommentsContext';
 import { StoryEditor } from './StoryEditor';
+import { StoryAuthorLine, storyStatusLabel } from './StoryAuthorLine';
 
 /** Opens the story reader by putting `?story=<id>` on the page URL (no step = the intro screen). */
 export function useOpenStory(): (id: string) => void {
@@ -25,8 +26,10 @@ export function useOpenStory(): (id: string) => void {
 }
 
 /**
- * The Stories tab of the run's Comments dialog: the run's published stories and the caller's own
- * drafts, with Read, Edit (author) and Delete (author or admin); the editor opens in place.
+ * The Stories tab of the run's Comments dialog: the run's published stories, AI agents' drafts
+ * (labelled `AI draft · not reviewed`, which any user may edit, publish or delete) and the caller's
+ * own drafts, with Read, Edit and Delete as the API's `canEdit` / `canDelete` allow; the editor
+ * opens in place.
  * Refetched on every `story:changed` for the run, since the socket carries no story content.
  * `onBeforeRead` runs before the reader opens (the dialog closes, so the story bar is visible).
  */
@@ -93,10 +96,15 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
               <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                   <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{s.title}</Typography>
-                  <Chip size="small" variant="outlined" label={s.status === 'published' ? 'Published' : 'Draft'} color={s.status === 'published' ? 'success' : 'default'} />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={storyStatusLabel(s)}
+                    color={s.status === 'published' ? 'success' : s.authorKind === 'agent' ? 'info' : 'default'}
+                  />
                 </Box>
                 <Typography variant="caption" color="text.secondary">
-                  {s.authorName} · {s.stepCount} {s.stepCount === 1 ? 'step' : 'steps'} · {formatCommentTime(s.publishedAt ?? s.createdAt)}
+                  <StoryAuthorLine story={s} /> · {s.stepCount} {s.stepCount === 1 ? 'step' : 'steps'} · {formatCommentTime(s.publishedAt ?? s.createdAt)}
                 </Typography>
               </Box>
               <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>

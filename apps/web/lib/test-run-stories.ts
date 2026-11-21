@@ -4,8 +4,9 @@ import type { RunComment } from '@/lib/test-run-comments';
 
 /**
  * Analysis stories on a test run (design: docs/designs/test-run-analysis-stories.md, "Stories"):
- * an ordered walk over the run's root comments, with a title and a conclusion. Drafts are visible
- * to their author only; the API answers 404 for anyone else's.
+ * an ordered walk over the run's root comments, with a title and a conclusion. A user's draft is
+ * visible to its author only (the API answers 404 for anyone else's); an AI agent's draft is visible
+ * to everyone who can see the run, for a person to review and publish.
  */
 export interface RunStorySummary {
   id: string;
@@ -17,12 +18,18 @@ export interface RunStorySummary {
   authorName: string;
   authorKind: StoryAuthorKind;
   publishedAt: string | null;
+  /** Who published it last (kept on unpublish); for an agent's story, the person who reviewed it. */
+  publishedById: string | null;
+  publishedByName: string | null;
   createdAt: string;
   updatedAt: string;
   stepCount: number;
-  /** The caller wrote it: may edit, reorder, publish and unpublish. */
+  /**
+   * The caller may edit, reorder, publish and unpublish: its author, any user for an AI agent's
+   * draft, or the person who published an agent's story.
+   */
   canEdit: boolean;
-  /** The caller may delete it (author, org admin, global admin). */
+  /** The caller may delete it (author, any user for an agent's draft, org admin, global admin). */
   canDelete: boolean;
 }
 

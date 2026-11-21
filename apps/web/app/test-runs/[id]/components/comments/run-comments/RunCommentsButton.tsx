@@ -25,7 +25,8 @@ export function runCommentsLabel(total: number, unread: number, stories: number,
  * The run header's comments icon: the run's comment total as a badge, red while comments by others
  * are unread, opening the Comments dialog. Shown when the run has comments, and also when it has
  * stories only, so they stay reachable. Stories are counted from the access-checked list (drafts:
- * the caller's own), refetched on `story:changed`.
+ * the caller's own and every AI agent's, so a run whose only content is an agent's proposed story
+ * still shows the icon), refetched on `story:changed`.
  */
 export default function RunCommentsButton() {
   const ctx = useComments();

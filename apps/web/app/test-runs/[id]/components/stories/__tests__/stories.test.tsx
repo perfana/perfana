@@ -45,6 +45,10 @@ import { StoryEditor } from '../StoryEditor';
 import { AddToStoryMenu } from '../AddToStoryMenu';
 // eslint-disable-next-line import/first
 import { isTypingTarget } from '../story-format';
+// eslint-disable-next-line import/first
+import { StoriesPanel } from '../StoriesPanel';
+// eslint-disable-next-line import/first
+import { AI_DRAFT_LABEL, storyAttribution, storyStatusLabel } from '../StoryAuthorLine';
 
 const comment = (over: Partial<RunComment>): RunComment & { replyCount: number } => ({
   id: 'c', testRunId: 'run-1', cardKey: 'performance', parentId: null, itemKey: null, itemLabel: null, body: 'text', deleted: false,
@@ -55,7 +59,7 @@ const comment = (over: Partial<RunComment>): RunComment & { replyCount: number }
 const graphsView = { kind: 'graphs' as const, series: [{ dashboardId: 'd', panelId: 1, metricName: 'm' }] as never };
 const STORY: RunStory = {
   id: 's1', testRunId: 'run-1', title: 'Checkout latency', summary: 'Heap too small.', status: 'published', authorId: 'u1', authorName: 'Anna',
-  authorKind: 'user', publishedAt: '2026-11-20T12:00:00Z', createdAt: '2026-11-20T11:00:00Z', updatedAt: '2026-11-20T12:00:00Z',
+  authorKind: 'user', publishedAt: '2026-11-20T12:00:00Z', publishedById: 'u1', publishedByName: 'Anna', createdAt: '2026-11-20T11:00:00Z', updatedAt: '2026-11-20T12:00:00Z',
   stepCount: 4, canEdit: true, canDelete: true,
   steps: [
     { position: 1, note: null, comment: comment({ id: 'm1', cardKey: 'graphs', markerSeq: 2, markerTime: '2026-11-20T10:05:00Z', chartContext: graphsView, body: 'p95 jumps', tag: 'symptom' }) },
@@ -309,5 +313,84 @@ describe('AddToStoryMenu', () => {
     fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'GC pauses' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(api.createStory).toHaveBeenCalledWith('run-1', 'GC pauses', [{ commentId: 'c42' }]));
+  });
+});
+
+// PR6b: an agent's story is a proposal a person reviews and publishes.
+describe('agent stories', () => {
+  const agentDraft = (): RunStory => ({
+    ...clone(STORY),
+    status: 'draft',
+    publishedAt: null,
+    publishedById: null,
+    publishedByName: null,
+    authorId: 'api-key:k1',
+    authorName: 'Claude analysis agent',
+    authorKind: 'agent',
+    canEdit: true,
+    canDelete: true,
+  });
+  const agentPublished = (): RunStory => ({
+    ...agentDraft(),
+    status: 'published',
+    publishedAt: '2026-11-20T12:00:00Z',
+    publishedById: 'u2',
+    publishedByName: 'Mark',
+    canEdit: false,
+    canDelete: false,
+  });
+
+  it('labels a draft, an agent draft and a published story, and words the attribution', () => {
+    expect(storyStatusLabel({ status: 'draft', authorKind: 'user' })).toBe('Draft');
+    expect(storyStatusLabel({ status: 'draft', authorKind: 'agent' })).toBe('AI draft · not reviewed');
+    expect(storyStatusLabel({ status: 'published', authorKind: 'agent' })).toBe('Published');
+    expect(storyAttribution(agentPublished())).toBe('Proposed by Claude analysis agent (AI) · reviewed and published by Mark');
+    expect(storyAttribution(STORY)).toBe('Anna');
+  });
+
+  it('lists an agent draft with the AI chip, its label and Edit; a published one names agent and reviewer', async () => {
+    api.fetchStories.mockResolvedValue([{ ...agentDraft(), id: 'd1', title: 'Agent draft' }, { ...agentPublished(), id: 'p1', title: 'Agent published' }]);
+    render(<StoriesPanel />);
+    const rows = await screen.findAllByTestId('story-row');
+    const draftRow = rows.find((r) => within(r).queryByText('Agent draft'))!;
+    expect(within(draftRow).getByText(AI_DRAFT_LABEL)).toBeInTheDocument();
+    expect(within(draftRow).getByTestId('comment-author-ai')).toBeInTheDocument();
+    expect(within(draftRow).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    const pubRow = rows.find((r) => within(r).queryByText('Agent published'))!;
+    expect(within(pubRow).getByTestId('story-proposed-by')).toHaveTextContent('Proposed by Claude analysis agent');
+    expect(within(pubRow).getByTestId('story-proposed-by')).toHaveTextContent('reviewed and published by Mark');
+    expect(within(pubRow).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
+
+  it('opens an agent draft in the editor with the review notice, Publish and Delete for any user', async () => {
+    api.fetchStory.mockResolvedValue(agentDraft());
+    render(<StoryEditor storyId="s1" onClose={jest.fn()} onRead={jest.fn()} />);
+    await screen.findByTestId('story-editor');
+    expect(screen.getByText(AI_DRAFT_LABEL)).toBeInTheDocument();
+    expect(within(screen.getByTestId('story-editor-author')).getByTestId('comment-author-ai')).toBeInTheDocument();
+    expect(screen.getByTestId('story-agent-review')).toHaveTextContent(/nobody has reviewed it yet/);
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Delete story' })).toBeInTheDocument();
+  });
+
+  it('hides Delete in the editor when the caller may not delete', async () => {
+    api.fetchStory.mockResolvedValue({ ...clone(STORY), canDelete: false });
+    render(<StoryEditor storyId="s1" onClose={jest.fn()} onRead={jest.fn()} />);
+    await screen.findByTestId('story-editor');
+    expect(screen.queryByRole('button', { name: 'Delete story' })).not.toBeInTheDocument();
+  });
+
+  it("introduces an agent draft as an unreviewed AI draft everyone can see, and a published one with its reviewer", async () => {
+    setUrl('story=s1');
+    api.fetchStory.mockResolvedValue(agentDraft());
+    const { unmount } = render(<StoryReader />);
+    let dialog = await screen.findByRole('dialog', { name: 'Checkout latency' });
+    expect(dialog).toHaveTextContent(`${AI_DRAFT_LABEL}, visible to everyone who can see this run`);
+    expect(within(dialog).getAllByTestId('comment-author-ai').length).toBeGreaterThan(0);
+    unmount();
+    api.fetchStory.mockResolvedValue(agentPublished());
+    render(<StoryReader />);
+    dialog = await screen.findByRole('dialog', { name: 'Checkout latency' });
+    expect(within(dialog).getByTestId('story-proposed-by')).toHaveTextContent('reviewed and published by Mark');
   });
 });
