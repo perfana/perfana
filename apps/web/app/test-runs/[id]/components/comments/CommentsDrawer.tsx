@@ -37,6 +37,7 @@ import { CONTROL_GROUP_BASELINE } from '@/lib/control-group-baseline';
 import { CARD_LABELS, useComments, type MarkerDraft } from './CommentsContext';
 import { CommentTagChip } from './CommentTagChip';
 import { CommentTagPicker } from './CommentTagPicker';
+import CommentAuthor from './CommentAuthor';
 
 /** Cards whose single thread opens (and focuses its item) as soon as the comments open. */
 const AUTO_OPEN_SINGLE_THREAD = new Set<CommentCardKey>(['distributed-tracing']);
@@ -189,7 +190,7 @@ function CommentItem({
       <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
         {isNew && <Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0, alignSelf: 'center' }} />}
         {isNew && <Box component="span" sx={visuallyHidden}>unread</Box>}
-        <Typography variant="body2" sx={{ fontWeight: isNew ? 600 : 500 }}>{comment.authorName}</Typography>
+        <CommentAuthor name={comment.authorName} kind={comment.authorKind} sx={{ fontWeight: isNew ? 600 : 500 }} />
         <Tooltip title={new Date(comment.createdAt).toLocaleString()}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: isNew ? 600 : 400 }}>
             {formatCommentTime(comment.createdAt)}
@@ -601,7 +602,9 @@ export default function CommentsDrawer() {
                     author, anchor, body, count and time onto one line left room for a few words. */}
                 <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-                    <Typography variant="body2" noWrap sx={{ fontWeight: unreadThread ? 600 : 500, flex: 1, minWidth: 0 }}>{t.authorName}</Typography>
+                    <Box sx={{ flex: 1, minWidth: 0, display: 'flex' }}>
+                      <CommentAuthor name={t.authorName} kind={t.authorKind} noWrap sx={{ fontWeight: unreadThread ? 600 : 500, minWidth: 0 }} />
+                    </Box>
                     <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{formatCommentTime(lastActivity(t))}</Typography>
                     {unreadThread && <Box aria-label="unread" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0 }} />}
                   </Box>

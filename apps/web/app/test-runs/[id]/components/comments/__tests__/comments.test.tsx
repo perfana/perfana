@@ -124,6 +124,32 @@ it('header button jumps to the first unread card in page order and opens its dra
   await waitFor(() => expect(mocked.markCommentsSeen).toHaveBeenCalledWith('run', 'slo'));
 });
 
+it('says how many unread an AI agent wrote in the header button', async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 1, unread: 1, unreadAgent: 1 }, slo: { total: 4, unread: 4, unreadAgent: 2 } });
+  renderPage();
+  expect(await screen.findByTestId('run-comments-button')).toHaveAccessibleName('5 unread (3 from AI) · next: Service level objectives (4)');
+});
+
+it('marks an agent author with an AI chip in the drawer, and a person without one', async () => {
+  mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 2, unread: 0 } });
+  mocked.fetchCommentThreads.mockResolvedValue({
+    lastSeenAt: '2999-01-01T00:00:00Z',
+    threads: [
+      { ...comment({ id: 'ai', body: 'agent finding', authorName: 'Claude analysis agent', authorKind: 'agent' }), replies: [] },
+      { ...comment({ id: 'hu', body: 'human note', authorName: 'Anna', authorKind: 'user' }), replies: [] },
+    ],
+  });
+  renderPage();
+  fireEvent.click(await screen.findByTestId('card-comments-graphs'));
+  const drawer = await screen.findByRole('complementary', { name: 'Comments on Graphs' });
+  await within(drawer).findAllByText('agent finding');
+  const rows = [...drawer.querySelectorAll('button[aria-expanded]')];
+  const agentRow = rows.find((r) => r.textContent?.includes('Claude analysis agent'))!;
+  const humanRow = rows.find((r) => r.textContent?.includes('human note'))!;
+  expect(within(agentRow as HTMLElement).getByTestId('comment-author-ai')).toHaveTextContent('AI');
+  expect(within(humanRow as HTMLElement).queryByTestId('comment-author-ai')).toBeNull();
+});
+
 it('lists unread threads first, expands the oldest unread one, and marks seen only after loading', async () => {
   mocked.fetchCommentCounts.mockResolvedValue({ graphs: { total: 1, unread: 1 } });
   mocked.fetchCommentThreads.mockResolvedValue({

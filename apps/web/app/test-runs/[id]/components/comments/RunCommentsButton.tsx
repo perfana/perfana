@@ -4,6 +4,7 @@ import React from 'react';
 import { Button, Tooltip } from '@mui/material';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import { CARD_LABELS, useComments } from './CommentsContext';
+import { unreadCommentsLabel } from '@/lib/test-run-comments';
 
 /**
  * Run-level unread total (design R6/DR8). Each click reveals the first card in page order that
@@ -14,7 +15,7 @@ export default function RunCommentsButton() {
   const ctx = useComments();
   if (!ctx || ctx.totalUnread === 0 || !ctx.nextUnreadCard) return null;
   const next = ctx.nextUnreadCard;
-  const label = `${ctx.totalUnread} unread · next: ${CARD_LABELS[next]} (${ctx.unread[next]})`;
+  const label = `${unreadCommentsLabel(ctx.totalUnread, ctx.totalUnreadAgent)} · next: ${CARD_LABELS[next]} (${ctx.unread[next]})`;
   return (
     <Tooltip title={label}>
       <Button

@@ -70,6 +70,8 @@ interface CommentsContextValue {
   counts: CardCommentCounts;
   unread: Partial<Record<CommentCardKey, number>>;
   totalUnread: number;
+  /** Of `totalUnread`, how many an AI agent wrote. */
+  totalUnreadAgent: number;
   /** The card whose drawer is open, if any. */
   openCard: CommentCardKey | null;
   /** A comment to scroll to and highlight once (deep link). */
@@ -209,7 +211,7 @@ export function CommentsProvider({
       setFocusReplay(replay);
       if (card !== 'graphs') setMarkerDraft(null);
       // The drawer marks the card seen on the server once it has read the previous mark.
-      setCounts((prev) => (prev[card] ? { ...prev, [card]: { ...prev[card]!, unread: 0 } } : prev));
+      setCounts((prev) => (prev[card] ? { ...prev, [card]: { ...prev[card]!, unread: 0, unreadAgent: 0 } } : prev));
     },
     [],
   );
@@ -299,10 +301,11 @@ export function CommentsProvider({
   }, [counts, reveal, openDrawer]);
 
   const totalUnread = Object.values(unread).reduce<number>((a, b) => a + (b ?? 0), 0);
+  const totalUnreadAgent = Object.values(counts).reduce<number>((a, c) => a + (c?.unreadAgent ?? 0), 0);
 
   const value = useMemo(
-    () => ({ runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, registerViewCapture, captureView }),
-    [runId, runStart, counts, unread, totalUnread, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, registerViewCapture, captureView],
+    () => ({ runId, runStart, counts, unread, totalUnread, totalUnreadAgent, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, setActiveThreadId, viewRequest, restoreView, registerViewCapture, captureView }),
+    [runId, runStart, counts, unread, totalUnread, totalUnreadAgent, openCard, focusCommentId, lastEvent, live, openDrawer, closeDrawer, jumpToNextUnread, nextUnreadCard, jumpToFirstCommented, reveal, showComment, composeAnchor, commentOnItem, clearComposeAnchor, itemFocus, focusItem, focusReplay, markerDraft, startMarker, moveMarker, cancelMarker, activeThreadId, viewRequest, restoreView, registerViewCapture, captureView],
   );
   return <CommentsContext.Provider value={value}>{children}</CommentsContext.Provider>;
 }

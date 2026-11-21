@@ -18,6 +18,7 @@ import { fetchCommentThreads, formatCommentTime, type RunCommentThread } from '@
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import { CARD_LABELS, PAGE_ORDER, useComments } from '../comments/CommentsContext';
 import { CommentTagChip } from '../comments/CommentTagChip';
+import CommentAuthor from '../comments/CommentAuthor';
 
 const tagOf = (t: { tag?: unknown }): CommentTag | null => (isCommentTag(t.tag) ? t.tag : null);
 /** What the root is on: its item, or its marker number on Graphs. */
@@ -316,7 +317,7 @@ function CommentRow({
             </Typography>
           )}
           <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
-            {t.authorName} · {formatCommentTime(t.createdAt)}
+            <CommentAuthor name={t.authorName} kind={t.authorKind} variant="caption" /> · {formatCommentTime(t.createdAt)}
           </Typography>
         </Box>
         <Typography

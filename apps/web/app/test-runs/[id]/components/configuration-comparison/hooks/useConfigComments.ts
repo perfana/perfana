@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  COMMENT_ITEM_KEY_MAX_LENGTH,
-  COMMENT_ITEM_LABEL_MAX_LENGTH,
   CONFIG_VIEW_VALUE_MAX_LENGTH,
+  configCommentAnchor as sharedConfigCommentAnchor,
   configCommentItemKey,
 } from '@perfana/shared/constants/comment-cards';
 import { useCommentItemCounts, useCommentItemFocus, useComments } from '../../comments/CommentsContext';
@@ -13,15 +12,8 @@ import type { ConfigComparison, RelatedTestRun } from '../types';
 /** Code points, so a key is never cut through a surrogate pair. */
 const chars = (s: string) => Array.from(s);
 
-/**
- * A config row's comment anchor, or null when its item key would not fit `item_key` (the API
- * would refuse it). Keys that long are not expected; the guard only avoids a 400.
- */
-export function configCommentAnchor(configKey: string): { itemKey: string; itemLabel: string } | null {
-  const itemKey = configCommentItemKey(configKey);
-  if (chars(itemKey).length > COMMENT_ITEM_KEY_MAX_LENGTH) return null;
-  return { itemKey, itemLabel: chars(configKey).slice(0, COMMENT_ITEM_LABEL_MAX_LENGTH).join('') };
-}
+/** A config row's comment anchor; one definition in the shared package (agent anchors use it too). */
+export const configCommentAnchor = sharedConfigCommentAnchor;
 
 const cap = (v: string | null) => (v === null ? null : chars(v).slice(0, CONFIG_VIEW_VALUE_MAX_LENGTH).join(''));
 

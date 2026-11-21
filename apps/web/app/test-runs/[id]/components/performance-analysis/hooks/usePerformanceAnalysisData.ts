@@ -1,5 +1,6 @@
 'use client';
 
+import { TRANSACTION_NO_SCENARIO_GROUP, transactionScenarioGroup } from '@perfana/shared/constants/comment-cards';
 import { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import { TabActiveContext } from '../../../context/TabActiveContext';
 import { authenticatedFetch } from '@/lib/api';
@@ -504,7 +505,7 @@ export function usePerformanceAnalysisData({
 
   // Group transactions by scenario
   const groupedByScenario = sortedTransactions.reduce((groups, transaction) => {
-    const scenario = transaction.scenario_name || 'No Scenario';
+    const scenario = transactionScenarioGroup(transaction.scenario_name);
     if (!groups[scenario]) {
       groups[scenario] = [];
     }
@@ -513,8 +514,8 @@ export function usePerformanceAnalysisData({
   }, {} as Record<string, TransactionStat[]>);
 
   const scenarioGroups = Object.entries(groupedByScenario).sort(([a], [b]) => {
-    if (a === 'No Scenario') return 1;
-    if (b === 'No Scenario') return -1;
+    if (a === TRANSACTION_NO_SCENARIO_GROUP) return 1;
+    if (b === TRANSACTION_NO_SCENARIO_GROUP) return -1;
     return a.localeCompare(b);
   });
 

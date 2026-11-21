@@ -1,5 +1,6 @@
 'use client';
 
+import { transactionCommentItemLabel } from '@perfana/shared/constants/comment-cards';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Box,
@@ -287,7 +288,7 @@ export function TransactionsTable({
                             onOpenSamplerActionMenu={onOpenSamplerActionMenu}
                             onOpenSamplerErrors={onOpenSamplerErrors}
                             commentItemKey={transactionItemKey(scenarioName, transaction.transaction_name)}
-                            commentItemLabel={`${scenarioName} · ${transaction.transaction_name}`.slice(0, 255)}
+                            commentItemLabel={transactionCommentItemLabel(scenarioName, transaction.transaction_name)}
                             commentCounts={commentCounts}
                           />
                         ))}

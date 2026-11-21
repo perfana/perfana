@@ -13,6 +13,8 @@ import {
   MenuItem,
   Alert,
   Typography,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import { UseFormReturn } from 'react-hook-form';
 import { CreateApiKeyFormData } from '@/lib/validations';
@@ -109,6 +111,30 @@ export function ApiKeyFormDialog({
               </Typography>
             )}
           </FormControl>
+
+          {/* Opt-in agent scope (design: test-run-analysis-stories.md, "MCP"). Off by default: a
+              key stays read-only for comments unless its creator asks for this. */}
+          <FormControlLabel
+            sx={{ mb: 2, alignItems: 'flex-start', ml: 0 }}
+            control={
+              <Checkbox
+                checked={!!form.watch('commentsWrite')}
+                onChange={(e) => form.setValue('commentsWrite', e.target.checked)}
+                sx={{ pt: 0.25, pl: 0 }}
+                inputProps={{ 'aria-describedby': 'api-key-comments-write-help' }}
+              />
+            }
+            label={
+              <span>
+                <Typography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+                  Allow writing comments (for an AI agent)
+                </Typography>
+                <Typography id="api-key-comments-write-help" variant="caption" color="text.secondary" component="span" sx={{ display: 'block' }}>
+                  Adds the comments:write role: the key can post and edit its own test-run comments, marked as AI. It cannot delete anything and grants nothing else.
+                </Typography>
+              </span>
+            }
+          />
 
           {/* Organization Selector - shown only for multi-org users */}
           {showOrganizationSelector && (
