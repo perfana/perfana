@@ -23,6 +23,7 @@ import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { Capability } from '../../constants/capabilities.constants';
 import { CreateNotificationChannelDto, UpdateNotificationChannelDto } from './dto';
 import { CommentDigest, MattermostMessageBuilder, SlackMessageBuilder, TeamsMessageBuilder } from './message-builders';
+import type { StoryAnnouncement } from './message-builders';
 import { MASKED_WEBHOOK_URL } from './notifications.constants';
 import { checkWebhookTarget, postJsonGuarded } from './webhook-target-guard';
 
@@ -600,6 +601,28 @@ export class NotificationsService implements OnApplicationBootstrap {
         break;
       case 'mattermost':
         message = this.mattermostBuilder.buildCommentMessage(digest);
+        break;
+      default:
+        throw new Error(`Unsupported notification type: ${channel.type}`);
+    }
+    await this.deliver(channel, message);
+  }
+
+  /**
+   * Post one "analysis story published" message to a channel (the same sweep). Throws on
+   * failure, like `sendCommentDigest`.
+   */
+  async sendStoryAnnouncement(channel: NotificationChannel, story: StoryAnnouncement): Promise<void> {
+    let message: unknown;
+    switch (channel.type) {
+      case 'slack':
+        message = this.slackBuilder.buildStoryMessage(story);
+        break;
+      case 'teams':
+        message = this.teamsBuilder.buildStoryMessage(story);
+        break;
+      case 'mattermost':
+        message = this.mattermostBuilder.buildStoryMessage(story);
         break;
       default:
         throw new Error(`Unsupported notification type: ${channel.type}`);

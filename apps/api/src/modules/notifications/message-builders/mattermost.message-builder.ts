@@ -1,5 +1,6 @@
 import { TestRun } from '@perfana/shared';
 import { CommentDigest, commentDetail, commentHeadline } from './comment-digest';
+import { StoryAnnouncement, storyDetail, storyHeadline } from './comment-digest';
 
 /**
  * Mattermost incoming-webhook payload.
@@ -96,6 +97,22 @@ export class MattermostMessageBuilder {
           fallback: headline,
           color: COLOR_INFO,
           text: `${commentDetail(digest)}\n\n[View comments in Perfana](${digest.link})`,
+        },
+      ],
+    };
+  }
+
+  /** One post per published story: who, where, its title and step count, and a reader link. */
+  buildStoryMessage(story: StoryAnnouncement): MattermostMessage {
+    const headline = storyHeadline(story);
+    return {
+      username: 'Perfana',
+      text: `:books: **${headline}**`,
+      attachments: [
+        {
+          fallback: `${headline}: ${storyDetail(story)}`,
+          color: COLOR_INFO,
+          text: `${storyDetail(story)}\n\n[Read the analysis in Perfana](${story.link})`,
         },
       ],
     };
