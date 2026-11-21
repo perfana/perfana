@@ -15,16 +15,12 @@ export type CommentEvent =
   | { type: 'comment:created' | 'comment:updated'; comment: RunComment; seq: number }
   | { type: 'comment:deleted'; comment: RunComment & { hardDeleted?: boolean }; seq: number };
 
-/** An expansion key whose card takes comments. */
-export type CommentableExpansionKey = keyof typeof COMMENT_CARD_BY_EXPANSION_KEY;
-
 /**
- * The page's cards that take no comments of their own. Every other expansion key must have a
- * stored card key in COMMENT_CARD_BY_EXPANSION_KEY (the comments test asserts it).
+ * An expansion key whose card takes comments. Every card on the page does (the comments test
+ * asserts each expansion key has a stored card key); the run-wide list lives in the header's
+ * Comments dialog, not in a card.
  */
-export const NON_COMMENTABLE_EXPANSION_KEYS: readonly Exclude<keyof ExpansionState, CommentableExpansionKey>[] = Object.freeze([
-  'commentsExpanded', // the run-wide Comments card lists the other cards' comments
-]);
+export type CommentableExpansionKey = keyof typeof COMMENT_CARD_BY_EXPANSION_KEY;
 
 export const CARD_LABELS: Readonly<Record<CommentCardKey, string>> = COMMENT_CARD_LABELS;
 
@@ -35,8 +31,8 @@ export function cardKeyOf(expansionKey: keyof ExpansionState): CommentCardKey | 
 }
 
 /**
- * Every commentable card in page order (Results, then RCA, then Reporting), for the header's
- * next-unread jump. Cards without a comment card key (the Comments card) are skipped.
+ * Every commentable card in page order (Results, then RCA, then Reporting), for the Comments
+ * dialog's next-unread jump. A key without a comment card key would be skipped, not crash.
  */
 export const PAGE_ORDER: CommentCardKey[] = Object.values(TAB_CARDS)
   .flat()

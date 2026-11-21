@@ -216,7 +216,7 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
       </Box>
       {steps.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-          No steps yet. Use “Add to story” on a comment, in this card or in a card’s comments.
+          No steps yet. Use “Add to story” on a comment, in All comments or in a card’s comments.
         </Typography>
       ) : (
         <DndContext

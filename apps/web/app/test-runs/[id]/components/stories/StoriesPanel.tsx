@@ -25,11 +25,12 @@ export function useOpenStory(): (id: string) => void {
 }
 
 /**
- * The Comments card's Stories tab: the run's published stories and the caller's own drafts, with
- * Read, Edit (author) and Delete (author or admin); the editor opens in place. Refetched on every
- * `story:changed` for the run, since the socket carries no story content.
+ * The Stories tab of the run's Comments dialog: the run's published stories and the caller's own
+ * drafts, with Read, Edit (author) and Delete (author or admin); the editor opens in place.
+ * Refetched on every `story:changed` for the run, since the socket carries no story content.
+ * `onBeforeRead` runs before the reader opens (the dialog closes, so the story bar is visible).
  */
-export function StoriesPanel() {
+export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {}) {
   const ctx = useComments();
   const runId = ctx?.runId;
   const storyEvent = ctx?.storyEvent?.seq ?? 0;
@@ -37,7 +38,14 @@ export function StoriesPanel() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const openStory = useOpenStory();
+  const navigate = useOpenStory();
+  const openStory = useCallback(
+    (id: string) => {
+      onBeforeRead?.();
+      navigate(id);
+    },
+    [onBeforeRead, navigate],
+  );
 
   useEffect(() => {
     if (!runId) return;

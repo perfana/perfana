@@ -63,7 +63,7 @@ export function AddToStoryMenu({ commentId, label }: { commentId: string; label?
       await createStory(ctx.runId, t, [{ commentId }]);
       setNaming(false);
       setTitle('');
-      setToast(`Started “${t}”: open the Stories tab in the Comments card to edit it`);
+      setToast(`Started “${t}”: edit it under Comments (run header) › Stories`);
     } catch (e) {
       setDialogError(message(e));
     } finally {
