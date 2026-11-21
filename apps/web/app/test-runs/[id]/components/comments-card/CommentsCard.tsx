@@ -17,7 +17,7 @@ import { COMMENT_TAGS, isCommentTag, type CommentCardKey, type CommentTag } from
 import { fetchCommentThreads, formatCommentTime, type RunCommentThread } from '@/lib/test-run-comments';
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import { CARD_LABELS, PAGE_ORDER, useComments } from '../comments/CommentsContext';
-import CommentTagChip from './CommentTagChip';
+import { CommentTagChip } from '../comments/CommentTagChip';
 
 const tagOf = (t: { tag?: unknown }): CommentTag | null => (isCommentTag(t.tag) ? t.tag : null);
 /** What the root is on: its item, or its marker number on Graphs. */
