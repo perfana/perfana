@@ -3,7 +3,9 @@ import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import {
   COMMENT_CARD_KEYS,
   COMMENT_CARD_LABELS,
+  describeConfigCommentView,
   type CommentCardKey,
+  type ConfigCommentView,
 } from '@perfana/shared/constants/comment-cards';
 import {
   ReportDataFetcherService,
@@ -177,6 +179,7 @@ export class CommentsRenderer {
       <div class="comment-thread" style="margin:0 0 18px; padding:14px 16px; background:${REPORT_COLORS.cardBg}; border:1px solid ${REPORT_COLORS.cardBorder}; border-radius:6px; break-inside:avoid-page;">
         ${chart}
         ${this.renderComment(thread.root)}
+        ${this.renderConfigView(thread.root)}
         ${replies}
       </div>
     `;
@@ -265,6 +268,18 @@ export class CommentsRenderer {
     return chart + (missing > 0
       ? this.note(`${formatInt(missing)} of ${formatInt(selectors.length)} series recorded with this marker no longer resolve and are not drawn.`)
       : '');
+  }
+
+  /**
+   * The comparison a Configuration item comment was written against, so it stays readable once
+   * the card compares with another run. Escaped like everything else: the values are config
+   * values from the run, which anyone uploading configs controls.
+   */
+  private renderConfigView(root: ReportCommentRow): string {
+    const ctx = root.chartContext;
+    if (root.deletedAt !== null || root.cardKey !== 'config' || ctx?.kind !== 'config' || typeof ctx.status !== 'string') return '';
+    const line = describeConfigCommentView(ctx as unknown as ConfigCommentView);
+    return `<div class="comment-config-view" style="font-size:9.5pt; color:${REPORT_COLORS.secondaryInk}; overflow-wrap:anywhere; white-space:pre-wrap; margin:0 0 4px;">${escapeHtml(line)}</div>`;
   }
 
   private note(message: string): string {

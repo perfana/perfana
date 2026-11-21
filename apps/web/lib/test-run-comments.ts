@@ -1,5 +1,5 @@
 import { authenticatedFetch } from '@/lib/api';
-import type { CommentCardKey, CommentTag } from '@perfana/shared/constants/comment-cards';
+import type { CommentCardKey, CommentTag, ConfigCommentView } from '@perfana/shared/constants/comment-cards';
 import type { SeriesConfig as PresetSeries } from '@/lib/graph-presets';
 
 /**
@@ -47,11 +47,17 @@ export interface CompareView {
   baselineTestRunId?: string;
 }
 
-/** What a Graphs, Trends or Compare comment records about its card's view (design: PR2). */
-export type CommentView = MarkerChartContext | TrendsView | CompareView;
+/**
+ * The comparison a Configuration item comment was written against (design:
+ * test-run-analysis-stories.md, "Item-level comments").
+ */
+export type ConfigView = ConfigCommentView & { kind: 'config' };
+
+/** What a Graphs, Trends or Compare comment, or a Configuration item comment, records about its card's view. */
+export type CommentView = MarkerChartContext | TrendsView | CompareView | ConfigView;
 
 /** The comment's view if it was recorded on `card`; Graphs views from before `kind` existed count as Graphs. */
-export function viewOf<C extends 'graphs' | 'trends' | 'compare'>(
+export function viewOf<C extends 'graphs' | 'trends' | 'compare' | 'config'>(
   comment: Pick<RunComment, 'chartContext'>,
   card: C,
 ): Extract<CommentView, { kind?: C }> | null {

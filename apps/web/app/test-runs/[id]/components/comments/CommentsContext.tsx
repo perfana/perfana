@@ -86,11 +86,18 @@ interface CommentsContextValue {
   /** The latest "show this comment's view" request; the card it names consumes each key once. */
   viewRequest: { card: CommentCardKey; key: string; comment: RunComment } | null;
   restoreView: (comment: RunComment) => void;
-  /** A card (Graphs, Trends, Compare) registers how to read its current view; returns the unregister. */
-  registerViewCapture: (card: CommentCardKey, capture: () => CommentView | null) => () => void;
+  /**
+   * A card (Graphs, Trends, Compare, Configuration) registers how to read its current view;
+   * returns the unregister. `itemKey` is the item the new comment is anchored to, for a card
+   * whose view is per item (Configuration).
+   */
+  registerViewCapture: (card: CommentCardKey, capture: ViewCapture) => () => void;
   /** The card's current view, for a root comment to record; null when the card records none. */
-  captureView: (card: CommentCardKey) => CommentView | null;
+  captureView: (card: CommentCardKey, itemKey?: string | null) => CommentView | null;
 }
+
+/** Reads a card's view for a new root comment; `itemKey` is the comment's anchor, if any. */
+export type ViewCapture = (itemKey?: string | null) => CommentView | null;
 
 const CommentsContext = createContext<CommentsContextValue | null>(null);
 
@@ -133,7 +140,7 @@ export function CommentsProvider({
   const [markerDraft, setMarkerDraft] = useState<MarkerDraft | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [viewRequest, setViewRequest] = useState<CommentsContextValue['viewRequest']>(null);
-  const captures = useRef(new Map<CommentCardKey, () => CommentView | null>());
+  const captures = useRef(new Map<CommentCardKey, ViewCapture>());
   const openCardRef = useRef(openCard);
   openCardRef.current = openCard;
   const seqRef = useRef(0);
@@ -210,13 +217,16 @@ export function CommentsProvider({
     },
     [reveal],
   );
-  const registerViewCapture = useCallback((card: CommentCardKey, capture: () => CommentView | null) => {
+  const registerViewCapture = useCallback((card: CommentCardKey, capture: ViewCapture) => {
     captures.current.set(card, capture);
     return () => {
       if (captures.current.get(card) === capture) captures.current.delete(card);
     };
   }, []);
-  const captureView = useCallback((card: CommentCardKey) => captures.current.get(card)?.() ?? null, []);
+  const captureView = useCallback(
+    (card: CommentCardKey, itemKey?: string | null) => captures.current.get(card)?.(itemKey) ?? null,
+    [],
+  );
   const commentOnItem = useCallback(
     (card: CommentCardKey, itemKey: string, itemLabel: string) => {
       openDrawer(card);

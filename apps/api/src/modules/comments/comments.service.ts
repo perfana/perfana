@@ -166,6 +166,10 @@ export class CommentsService {
         // here rather than let the INSERT fail with a 500 inside the request transaction.
         if (Number.isNaN(Date.parse(dto.markerTime!))) throw new BadRequestException('markerTime must be a readable timestamp');
       }
+      if (dto.card === 'config' && dto.chartContext && !dto.parentId && !dto.itemKey) {
+        // A Configuration view is one item's comparison; a card-level comment has none to record.
+        throw new BadRequestException('A Configuration view belongs to a comment on a configuration item');
+      }
       const chartContext = dto.chartContext ? validateChartContext(dto.card, dto.parentId, dto.chartContext) : null;
       if (dto.parentId) {
         // Lock the parent so a concurrent hard delete cannot orphan the reply.
@@ -322,11 +326,11 @@ export class CommentsService {
 /**
  * Check a comment's recorded view against its card's shape and return what to store: the
  * validated, whitelisted fields plus `kind` (the card), stamped here rather than trusted from
- * the body. Only Graphs, Trends and Compare roots record a view.
+ * the body. Only Graphs, Trends and Compare roots, and Configuration item roots, record a view.
  */
 export function validateChartContext(card: string, parentId: string | undefined, raw: Record<string, unknown>): Record<string, unknown> {
   const cls = (CHART_CONTEXT_DTO_BY_CARD as Record<string, new () => object>)[card];
-  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends or Compare records a view');
+  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends, Compare or a Configuration item records a view');
   if (Buffer.byteLength(JSON.stringify(raw)) > CHART_CONTEXT_MAX_BYTES) throw new BadRequestException('chartContext is too large');
   const view = plainToInstance(cls, raw);
   const errors = validateSync(view, { whitelist: true });

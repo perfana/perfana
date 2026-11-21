@@ -130,3 +130,76 @@ describe('CommentsService canModerate', () => {
     expect(res.canModerate).toBe(expected);
   });
 });
+
+// Value: protects=a Configuration view is stored only on a root comment anchored to a config item,
+// with `kind: 'config'` stamped by the server; a reply, a card-level comment and an oversized value
+// are 400 before any row is written; fails_when=`config` leaves CHART_CONTEXT_DTO_BY_CARD, the value
+// cap or the item guard is dropped, or kind is trusted from the body; why_new=PR1 of
+// test-run-analysis-stories.md adds the config view; seam=none (same mocked EM as above);
+// no_claim=the reply's parent lookup (covered against Postgres by the RLS spec).
+describe('CommentsService Configuration view', () => {
+  const ORG = '11111111-1111-4111-8111-111111111111';
+  const RUN = '22222222-2222-4222-8222-222222222222';
+  const PARENT = '44444444-4444-4444-8444-444444444444';
+  const view = { comparedToTestRunId: 'App-00006', status: 'changed', currentValue: '512m', previousValue: '2g' };
+
+  const setup = () => {
+    const repo = {
+      create: (v: Record<string, unknown>) => v,
+      save: jest.fn(async (v: Record<string, unknown>) => ({
+        ...v,
+        id: '33333333-3333-4333-8333-333333333333',
+        deletedAt: null,
+        editedAt: null,
+        createdAt: new Date('2026-11-20T10:00:00Z'),
+      })),
+    };
+    const em = {
+      query: jest.fn().mockResolvedValue([{ id: RUN, organization_id: ORG, team_id: null }]),
+      getRepository: () => repo,
+    };
+    const dataSource = { transaction: (fn: (e: typeof em) => unknown) => fn(em), manager: em };
+    const service = new CommentsService(dataSource as never, {} as never, { emitCommentEvent: jest.fn() } as never, {} as never);
+    return { service, repo };
+  };
+  const caller = { userId: 'sub-1', displayName: 'Ada', orgIds: [ORG] };
+
+  it('stores the view on a config item root, stamped with kind config', async () => {
+    const { service, repo } = setup();
+    const res = await service.create(
+      'run-1',
+      { card: 'config', body: 'heap shrank', itemKey: 'config:heap.max', itemLabel: 'heap.max', chartContext: { ...view, kind: 'graphs' } } as never,
+      caller,
+    );
+    expect(repo.save).toHaveBeenCalledTimes(1);
+    expect(res.chartContext).toEqual({ ...view, kind: 'config' });
+  });
+
+  it('refuses a view on a reply', async () => {
+    const { service, repo } = setup();
+    await expect(
+      service.create('run-1', { card: 'config', body: 'b', parentId: PARENT, chartContext: view } as never, caller),
+    ).rejects.toThrow(/root comment/);
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('refuses a view on a card-level config comment', async () => {
+    const { service, repo } = setup();
+    await expect(service.create('run-1', { card: 'config', body: 'b', chartContext: view } as never, caller)).rejects.toThrow(
+      'configuration item',
+    );
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('refuses a value over 2,000 characters', async () => {
+    const { service, repo } = setup();
+    await expect(
+      service.create(
+        'run-1',
+        { card: 'config', body: 'b', itemKey: 'config:k', itemLabel: 'k', chartContext: { ...view, currentValue: 'x'.repeat(2001) } } as never,
+        caller,
+      ),
+    ).rejects.toThrow(/chartContext\.currentValue/);
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+});

@@ -18,7 +18,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { COMMENT_BODY_MAX_LENGTH, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_BODY_MAX_LENGTH, describeConfigCommentView, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
 import { useAuth } from '@/contexts/auth-context';
 import {
   deleteComment,
@@ -50,6 +50,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 
 
 /** One line saying what view a comment recorded, shown beside its "Restore view". */
 export function describeView(view: CommentView, marker: boolean): string {
+  if (view.kind === 'config') return describeConfigCommentView(view);
   const n = `${view.series.length} series`;
   if (view.kind === 'trends') {
     const dates = view.customRange ? `${day(view.customRange[0])}–${day(view.customRange[1])}` : null;
@@ -260,6 +261,21 @@ function MarkerComposer({
         Click the chart to move it.
       </Typography>
       <Composer placeholder={`Describe what happens at ${at}…`} submitLabel="Place marker" autoFocus onSubmit={onSubmit} onCancel={onCancel} />
+    </Box>
+  );
+}
+
+/** What view a root recorded, with its "Restore view". Nothing for a deleted root or one without a view. */
+function ViewLine({ thread, onRestore }: { thread: RunCommentThread; onRestore: () => void }) {
+  if (!thread.chartContext || thread.deleted) return null;
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }} data-testid={`comment-view-${thread.id}`}>
+      <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+        {describeView(thread.chartContext, thread.markerSeq != null)}
+      </Typography>
+      <Button size="small" onClick={onRestore} sx={{ flexShrink: 0 }}>
+        Restore view
+      </Button>
     </Box>
   );
 }
@@ -508,7 +524,7 @@ export default function CommentsDrawer() {
             // stops the comment itself from posting.
             let view: CommentView | undefined;
             try {
-              view = ctx.captureView(card) ?? undefined;
+              view = ctx.captureView(card, anchor?.itemKey ?? null) ?? undefined;
             } catch {
               view = undefined;
             }
@@ -599,16 +615,9 @@ export default function CommentsDrawer() {
               </ButtonBase>
               {open && (
                 <Box sx={{ px: 1, pb: 1.5 }}>
-                  {t.chartContext && !t.deleted && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0 }}>
-                        {describeView(t.chartContext, t.markerSeq != null)}
-                      </Typography>
-                      <Button size="small" onClick={() => ctx.restoreView(t)} sx={{ flexShrink: 0 }}>
-                        Restore view
-                      </Button>
-                    </Box>
-                  )}
+                  {/* A chart view heads its comment; a Configuration comparison is a fact about
+                      the comment, so it sits under it. */}
+                  {t.chartContext?.kind !== 'config' && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
                   <CommentItem
                     comment={t}
                     isNew={isNew(t)}
@@ -617,6 +626,7 @@ export default function CommentsDrawer() {
                     onEdit={async (body) => upsert(await editComment(t.id, body))}
                     onDelete={() => remove(t)}
                   />
+                  {t.chartContext?.kind === 'config' && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
                   <Box sx={{ pl: 2, borderLeft: 1, borderColor: 'divider', ml: 0.5 }}>
                     {t.replies.map((r) => (
                       <CommentItem

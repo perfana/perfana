@@ -29,6 +29,8 @@ export function useDashboardsData({
   const [allDashboardTags, setAllDashboardTags] = useState<string[]>([]);
   const [dashboardSearchText, setDashboardSearchText] = useState('');
   const [expandedDashboard, setExpandedDashboard] = useState<Dashboard | null>(null);
+  // The list has answered (or failed) for this run, so a dashboard missing from it is really gone.
+  const [dashboardsLoaded, setDashboardsLoaded] = useState(false);
 
   // Track last loaded combination to prevent unnecessary reloads
   const lastLoadedRef = useRef<string>('');
@@ -105,6 +107,7 @@ export function useDashboardsData({
       setDashboards([]);
     } finally {
       setDashboardsLoading(false);
+      setDashboardsLoaded(true);
     }
   }, [testRun?.system_under_test_id, testRun?.test_environment]);
 
@@ -180,6 +183,7 @@ export function useDashboardsData({
     setDashboards([]);
     setAllDashboardTags([]);
     setSelectedDashboardTags([]);
+    setDashboardsLoaded(false);
     lastLoadedRef.current = '';
   }, [testRun?.id]);
 
@@ -218,6 +222,7 @@ export function useDashboardsData({
 
     // Loading states
     dashboardsLoading,
+    dashboardsLoaded,
 
     // Selection state
     selectedDashboardTags,

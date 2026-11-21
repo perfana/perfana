@@ -23,6 +23,8 @@ import { DashboardsSectionProps } from './types';
 
 // Hooks
 import { useDashboardsData } from './hooks';
+import { useDashboardComments } from './hooks/useDashboardComments';
+import CommentFilterChip from '../comments/CommentFilterChip';
 
 // Utils
 import { buildGrafanaNewTabUrl } from './utils';
@@ -50,6 +52,8 @@ export default function DashboardsSection({
     dashboardsExpanded,
     onDashboardsExpand,
   });
+  const dashboardComments = useDashboardComments(dashboardsData, dashboardsExpanded);
+  const commentFilter = dashboardComments.filter;
 
   // Handle open in Grafana
   const handleOpenInGrafana = (dashboard: typeof dashboardsData.dashboards[0]) => {
@@ -231,7 +235,15 @@ export default function DashboardsSection({
               <Divider sx={{ my: 2 }} />
               <DashboardsExpandedContent
                 dashboards={dashboardsData.dashboards}
-                filteredDashboards={dashboardsData.filteredDashboards}
+                filteredDashboards={dashboardComments.visibleDashboards}
+                commentCounts={dashboardComments.counts}
+                commentFilter={commentFilter && (
+                  <CommentFilterChip
+                    label={commentFilter.label}
+                    missing={commentFilter.ready && !commentFilter.exists ? 'This dashboard is no longer configured for this workload' : null}
+                    onShowAll={dashboardComments.clearCommentFocus}
+                  />
+                )}
                 dashboardsLoading={dashboardsData.dashboardsLoading}
                 allDashboardTags={dashboardsData.allDashboardTags}
                 selectedDashboardTags={dashboardsData.selectedDashboardTags}

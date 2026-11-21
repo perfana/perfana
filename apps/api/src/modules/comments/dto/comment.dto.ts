@@ -21,6 +21,7 @@ import { CompareSeriesConfig } from '../../compare-presets/dto/create-compare-pr
 import {
   COMMENT_BODY_MAX_LENGTH,
   COMMENT_CARD_KEYS,
+  CONFIG_VIEW_VALUE_MAX_LENGTH,
   type CommentCardKey,
 } from '@perfana/shared/constants/comment-cards';
 
@@ -123,11 +124,41 @@ export class CompareChartContextDto {
   baselineTestRunId?: string;
 }
 
+/**
+ * What a Configuration item comment was written against: the run the card compared with and
+ * the item's status and values in that comparison, so the comment stays readable after the
+ * comparison moves on. Values are null when the key is absent from that side.
+ */
+export class ConfigChartContextDto {
+  @ApiPropertyOptional({ description: 'The run the card compared with; absent = none picked', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  comparedToTestRunId?: string;
+
+  @ApiProperty({ enum: ['changed', 'expected', 'new', 'removed', 'same'] })
+  @IsIn(['changed', 'expected', 'new', 'removed', 'same'])
+  status!: 'changed' | 'expected' | 'new' | 'removed' | 'same';
+
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: CONFIG_VIEW_VALUE_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @Length(0, CONFIG_VIEW_VALUE_MAX_LENGTH)
+  currentValue?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: CONFIG_VIEW_VALUE_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @Length(0, CONFIG_VIEW_VALUE_MAX_LENGTH)
+  previousValue?: string | null;
+}
+
 /** Which view shape a card's comments record. Other cards record none. */
 export const CHART_CONTEXT_DTO_BY_CARD = {
   graphs: ChartContextDto,
   trends: TrendsChartContextDto,
   compare: CompareChartContextDto,
+  config: ConfigChartContextDto,
 } as const;
 
 export class CreateCommentDto {
@@ -167,8 +198,8 @@ export class CreateCommentDto {
 
   @ApiPropertyOptional({
     description:
-      "The card's view when the comment was written (Graphs, Trends, Compare roots only; required with markerTime). " +
-      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto or CompareChartContextDto. ' +
+      "The card's view when the comment was written (Graphs, Trends and Compare roots, and Configuration item roots; required with markerTime). " +
+      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto, CompareChartContextDto or ConfigChartContextDto. ' +
       'Validated by the service against that class, because one nested type here would have the whitelist strip the other cards\' fields.',
   })
   @IsOptional()
