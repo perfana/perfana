@@ -13,6 +13,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -22,8 +23,14 @@ import {
   COMMENT_BODY_MAX_LENGTH,
   COMMENT_CARD_KEYS,
   CONFIG_VIEW_VALUE_MAX_LENGTH,
+  COMMENT_TAGS,
   type CommentCardKey,
+  type CommentTag,
 } from '@perfana/shared/constants/comment-cards';
+
+const TAG_DESCRIPTION =
+  'What the root comment is in an analysis: symptom, hypothesis, evidence, ruled-out, root-cause or action. ' +
+  'Roots only (a tag on a reply is a 400).';
 
 /** Most series a marker records; mirrors the web's LINK_WILDCARD_MAX_SERIES. */
 export const MARKER_MAX_SERIES = 50;
@@ -205,14 +212,34 @@ export class CreateCommentDto {
   @IsOptional()
   @IsObject()
   chartContext?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ enum: COMMENT_TAGS, nullable: true, description: `${TAG_DESCRIPTION} Absent or null = untagged.` })
+  @IsOptional()
+  @IsIn(COMMENT_TAGS as readonly string[] as string[])
+  tag?: CommentTag | null;
 }
 
-/** Only the body is editable (design R5); any other key is stripped by the global ValidationPipe. */
+/**
+ * The author's own text and tag (design R5, grown by the tags design); any other key is stripped
+ * by the global ValidationPipe. At least one of the two must be sent. An absent key leaves the
+ * stored value alone; `tag: null` clears the tag, `body: null` is refused.
+ */
 export class UpdateCommentDto {
-  @ApiProperty({ minLength: 1, maxLength: COMMENT_BODY_MAX_LENGTH })
+  @ApiPropertyOptional({ minLength: 1, maxLength: COMMENT_BODY_MAX_LENGTH, description: 'New text; sets editedAt.' })
+  // ValidateIf rather than IsOptional: IsOptional would also let an explicit null through.
+  @ValidateIf((o: UpdateCommentDto) => o.body !== undefined)
   @IsString()
   @Length(1, COMMENT_BODY_MAX_LENGTH)
-  body!: string;
+  body?: string;
+
+  @ApiPropertyOptional({
+    enum: COMMENT_TAGS,
+    nullable: true,
+    description: `${TAG_DESCRIPTION} null clears it. A tag-only change does not set editedAt: "(edited)" is about the text.`,
+  })
+  @IsOptional()
+  @IsIn(COMMENT_TAGS as readonly string[] as string[])
+  tag?: CommentTag | null;
 }
 
 export class MarkSeenDto {
@@ -237,6 +264,8 @@ export interface CommentResponse {
   markerSeq: number | null;
   markerTime: string | null;
   chartContext: Record<string, unknown> | null;
+  /** A root's tag; null when untagged and on every reply. Kept when the comment is deleted. */
+  tag: CommentTag | null;
   createdAt: string;
   editedAt: string | null;
 }

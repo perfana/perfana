@@ -83,8 +83,8 @@ export interface RunComment {
   markerTime: string | null;
   /** The card's view when the root was written (Graphs, Trends, Compare); null once deleted and elsewhere. */
   chartContext: CommentView | null;
-  /** Analysis tag on a root (design: test-run-analysis-stories.md); null when untagged, always null on a reply. Optional until the API sends it. */
-  tag?: CommentTag | null;
+  /** Analysis tag on a root (design: test-run-analysis-stories.md); null when untagged, always null on a reply. Kept on a deleted root. */
+  tag: CommentTag | null;
   createdAt: string;
   editedAt: string | null;
 }
@@ -135,11 +135,13 @@ export const postComment = async (
   parentId?: string,
   anchor?: CommentAnchor,
   chartContext?: CommentView,
-) => json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card, body, parentId, ...anchor, chartContext })), 'Posting comment');
+  /** Roots only; the API refuses a tag on a reply. */
+  tag?: CommentTag | null,
+) => json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card, body, parentId, ...anchor, chartContext, tag: tag ?? undefined })), 'Posting comment');
 
 /** Post a numbered marker on the Graphs card; the server assigns its number. */
-export async function postMarker(runId: string, body: string, markerTime: string, chartContext: MarkerChartContext) {
-  const c = await json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card: 'graphs', body, markerTime, chartContext })), 'Posting marker');
+export async function postMarker(runId: string, body: string, markerTime: string, chartContext: MarkerChartContext, tag?: CommentTag | null) {
+  const c = await json<RunComment>(await authenticatedFetch(base(runId), send('POST', { card: 'graphs', body, markerTime, chartContext, tag: tag ?? undefined })), 'Posting marker');
   // An API older than this client strips the marker fields (whitelist validation) and saves a plain
   // comment with a 201. Say so instead of letting the marker vanish without a word.
   if (c.markerSeq == null) {
@@ -156,8 +158,16 @@ export const fetchCommentItemCounts = async (runId: string, card: CommentCardKey
 export const markCommentsSeen = async (runId: string, card: CommentCardKey) =>
   json<void>(await authenticatedFetch(`${base(runId)}/seen`, send('PUT', { card })), 'Marking comments seen');
 
-export const editComment = async (id: string, body: string) =>
-  json<RunComment>(await authenticatedFetch(`/comments/${encodeURIComponent(id)}`, send('PATCH', { body })), 'Saving comment');
+/**
+ * Edit the author's own comment. `tag` undefined leaves the stored tag alone, null clears it. The
+ * server marks the comment "(edited)" only when the body actually changed, so sending the same body
+ * beside a new tag is a retag, not an edit.
+ */
+export const editComment = async (id: string, body: string, tag?: CommentTag | null) =>
+  json<RunComment>(
+    await authenticatedFetch(`/comments/${encodeURIComponent(id)}`, send('PATCH', tag === undefined ? { body } : { body, tag })),
+    'Saving comment',
+  );
 
 export const deleteComment = async (id: string) =>
   json<void>(await authenticatedFetch(`/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }), 'Deleting comment');

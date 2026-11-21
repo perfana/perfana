@@ -31,6 +31,7 @@ const row = (over: Partial<ReportCommentRow> = {}): ReportCommentRow => ({
   createdAt: new Date('2026-11-20T10:00:00Z'),
   editedAt: null,
   deletedAt: null,
+  tag: null,
   ...over,
 });
 
@@ -113,6 +114,26 @@ describe('CommentsRenderer', () => {
     expect(html).toContain('Comment deleted');
     expect(html).toContain('reply stays');
     expect(html).toContain(`Marker ${markerGlyph(2)}`);
+  });
+
+  // Tags design (PR2): a root's tag leads its meta line, also when the root was deleted; a reply
+  // never shows one; a key this build does not know is printed as stored, escaped.
+  it('prints a root\'s tag label before it, keeps it on a deleted root, and escapes an unknown key', async () => {
+    const tagged = row({ body: 'heap.max halved', tag: 'root-cause' });
+    const { renderer } = setup([
+      tagged,
+      row({ parentId: tagged.id, body: 'agreed', tag: 'evidence' }),
+      row({ body: 'gone', tag: 'ruled-out', deletedAt: new Date(), markerSeq: 4, cardKey: 'graphs' }),
+      row({ body: 'future', tag: '<b>x</b>' }),
+    ]);
+    const html = await renderer.renderCommentsSection(section(), testRun);
+    expect(html).toContain('>Root cause</span>');
+    expect(html.indexOf('>Root cause</span>')).toBeLessThan(html.indexOf('heap.max halved'));
+    expect(html).not.toContain('>Evidence</span>');
+    expect(html).toContain('>Ruled out</span>');
+    expect(html.indexOf('>Ruled out</span>')).toBeLessThan(html.indexOf(`Marker ${markerGlyph(4)}`));
+    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
+    expect(html).not.toContain('<b>x</b>');
   });
 
   it('heads a Graphs marker thread with its recorded view, trimmed to the recorded range, with the numbered callout', async () => {

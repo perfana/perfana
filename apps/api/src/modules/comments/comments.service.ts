@@ -21,6 +21,7 @@ import {
   type CommentResponse,
   type CommentThreadResponse,
   type CreateCommentDto,
+  type UpdateCommentDto,
 } from './dto/comment.dto';
 import { commentCountsByCard, type CommentCounts } from './comment-unread.sql';
 import { COMMENT_UNREAD_WINDOW_DAYS } from '@perfana/shared/constants/comment-cards';
@@ -153,6 +154,9 @@ export class CommentsService {
       if (dto.parentId && dto.itemKey) {
         throw new BadRequestException('A reply takes its anchor from the root; send itemKey only on a root comment');
       }
+      if (dto.parentId && dto.tag) {
+        throw new BadRequestException('Only a root comment takes a tag; a reply discusses its root');
+      }
       if (Boolean(dto.itemKey) !== Boolean(dto.itemLabel)) {
         throw new BadRequestException('itemKey and itemLabel go together');
       }
@@ -207,6 +211,7 @@ export class CommentsService {
           markerSeq,
           markerTime: isMarker ? new Date(dto.markerTime!) : null,
           chartContext,
+          tag: dto.tag ?? null,
           body: dto.body,
           authorId: caller.userId,
           authorName: (caller.displayName || caller.userId).slice(0, 255),
@@ -220,14 +225,26 @@ export class CommentsService {
     return response;
   }
 
-  // audit-skip: author-only text edit of their own comment; the row carries edited_at
-  async update(id: string, body: string, caller: CommentCaller): Promise<CommentResponse> {
+  /**
+   * Author-only edit of the text and/or the tag (design R5; tags design). An absent field is left
+   * alone and `tag: null` clears the tag. Only a text change sets `editedAt`: "(edited)" is about
+   * the text, so retagging a comment does not mark it edited.
+   */
+  // audit-skip: author-only edit of their own comment; the row carries edited_at
+  async update(id: string, dto: UpdateCommentDto, caller: CommentCaller): Promise<CommentResponse> {
+    if (dto.body === undefined && dto.tag === undefined) throw new BadRequestException('Send body, tag or both');
     const saved = await this.tx(async (em) => {
       const comment = await this.loadComment(id, caller, em, true);
       if (comment.deletedAt) throw new NotFoundException('Comment not found');
       if (comment.authorId !== caller.userId) throw new ForbiddenException('Only the author can edit a comment');
-      comment.body = body;
-      comment.editedAt = new Date();
+      if (dto.tag && comment.parentId) {
+        throw new BadRequestException('Only a root comment takes a tag; a reply discusses its root');
+      }
+      if (dto.body !== undefined && dto.body !== comment.body) {
+        comment.body = dto.body;
+        comment.editedAt = new Date();
+      }
+      if (dto.tag !== undefined) comment.tag = dto.tag;
       return em.getRepository(TestRunComment).save(comment);
     });
     const response = toResponse(saved);
@@ -366,6 +383,8 @@ export function toResponse(row: TestRunComment): CommentResponse {
     markerSeq: row.markerSeq ?? null,
     markerTime: row.markerTime ? new Date(row.markerTime).toISOString() : null,
     chartContext: deleted ? null : (row.chartContext ?? null),
+    // Kept on a deleted comment: a story step still reads "Root cause · comment deleted".
+    tag: row.tag ?? null,
     createdAt: new Date(row.createdAt).toISOString(),
     editedAt: row.editedAt ? new Date(row.editedAt).toISOString() : null,
   };

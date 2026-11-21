@@ -18,7 +18,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { COMMENT_BODY_MAX_LENGTH, describeConfigCommentView, type CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_BODY_MAX_LENGTH, describeConfigCommentView, type CommentCardKey, type CommentTag } from '@perfana/shared/constants/comment-cards';
 import { useAuth } from '@/contexts/auth-context';
 import {
   deleteComment,
@@ -35,6 +35,8 @@ import {
 } from '@/lib/test-run-comments';
 import { CONTROL_GROUP_BASELINE } from '@/lib/control-group-baseline';
 import { CARD_LABELS, useComments, type MarkerDraft } from './CommentsContext';
+import { CommentTagChip } from './CommentTagChip';
+import { CommentTagPicker } from './CommentTagPicker';
 
 /** Cards whose single thread opens (and focuses its item) as soon as the comments open. */
 const AUTO_OPEN_SINGLE_THREAD = new Set<CommentCardKey>(['distributed-tracing']);
@@ -70,6 +72,8 @@ function Composer({
   submitLabel,
   initial = '',
   autoFocus,
+  withTag,
+  initialTag = null,
   onSubmit,
   onCancel,
 }: {
@@ -77,10 +81,14 @@ function Composer({
   submitLabel: string;
   initial?: string;
   autoFocus?: boolean;
-  onSubmit: (body: string) => Promise<void>;
+  /** Offer the analysis tag picker: new roots, and a root's edit mode. Never a reply. */
+  withTag?: boolean;
+  initialTag?: CommentTag | null;
+  onSubmit: (body: string, tag: CommentTag | null) => Promise<void>;
   onCancel?: () => void;
 }) {
   const [text, setText] = useState(initial);
+  const [tag, setTag] = useState<CommentTag | null>(initialTag);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const trimmed = text.trim();
@@ -89,8 +97,9 @@ function Composer({
     setBusy(true);
     setError(null);
     try {
-      await onSubmit(trimmed);
+      await onSubmit(trimmed, withTag ? tag : null);
       setText('');
+      setTag(initialTag);
     } catch (e) {
       setError(errorText(e)); // the text stays in the box
     } finally {
@@ -120,6 +129,7 @@ function Composer({
         inputProps={{ maxLength: COMMENT_BODY_MAX_LENGTH, 'aria-label': placeholder }}
       />
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.75 }}>
+        {withTag && <CommentTagPicker value={tag} onChange={setTag} disabled={busy} />}
         {error && (
           <Typography variant="caption" color="error" sx={{ flex: 1 }} role="alert">
             Not posted: {error}
@@ -149,6 +159,7 @@ function CommentItem({
   isNew,
   mine,
   canDelete,
+  taggable,
   onEdit,
   onDelete,
 }: {
@@ -157,7 +168,9 @@ function CommentItem({
   mine: boolean;
   /** Author, or an organization admin moderating someone else's comment. */
   canDelete: boolean;
-  onEdit: (body: string) => Promise<void>;
+  /** A root: its edit mode also edits the tag (author only, like the text). */
+  taggable?: boolean;
+  onEdit: (body: string, tag: CommentTag | null) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -191,8 +204,10 @@ function CommentItem({
             submitLabel="Save"
             initial={comment.body ?? ''}
             autoFocus
-            onSubmit={async (body) => {
-              await onEdit(body);
+            withTag={taggable}
+            initialTag={comment.tag}
+            onSubmit={async (body, tag) => {
+              await onEdit(body, tag);
               setEditing(false);
             }}
             onCancel={() => setEditing(false)}
@@ -241,7 +256,7 @@ function MarkerComposer({
   runStart?: string | null;
   onMove: (time: string) => void;
   onCancel: () => void;
-  onSubmit: (body: string) => Promise<void>;
+  onSubmit: (body: string, tag: CommentTag | null) => Promise<void>;
 }) {
   const i = draft.steps.indexOf(draft.time);
   const at = formatMarkerTime(draft.time, runStart);
@@ -260,7 +275,7 @@ function MarkerComposer({
       <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
         Click the chart to move it.
       </Typography>
-      <Composer placeholder={`Describe what happens at ${at}…`} submitLabel="Place marker" autoFocus onSubmit={onSubmit} onCancel={onCancel} />
+      <Composer placeholder={`Describe what happens at ${at}…`} submitLabel="Place marker" autoFocus withTag onSubmit={onSubmit} onCancel={onCancel} />
     </Box>
   );
 }
@@ -497,10 +512,10 @@ export default function CommentsDrawer() {
             runStart={runStart}
             onMove={ctx.moveMarker}
             onCancel={ctx.cancelMarker}
-            onSubmit={async (body) => {
+            onSubmit={async (body, tag) => {
               let c: RunComment;
               try {
-                c = await postMarker(runId, body, draft.time, draft.capture());
+                c = await postMarker(runId, body, draft.time, draft.capture(), tag);
               } catch (e) {
                 // An older API saved it as a plain comment: list it, so a retry is not mistaken for a lost post.
                 const saved = (e as { saved?: RunComment }).saved;
@@ -518,7 +533,8 @@ export default function CommentsDrawer() {
           placeholder={anchor ? `Comment on ${anchor.itemLabel}…` : 'New comment on this card…'}
           submitLabel="Comment"
           autoFocus={Boolean(anchor) || threads?.length === 0}
-          onSubmit={async (body) => {
+          withTag
+          onSubmit={async (body, tag) => {
             // The card's view goes with a new root (Graphs, Trends, Compare), so it can be restored.
             // The view is an extra: one that cannot be read, or that the server refuses, never
             // stops the comment itself from posting.
@@ -529,8 +545,8 @@ export default function CommentsDrawer() {
               view = undefined;
             }
             const where = anchor ? { itemKey: anchor.itemKey, itemLabel: anchor.itemLabel } : undefined;
-            const c = await postComment(runId, card, body, undefined, where, view).catch((e: unknown) => {
-              if (view && e instanceof Error && e.message.includes('chartContext')) return postComment(runId, card, body, undefined, where);
+            const c = await postComment(runId, card, body, undefined, where, view, tag).catch((e: unknown) => {
+              if (view && e instanceof Error && e.message.includes('chartContext')) return postComment(runId, card, body, undefined, where, undefined, tag);
               throw e;
             });
             upsert(c);
@@ -589,6 +605,12 @@ export default function CommentsDrawer() {
                     <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{formatCommentTime(lastActivity(t))}</Typography>
                     {unreadThread && <Box aria-label="unread" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0 }} />}
                   </Box>
+                  {/* Kept on a deleted root: it still says what the thread was in the analysis. */}
+                  {t.tag && (
+                    <Box>
+                      <CommentTagChip tag={t.tag} />
+                    </Box>
+                  )}
                   {t.markerTime && (
                     <Typography variant="caption" color="primary" component="div" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                       {formatMarkerTime(t.markerTime, runStart)}
@@ -623,7 +645,9 @@ export default function CommentsDrawer() {
                     isNew={isNew(t)}
                     mine={t.authorId === me}
                     canDelete={canModerate || t.authorId === me}
-                    onEdit={async (body) => upsert(await editComment(t.id, body))}
+                    taggable
+                    // The tag goes only when it changed, so a text edit never resends it.
+                    onEdit={async (body, tag) => upsert(await editComment(t.id, body, tag !== t.tag ? tag : undefined))}
                     onDelete={() => remove(t)}
                   />
                   {t.chartContext?.kind === 'config' && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}

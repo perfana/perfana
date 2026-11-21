@@ -7,7 +7,8 @@
  * a unit test so tx() falls back to dataSource.transaction); no_claim=SQL, tenant scoping, threading
  * rules (covered against Postgres by the RLS spec).
  */
-import { CommentsService } from './comments.service';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { CommentsService, toResponse } from './comments.service';
 
 describe('CommentsService realtime failure', () => {
   const ORG = '11111111-1111-4111-8111-111111111111';
@@ -201,5 +202,108 @@ describe('CommentsService Configuration view', () => {
       ),
     ).rejects.toThrow(/chartContext\.currentValue/);
     expect(repo.save).not.toHaveBeenCalled();
+  });
+});
+
+// Value: protects=the tag rules of the tags design without a database: a reply never takes a tag,
+// PATCH stays author-only for the tag too, a tag-only change leaves editedAt alone, an empty PATCH is
+// a 400, and the deleted shape keeps the tag; fails_when=the reply guard, the author check or the
+// editedAt guard is dropped from update(), or toResponse redacts the tag with the body;
+// why_new=the RLS spec proves the same against Postgres but needs one; seam=none (mocked EM, as
+// above); no_claim=the CHECK constraints (RLS spec and the 1829 migration spec).
+describe('CommentsService tags', () => {
+  const ORG = '11111111-1111-4111-8111-111111111111';
+  const RUN = '22222222-2222-4222-8222-222222222222';
+  const ID = '33333333-3333-4333-8333-333333333333';
+  const anna = { userId: 'sub-anna', displayName: 'Anna', orgIds: [ORG] };
+  const mark = { userId: 'sub-mark', displayName: 'Mark', orgIds: [ORG] };
+
+  const setup = (stored: Record<string, unknown> = {}) => {
+    const row = {
+      id: ID, testRunId: RUN, cardKey: 'graphs', parentId: null, body: 'p95 jumps', authorId: anna.userId, authorName: 'Anna',
+      itemKey: null, itemLabel: null, markerSeq: null, markerTime: null, chartContext: null, tag: null,
+      organizationId: ORG, teamId: null, createdAt: new Date('2026-11-20T10:00:00Z'), editedAt: null, deletedAt: null,
+      ...stored,
+    };
+    const repo = {
+      create: (v: Record<string, unknown>) => v,
+      save: jest.fn(async (v: Record<string, unknown>) => ({ ...row, ...v, id: v.id ?? ID, createdAt: row.createdAt })),
+      findOne: jest.fn().mockResolvedValue(row),
+    };
+    const em = {
+      query: jest.fn(async (sql: string) =>
+        String(sql).includes('FOR SHARE')
+          ? [{ test_run_id: RUN, card_key: 'graphs', parent_id: null, deleted_at: null }]
+          : [{ id: RUN, organization_id: ORG, team_id: null }],
+      ),
+      getRepository: () => repo,
+    };
+    const dataSource = { transaction: (fn: (e: typeof em) => unknown) => fn(em), manager: em };
+    const service = new CommentsService(dataSource as never, {} as never, { emitCommentEvent: jest.fn() } as never, {} as never);
+    return { service, repo, row };
+  };
+
+  it('stores and returns a root tag on create', async () => {
+    const { service, repo } = setup();
+    const res = await service.create(RUN, { card: 'graphs', body: 'p95 jumps', tag: 'symptom' }, anna);
+    expect(repo.save.mock.calls[0][0]).toMatchObject({ tag: 'symptom' });
+    expect(res.tag).toBe('symptom');
+  });
+
+  it('stores null when no tag is sent', async () => {
+    const { service, repo } = setup();
+    expect((await service.create(RUN, { card: 'graphs', body: 'x' }, anna)).tag).toBeNull();
+    expect(repo.save.mock.calls[0][0]).toMatchObject({ tag: null });
+  });
+
+  it('refuses a tag on a reply with 400 before saving', async () => {
+    const { service, repo } = setup();
+    await expect(service.create(RUN, { card: 'graphs', body: 'no', parentId: ID, tag: 'ruled-out' }, anna)).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('refuses retagging a reply with 400', async () => {
+    const { service, repo } = setup({ parentId: '44444444-4444-4444-8444-444444444444' });
+    await expect(service.update(ID, { tag: 'evidence' }, anna)).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('refuses a tag change by anyone but the author with 403', async () => {
+    const { service, repo } = setup();
+    await expect(service.update(ID, { tag: 'root-cause' }, mark)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('changes only the tag on a tag-only PATCH, leaving body and editedAt', async () => {
+    const { service } = setup({ tag: 'hypothesis' });
+    expect(await service.update(ID, { tag: 'root-cause' }, anna)).toMatchObject({ tag: 'root-cause', body: 'p95 jumps', editedAt: null });
+  });
+
+  it('does not mark an unchanged body sent beside a tag as edited', async () => {
+    const { service } = setup();
+    expect(await service.update(ID, { body: 'p95 jumps', tag: 'evidence' }, anna)).toMatchObject({ tag: 'evidence', editedAt: null });
+  });
+
+  it('clears the tag on tag: null', async () => {
+    const { service } = setup({ tag: 'hypothesis' });
+    expect((await service.update(ID, { tag: null }, anna)).tag).toBeNull();
+  });
+
+  it('marks a text change as edited and keeps the tag when none is sent', async () => {
+    const { service } = setup({ tag: 'evidence' });
+    const res = await service.update(ID, { body: 'p95 doubles' }, anna);
+    expect(res).toMatchObject({ body: 'p95 doubles', tag: 'evidence' });
+    expect(res.editedAt).not.toBeNull();
+  });
+
+  it('refuses an empty PATCH with 400', async () => {
+    const { service, repo } = setup();
+    await expect(service.update(ID, {}, anna)).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('keeps the tag in the redacted shape of a deleted comment', () => {
+    const { row } = setup({ tag: 'root-cause', deletedAt: new Date(), body: '' });
+    expect(toResponse(row as never)).toMatchObject({ deleted: true, body: null, chartContext: null, tag: 'root-cause' });
   });
 });

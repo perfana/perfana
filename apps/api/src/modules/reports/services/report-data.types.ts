@@ -607,4 +607,6 @@ export interface ReportCommentRow {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
+  /** A root's tag key (`COMMENT_TAGS`, migration 1829); kept on a soft-deleted root. */
+  tag: string | null;
 }

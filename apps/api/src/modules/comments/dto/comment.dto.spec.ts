@@ -9,7 +9,8 @@
 import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { CreateCommentDto, MARKER_MAX_SERIES } from './comment.dto';
+import { CreateCommentDto, MARKER_MAX_SERIES, UpdateCommentDto } from './comment.dto';
+import { COMMENT_TAGS } from '@perfana/shared/constants/comment-cards';
 import { validateChartContext } from '../comments.service';
 
 const s = (source = 'grafana') => ({ dashboardId: 'd1', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: 'used', source });
@@ -80,5 +81,37 @@ describe('CreateCommentDto', () => {
   it('refuses a non-ISO marker time', async () => {
     const dto = plainToInstance(CreateCommentDto, { card: 'graphs', body: 'b', markerTime: '10:37', chartContext: graphs() });
     expect((await validate(dto, { whitelist: true })).length).toBeGreaterThan(0);
+  });
+
+  // Value: protects=only the six stored tag keys pass the pipe, and null means untagged;
+  // fails_when=the @IsIn list drifts from COMMENT_TAGS or a label ('Root cause') is accepted as a
+  // key; why_new=the service trusts the DTO for the vocabulary; seam=none; no_claim=the CHECK.
+  it.each([...COMMENT_TAGS, null])('accepts tag %p', async (tag) => {
+    const dto = plainToInstance(CreateCommentDto, { card: 'slo', body: 'b', tag });
+    expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+  });
+
+  it.each(['Root cause', 'rootcause', 'cause', 3])('refuses tag %p', async (tag) => {
+    const dto = plainToInstance(CreateCommentDto, { card: 'slo', body: 'b', tag });
+    expect((await validate(dto, { whitelist: true })).map((e) => e.property)).toEqual(['tag']);
+  });
+});
+
+describe('UpdateCommentDto', () => {
+  it.each([
+    ['a body', { body: 'fixed' }],
+    ['a tag', { tag: 'root-cause' }],
+    ['a cleared tag', { tag: null }],
+    ['both', { body: 'fixed', tag: 'action' }],
+  ])('accepts %s', async (_label, raw) => {
+    expect(await validate(plainToInstance(UpdateCommentDto, raw), { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+  });
+
+  it.each([
+    ['a null body', { body: null }, 'body'],
+    ['an empty body', { body: '' }, 'body'],
+    ['an unknown tag', { tag: 'Root cause' }, 'tag'],
+  ])('refuses %s', async (_label, raw, property) => {
+    expect((await validate(plainToInstance(UpdateCommentDto, raw), { whitelist: true })).map((e) => e.property)).toEqual([property]);
   });
 });
