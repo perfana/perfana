@@ -55,8 +55,8 @@ export class CommentsController {
   }
 
   @Post('test-runs/:id/comments')
-  @ApiOperation({ summary: 'Post a comment or a reply' })
-  @ApiResponse({ status: 400, description: 'Invalid card, or the parent is not a live root on the same run and card' })
+  @ApiOperation({ summary: 'Post a comment or a reply', description: 'A root may carry one `tag` (symptom, hypothesis, evidence, ruled-out, root-cause, action); a reply may not.' })
+  @ApiResponse({ status: 400, description: 'Invalid card or tag, a tag on a reply, or the parent is not a live root on the same run and card' })
   @ApiResponse({ status: 403, description: 'API keys cannot write comments' })
   async create(@Param('id') id: string, @Body() dto: CreateCommentDto, @UserCtx() ctx: UserContext): Promise<CommentResponse> {
     return this.comments.create(id, dto, await this.caller(ctx, true));
@@ -70,10 +70,15 @@ export class CommentsController {
   }
 
   @Patch('comments/:id')
-  @ApiOperation({ summary: "Edit a comment's text (author only)" })
+  @ApiOperation({
+    summary: "Edit a comment's text and/or tag (author only)",
+    description: 'Send `body`, `tag` or both; an absent field is left alone and `tag: null` clears the tag. Only a text change sets `editedAt`.',
+  })
+  @ApiResponse({ status: 400, description: 'Neither body nor tag sent, an invalid tag, or a tag on a reply' })
+  @ApiResponse({ status: 403, description: 'Not the author, or an API key' })
   @ApiResponse({ status: 404, description: 'Not found, deleted, or outside your organizations' })
   async update(@Param('id') id: string, @Body() dto: UpdateCommentDto, @UserCtx() ctx: UserContext): Promise<CommentResponse> {
-    return this.comments.update(id, dto.body, await this.caller(ctx, true));
+    return this.comments.update(id, dto, await this.caller(ctx, true));
   }
 
   @Delete('comments/:id')

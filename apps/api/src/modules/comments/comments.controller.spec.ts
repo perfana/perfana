@@ -23,6 +23,7 @@ describe('CommentsController', () => {
     ['create', () => controller.create('run', { card: 'graphs', body: 'x' }, key)],
     ['seen', () => controller.seen('run', { card: 'graphs' }, key)],
     ['update', () => controller.update('c', { body: 'x' }, key)],
+    ['update (tag only)', () => controller.update('c', { tag: 'symptom' }, key)],
     ['remove', () => controller.remove('c', key)],
   ])('refuses %s from an API key with 403', async (_name, call) => {
     await expect(call()).rejects.toBeInstanceOf(ForbiddenException);
@@ -41,5 +42,10 @@ describe('CommentsController', () => {
   it('hands a person through with their display name and org scope', async () => {
     await controller.create('run', { card: 'graphs', body: 'x' }, person);
     expect(service.create).toHaveBeenCalledWith('run', { card: 'graphs', body: 'x' }, { userId: 'sub-1', displayName: 'Ada', orgIds: ['org-a'] });
+  });
+
+  it('hands a PATCH through whole, so a tag-only edit reaches the service', async () => {
+    await controller.update('c', { tag: null }, person);
+    expect(service.update).toHaveBeenCalledWith('c', { tag: null }, { userId: 'sub-1', displayName: 'Ada', orgIds: ['org-a'] });
   });
 });

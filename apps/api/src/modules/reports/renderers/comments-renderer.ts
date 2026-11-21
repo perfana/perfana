@@ -3,6 +3,7 @@ import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import {
   COMMENT_CARD_KEYS,
   COMMENT_CARD_LABELS,
+  COMMENT_TAG_LABELS,
   type CommentCardKey,
 } from '@perfana/shared/constants/comment-cards';
 import {
@@ -184,6 +185,8 @@ export class CommentsRenderer {
 
   private renderComment(c: ReportCommentRow): string {
     const meta: string[] = [];
+    // A root's tag leads (kept on a deleted root); a key this build does not know prints as stored.
+    if (c.tag && !c.parentId) meta.push(chip((COMMENT_TAG_LABELS as Record<string, string>)[c.tag] ?? c.tag, 'neutral'));
     if (c.markerSeq !== null) {
       meta.push(`<span style="font-weight:700; color:${REPORT_COLORS.ink};">Marker ${escapeHtml(markerGlyph(c.markerSeq))}</span>`);
     }

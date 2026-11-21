@@ -423,6 +423,9 @@ describe('SutImportService (integration)', () => {
       await insertComment(c.reply, { parent: c.root, body: 'reply', createdAt: '2026-11-01T10:20:00Z' });
       await insertComment(c.markerReply, { parent: c.marker, body: 'under a deleted marker', createdAt: '2026-11-01T10:30:00Z' });
       await dataSource.query(`UPDATE test_run_comments SET deleted_at = '2026-11-01T11:00:00Z', body = '' WHERE id = $1`, [c.marker]);
+      // Tags (migration 1829) travel as an ordinary column; a soft-deleted root keeps its own.
+      await dataSource.query(`UPDATE test_run_comments SET tag = 'root-cause' WHERE id = $1`, [c.root]);
+      await dataSource.query(`UPDATE test_run_comments SET tag = 'symptom' WHERE id = $1`, [c.marker]);
       await dataSource.query(
         `INSERT INTO test_run_comment_reads (user_id, test_run_id, card_key, last_seen_at, organization_id) VALUES ('user-b',$1,'graphs',now(),$2)`,
         [c.run, srcOrg],
@@ -437,12 +440,15 @@ describe('SutImportService (integration)', () => {
       expect(summary.droppedCounts['test_run_comments']).toBeUndefined();
 
       const rows: Array<Record<string, any>> = await dataSource.query(
-        `SELECT id, parent_id, body, deleted_at, marker_seq, organization_id, team_id, notified_at
+        `SELECT id, parent_id, body, deleted_at, marker_seq, organization_id, team_id, notified_at, tag
          FROM test_run_comments WHERE test_run_id = $1`,
         [c.run],
       );
       expect(rows).toHaveLength(4);
       const byId = new Map(rows.map((r) => [r.id, r]));
+      expect(byId.get(c.root)!.tag).toBe('root-cause');
+      expect(byId.get(c.marker)!.tag).toBe('symptom');
+      expect(byId.get(c.reply)!.tag).toBeNull();
       expect(byId.get(c.reply)!.parent_id).toBe(c.root);
       expect(byId.get(c.markerReply)!.parent_id).toBe(c.marker);
       expect(byId.get(c.marker)).toMatchObject({ body: '', marker_seq: 1 });
@@ -477,9 +483,11 @@ describe('SutImportService (integration)', () => {
       ];
       const summary = await importService.import(gzipSync(Buffer.from(lines.join('\n') + '\n')), targetOrg);
       expect(summary.rowCounts['test_run_comments']).toBe(2);
-      const rows = await dataSource.query(`SELECT id, notified_at FROM test_run_comments WHERE test_run_id = $1`, [c.run]);
+      // ...nor a tag (migration 1829), which lands as NULL: untagged.
+      const rows = await dataSource.query(`SELECT id, notified_at, tag FROM test_run_comments WHERE test_run_id = $1`, [c.run]);
       expect(rows).toHaveLength(2);
       for (const r of rows) expect(r.notified_at).not.toBeNull();
+      for (const r of rows) expect(r.tag).toBeNull();
     });
 
     it('drops a reply whose root lost its marker number to a comment already here, instead of aborting', async () => {
