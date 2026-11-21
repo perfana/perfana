@@ -18,6 +18,8 @@ Today the reader of such an analysis has to:
 
 The commenter knows the story. Perfana gives them no way to tell it.
 
+A second gap makes this worse for two cards that matter most to root causes. **Configuration** and **Dashboards** take card-level comments only. "heap.max dropped from 2 GB to 512 MB" cannot be pinned to the `heap.max` row, and "look at the JVM dashboard" cannot be pinned to that dashboard, so a reader opening the comment lands on a card with dozens of rows and has to find the item themselves. The Configuration card makes it harder still: its default status filter shows only `changed` and `new` items, so the item a comment talks about can be hidden when the card opens.
+
 ## What Makes This Cool
 
 - The evidence is already live. A comment on Graphs, Trends or Compare stores the view its author was looking at (`chart_context`), and the `?card=&comment=` deep link already reveals the card, focuses the item and replays that view. A story is an ordered walk over those deep links, so each step puts the reader **in front of the chart, row or config item it talks about**, not in front of a quote of it.
@@ -87,6 +89,46 @@ Each tag gets an icon and colour from the `readable` palette (`apps/web/lib/them
 **Web.** A tag chip on each root in `CommentsDrawer`, a tag picker in the composer and in the root's edit mode. The chip is clickable in the comments card to filter.
 
 **Report.** The Comments section prints the tag before each root.
+
+### Item-level comments on the Configuration and Dashboards cards
+
+Both cards join the cards that already anchor comments to items (Performance analysis, SLO, Anomaly detection, Splunk, Dynatrace, Distributed tracing, Pyroscope). No schema or API change: `item_key` / `item_label` already exist and are opaque to the API. Card-level comments on both cards stay possible.
+
+**How the existing item mechanism works, and what is missing.** A row renders `RowCommentButton` (or a section renders `ItemCommentHeader`) with `data-comment-item=<itemKey>`; counts come from `useCommentItemCounts(card, expanded)`. When a thread anchored to an item is opened in the drawer, from a deep link or (later) from a story step, the drawer calls `focusItem(card, itemKey)`. The card's `useCommentItemFocus(card, onFocus)` then scrolls to the element and flashes it, retrying for up to 3 s. That is enough for cards that always render every item. It is not enough for these two, because **both cards filter their items** (Configuration: status, tag and key-text filters; Dashboards: search text and tags), and a filtered-out item has no element to scroll to. So each card handles focus by applying a **comment filter**.
+
+**The comment filter (both cards).**
+
+- In `onFocus(itemKey)`, the card sets `commentFocus = itemKey` and returns whether the item exists in its data.
+- While `commentFocus` is set, the card shows **only** the matching item(s), bypassing the user's own filters **without changing them**. A chip above the list reads `Showing the item from a comment: heap.max · Show all`. "Show all" clears `commentFocus` and the user's previous filters apply again, as they left them.
+- The match is **exact** on the item's key. The Configuration card's own key filter is a case-insensitive *contains* match, so filtering to `heap` would also show `heap.max` and `heap.min`. That is why the comment filter is separate state, not a write to `keyFilter`.
+- If the item is not in the card's data (the config key is in neither run, the dashboard was removed from the workload), the chip says so (`heap.max is not in this comparison` / `This dashboard is no longer configured for this workload`), and the list shows its normal empty state. The comment still shows its `item_label`, which is a snapshot from when it was written.
+- A new focus replaces the previous one. Closing the drawer does not clear the filter: the reader is usually still looking at the item.
+
+**Configuration card** (`components/configuration-comparison/`).
+
+- **Item key:** `config:<configKey>`, on the key alone. Tags are deliberately left out: they can differ between the two runs being compared, and `ConfigDiffTable` keys rows by key + tags + index, so one config key can render as more than one row. Each of those rows shows the same comment control, and the comment filter shows all of them.
+- **Label:** the config key, truncated to 255 characters (`item_label`'s width). A key whose item key would exceed 1,024 characters (`item_key`'s width) gets no comment button. Keys that long are not expected; the guard just avoids a 400.
+- **Button:** `RowCommentButton` in each `ConfigDiffTable` row; the row gets the hover/focus-within rule so the outlined icon appears on hover, as on Performance analysis.
+- **The comment filter bypasses the default `['changed','new']` status filter.** This is the case the user hits most: a comment that says "this value did *not* change, so it is not the cause" is about a `same` item, which the default view hides.
+- **What the author was comparing against.** The status and the previous value depend on which run is selected in the card's comparison picker (`selectedRelatedTestRun`, by default the previous run). A comment saying "changed from 2 GB" means nothing against a different run. So a root comment on a config item records a view, like Graphs, Trends and Compare do today: `chart_context` with a server-stamped `kind: 'config'` and `{ comparedToTestRunId, status, currentValue, previousValue }`, each value capped at 2,000 characters. That means a `ConfigChartContextDto` added to `CHART_CONTEXT_DTO_BY_CARD` (`apps/api/src/modules/comments/comments.service.ts`), so `validateChartContext` accepts a view on `config`, and its error message changes from "Only a root comment on Graphs, Trends or Compare records a view". The usual root-only rule and `CHART_CONTEXT_MAX_BYTES` apply. Three consequences:
+  - The drawer shows the snapshot under the comment (`Compared with run 1234: 2 GB → 512 MB (changed)`), so the comment stays readable when the comparison has moved on.
+  - "Restore view" and the `?comment=` deep link replay it through the existing card-tagged `viewRequest`: the card selects that comparison run (if it is still offered), with the usual "Previous view replaced · Undo". Opening the thread in the drawer only applies the comment filter; it does not switch the comparison, matching how Graphs threads behave.
+  - Config values are already visible to everyone who can see the run, so copying them into the comment adds no exposure. They travel in the SUT export with the comment, as the run's config already does.
+
+**Dashboards card** (`components/dashboards/`).
+
+- **Item key:** `dashboard:<application_dashboards.id>`, which is `Dashboard.id` in the card. **Never the Grafana `dashboard_uid`**: a uid is unique only within one Grafana instance, and the same uid routinely exists on several (CLAUDE.md "`grafana_dashboards` is a mixed table", trap 3; Common Issue #43). The application dashboard id is per workload, which is exactly the scope of this card.
+- **Label:** `dashboard_label`, falling back to `dashboard_name`.
+- **Button:** the item is a `DashboardCard` tile in a grid, not a table row, so the tile gets an always-visible comment control in its header (the `ItemCommentHeader` styling: filled icon with threads, outlined without), carrying `data-comment-item` on the tile.
+- **Comment filter:** bypasses the search text and selected tags.
+- No view is recorded. The card has no view state worth replaying: the Grafana link already opens at the run's time range with the run's variables. A comment on a specific *panel* inside a dashboard is out of scope (Open Question 7).
+
+**Ripple effects.**
+
+- The **comments card** row shows `Configuration · heap.max` / `Dashboards · JVM overview` from `item_label`, and "Show in context" applies the comment filter through the same `focusItem` path.
+- A **story step** on a config item or dashboard focuses it the same way. This is where the comment filter matters most, because the reader did not set up the card's filters and should not have to undo them.
+- The **Comments report section** already prints `item_label` under the card heading; a config comment additionally prints its comparison snapshot.
+- Each card builds its own `item_key` format today, and nothing records them centrally. The two new prefixes, `config:` and `dashboard:`, are exported as builder functions from `packages/shared/src/constants/comment-cards.ts`, so the report and future cross-run lookups parse them from one definition.
 
 ### The comments card
 
@@ -244,13 +286,15 @@ A read-only `get_test_run_stories` tool returning published stories with steps a
 
 ## Phasing
 
-1. **PR1 — Tags.** Migration 1829 (column + two CHECKs), entity, DTOs, list/socket payloads, drawer chip and picker, Comments report section prints the tag. Useful on its own.
-2. **PR2 — Comments card.** Card, tab placement, All comments list with filters, Show in context, live updates. No API change.
-3. **PR3 — Stories.** Migration 1830 (two tables, RLS, indexes), API, delete-rule extension, SUT export, Add to story, editor, reader bar with view snapshot/restore, `?story=&step=` link.
-4. **PR4 — Report and notification.** Comments section `stories` layout; publish announcement through the sweep.
+1. **PR1 — Item comments on Configuration and Dashboards.** Comment buttons, item counts, the comment filter and chip on both cards, the `config` view DTO and replay of the comparison run, the comparison snapshot in the drawer and the report. No migration. Independent of everything else here, so it can ship first.
+2. **PR2 — Tags.** Migration 1829 (column + two CHECKs), entity, DTOs, list/socket payloads, drawer chip and picker, Comments report section prints the tag. Useful on its own.
+3. **PR3 — Comments card.** Card, tab placement, All comments list with filters, Show in context, live updates. No API change.
+4. **PR4 — Stories.** Migration 1830 (two tables, RLS, indexes), API, delete-rule extension, SUT export, Add to story, editor, reader bar with view snapshot/restore, `?story=&step=` link.
+5. **PR5 — Report and notification.** Comments section `stories` layout; publish announcement through the sweep.
 
 ## Tests
 
+- **Item comments:** opening a thread on a `same` config item shows it although the default status filter hides `same`; the comment filter matches `heap.max` exactly and not `heap.max.extra`; "Show all" restores the user's own status, tag and key filters unchanged; a config key in neither run and a removed dashboard each show their chip message; a config root records `kind: 'config'` with the selected comparison run, a reply cannot record a view, an oversized value → 400; Restore view selects the recorded comparison run and Undo returns to the previous one; dashboard item keys use the application dashboard id, so the same Grafana uid on two instances yields two separate items.
 - **Tags:** CHECK and constant stay equal; tag on a reply → 400; PATCH tag by non-author → 403; tag survives soft delete.
 - **Stories API:** someone else's draft is 404 on GET/PATCH/PUT/DELETE; a published one is readable cross-user in the same org and 404 cross-org; steps referencing a reply, another run's comment, or a soft-deleted comment → 400; `PUT steps` is atomic (a failing insert leaves the old list); API-key writes → 403; 51 steps → 400.
 - **Delete rule:** deleting a step's root soft-deletes it, even with no replies and no marker; deleting a story leaves its comments; a run delete removes both without an FK error.
@@ -269,6 +313,9 @@ A read-only `get_test_run_stories` tool returning published stories with steps a
 5. **Typed links (Approach A).** Revisit once stories are in use: do authors write step notes like "this explains step 1"? If so, that is the demand signal for links.
 6. **Story-level verdict.** Should a published story be able to set or suggest the run's verdict / annotation? Out of scope here; worth deciding before anyone builds it ad hoc.
 
+7. **Comments on a Grafana panel.** A dashboard-level anchor is what this design adds. Pinning a comment to one panel of an embedded dashboard needs a panel list per dashboard in the card: `DashboardDialog` embeds the whole dashboard in an iframe, and Perfana cannot see clicks inside it. Worth it only if dashboard comments turn out to be mostly about one panel.
+8. **Should the Configuration comment filter switch the comparison run on plain open**, not only on Restore view? Proposed no, for consistency with Graphs. The drawer's snapshot covers the case where the runs differ.
+
 ## Out of Scope
 
 - Cross-run memory (surfacing earlier runs' root causes on a similar symptom). Tags are designed to make it possible; it gets its own design.
@@ -278,6 +325,7 @@ A read-only `get_test_run_stories` tool returning published stories with steps a
 
 ## Success Criteria
 
+- A comment on a configuration item or a dashboard opens with that item, and only that item, visible, whatever the card's filters were, and the reader can return to their own filters in one click.
 - A reviewer can follow a cross-card analysis from one link, in the author's order, seeing each comment's evidence (chart view, row, config item), without opening a drawer.
 - Leaving the story returns every card to the view the reader had before.
 - A report generated after PR4 can contain the story with its marker charts.
