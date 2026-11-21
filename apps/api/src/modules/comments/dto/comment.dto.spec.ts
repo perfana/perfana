@@ -15,6 +15,7 @@ import { validateChartContext } from '../comments.service';
 const s = (source = 'grafana') => ({ dashboardId: 'd1', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: 'used', source });
 const graphs = (over: Record<string, unknown> = {}) => ({ series: [s()], xRange: ['2026-11-20T10:00:00Z', '2026-11-20T11:00:00Z'], axisMode: 'split', ...over });
 const trends = (over: Record<string, unknown> = {}) => ({ series: [{ ...s(), metricsSourceId: 'm1', isAggregated: false }], timeRange: 'Last week', evaluateType: 'p95', ...over });
+const config = (over: Record<string, unknown> = {}) => ({ comparedToTestRunId: 'App-00006', status: 'changed', currentValue: '512m', previousValue: '2g', ...over });
 const compare = (over: Record<string, unknown> = {}) => ({ series: [s()], baselineTestRunId: 'App-acc-loadTest-00007', ...over });
 
 describe('validateChartContext', () => {
@@ -28,6 +29,12 @@ describe('validateChartContext', () => {
       .toMatchObject({ kind: 'trends', timeRange: 'Custom', evaluateType: 'p95', series: [{ metricsSourceId: 'm1' }] });
     expect(validateChartContext('compare', undefined, compare({ baselineTestRunId: 'control-group' })))
       .toMatchObject({ kind: 'compare', baselineTestRunId: 'control-group' });
+  });
+
+  it('keeps a Configuration view, values at the cap and null for an absent side', () => {
+    expect(validateChartContext('config', undefined, config({ currentValue: 'x'.repeat(2000), previousValue: null })))
+      .toMatchObject({ kind: 'config', status: 'changed', comparedToTestRunId: 'App-00006', previousValue: null });
+    expect(validateChartContext('config', undefined, config({ status: 'same', comparedToTestRunId: undefined }))).toMatchObject({ kind: 'config', status: 'same' });
   });
 
   it('strips keys outside the shape and ignores a kind the body claims', () => {
@@ -48,13 +55,18 @@ describe('validateChartContext', () => {
     ['a Trends view with no aggregation', 'trends', trends({ evaluateType: undefined })],
     ['a backwards custom Trends window', 'trends', trends({ customRange: ['2026-11-20T00:00:00Z', '2026-11-01T00:00:00Z'] })],
     ['a Compare view with no series', 'compare', compare({ series: [] })],
+    ['a Configuration value over 2,000 characters', 'config', config({ previousValue: 'x'.repeat(2001) })],
+    ['a Configuration view with an unknown status', 'config', config({ status: 'different' })],
+    ['a Configuration view with no status', 'config', config({ status: undefined })],
     ['a view on a card that records none', 'slo', graphs()],
+    ['a view on Dashboards, which records none', 'dashboards', config()],
   ])('refuses %s', (_label, card, raw) => {
     expect(() => validateChartContext(card, undefined, raw)).toThrow();
   });
 
   it('refuses a view on a reply', () => {
     expect(() => validateChartContext('graphs', 'parent-id', graphs())).toThrow(/root comment/);
+    expect(() => validateChartContext('config', 'parent-id', config())).toThrow(/root comment/);
   });
 });
 
