@@ -272,4 +272,9 @@ export interface CommentResponse {
 
 export interface CommentThreadResponse extends CommentResponse {
   replies: CommentResponse[];
+  /**
+   * The stories this root is a step of, among those the caller can see (published, or their own
+   * drafts); absent when none. Lets the drawer name them before a delete.
+   */
+  stories?: { id: string; title: string; position: number }[];
 }

@@ -141,6 +141,22 @@ export class CommentsService {
     const read = card
       ? await em.getRepository(TestRunCommentRead).findOne({ where: { userId: caller.userId, testRunId: run.id, cardKey: card } })
       : null;
+    // The stories each root is a step of, as far as the caller can see them (published, or their
+    // own drafts), so the drawer's delete confirmation can name them.
+    if (threads.size > 0) {
+      const steps: { comment_id: string; story_id: string; title: string; position: number }[] = await em.query(
+        `SELECT st.comment_id, s.id AS story_id, s.title, st.position
+           FROM test_run_story_steps st
+           JOIN test_run_stories s ON s.id = st.story_id
+          WHERE s.test_run_id = $1 AND (s.status = 'published' OR s.author_id = $2)
+          ORDER BY s.created_at, s.id`,
+        [run.id, caller.userId],
+      );
+      for (const st of steps) {
+        const root = threads.get(st.comment_id);
+        if (root) (root.stories ??= []).push({ id: st.story_id, title: st.title, position: st.position });
+      }
+    }
     const canModerate =
       !caller.userId.startsWith('api-key:') &&
       (caller.orgIds === null || (await this.authzService.isOrganizationAdmin(caller.userId, run.organizationId)));
@@ -252,9 +268,15 @@ export class CommentsService {
     return response;
   }
 
+  private async isStoryStep(em: EntityManager, commentId: string): Promise<boolean> {
+    const rows: unknown[] = await em.query(`SELECT 1 FROM test_run_story_steps WHERE comment_id = $1 LIMIT 1`, [commentId]);
+    return rows.length > 0;
+  }
+
   /**
-   * Delete rule: a marker root or a root with replies is soft-deleted (body wiped, number and
-   * thread kept); a plain root and any reply are hard-deleted.
+   * Delete rule: a marker root, a root with replies, or a root that is a step of any story is
+   * soft-deleted (body wiped, number, tag and thread kept); a plain root and any reply are
+   * hard-deleted.
    */
   async remove(id: string, caller: CommentCaller): Promise<void> {
     const outcome = await this.tx(async (em) => {
@@ -269,7 +291,12 @@ export class CommentsService {
       const repo = em.getRepository(TestRunComment);
       this.auditService.logDelete(comment as unknown as OwnedResource, { organizationIdOverride: comment.organizationId });
       const hasReplies = !comment.parentId && (await repo.count({ where: { parentId: comment.id } })) > 0;
-      if (comment.markerSeq !== null || hasReplies) {
+      // A step of any story (drafts included, whoever wrote them) keeps its row, so the story keeps
+      // its shape and the step reads "comment deleted". The FK on test_run_story_steps.comment_id
+      // is NO ACTION as a backstop; this is the rule. A concurrent step insert holds FOR SHARE on
+      // this row, so this count runs after it committed.
+      const inStory = !comment.parentId && (await this.isStoryStep(em, comment.id));
+      if (comment.markerSeq !== null || hasReplies || inStory) {
         comment.deletedAt = new Date();
         comment.body = '';
         // The recorded view is the author's content too; the greyed pin needs only marker_seq/time.

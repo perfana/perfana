@@ -1,4 +1,4 @@
-type SutFilter = 'bySut' | 'byTestRunVarchar' | 'byTestRunUuid' | 'byAppDashboard' | 'byTestEnvironment' | 'byReference';
+type SutFilter = 'bySut' | 'byTestRunVarchar' | 'byTestRunUuid' | 'byStoryOfTestRun' | 'byAppDashboard' | 'byTestEnvironment' | 'byReference';
 type SutGroup = 'core' | 'optional' | 'raw' | 'shared';
 
 export interface SutResource {
@@ -146,6 +146,16 @@ export const SUT_RESOURCES: SutResource[] = [
   // notification sweep never announces an imported comment (design R9).
   { table: 'test_run_comments', filter: 'byTestRunUuid', group: 'core',
     orderBy: '(t.parent_id IS NOT NULL), t.created_at, t.id' },
+  // Analysis stories (migration 1830) travel with their run's comments, which their steps
+  // reference: stories after test_run_comments, steps after both. Ids are not remapped (every row
+  // carries its source PK, as comments do), and organization_id / team_id are rewritten by the
+  // importer's generic ownership remap. Drafts travel too: the bundle is an admin-only copy of the
+  // run, and a draft stays its author's in the target (author_id is kept). Steps have no run
+  // column of their own, so they are selected through their story (byStoryOfTestRun), and the
+  // importer drops a step whose comment or story did not land rather than abort the import.
+  { table: 'test_run_stories', filter: 'byTestRunUuid', group: 'core' },
+  { table: 'test_run_story_steps', filter: 'byStoryOfTestRun', group: 'core',
+    orderBy: 't.story_id, t.position' },
   { table: 'graph_presets', filter: 'byTestRunVarchar', group: 'optional' },
 
   // --- raw sample hypertables (off by default) ---

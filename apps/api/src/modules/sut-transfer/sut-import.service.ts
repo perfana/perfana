@@ -108,6 +108,8 @@ const PURGE_SCOPE_COLUMN = 'test_run_id';
  * the column is stamped the same way.
  */
 const COMMENTS_TABLE = 'test_run_comments';
+/** Story steps reference comments and stories; see insertBatch. */
+const STORY_STEPS_TABLE = 'test_run_story_steps';
 
 @Injectable()
 export class SutImportService {
@@ -302,6 +304,16 @@ export class SutImportService {
     }
 
     if (table === COMMENTS_TABLE) return this.insertComments(manager, toInsert);
+    if (table === STORY_STEPS_TABLE) {
+      // A step whose comment did not land (it lost ON CONFLICT to a different comment holding its
+      // marker number, see insertComments) or whose story did not would FK-violate at commit and
+      // abort the whole import; drop it instead. The story keeps its other steps.
+      const reason = 'their comment or story was not imported.';
+      const withComment = await this.dropRowsMissingParent(manager, table, toInsert, 'comment_id', COMMENTS_TABLE, reason);
+      const kept = await this.dropRowsMissingParent(manager, table, withComment, 'story_id', 'test_run_stories', reason);
+      const stepsDropped = dropped + toInsert.length - kept.length;
+      return { inserted: kept.length > 0 ? await this.writeRows(manager, table, kept) : 0, dropped: stepsDropped };
+    }
 
     return { inserted: await this.writeRows(manager, table, toInsert), dropped };
   }

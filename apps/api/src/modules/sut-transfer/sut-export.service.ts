@@ -170,6 +170,13 @@ export class SutExportService {
           sql: `SELECT row_to_json(t) AS r FROM ${resource.table} t WHERE t.test_run_id = ANY($1)`,
           params: [ctx.testRunUuids],
         };
+      case 'byStoryOfTestRun':
+        // Story steps hang off a story, which hangs off the run by uuid.
+        return {
+          sql: `SELECT row_to_json(t) AS r FROM ${resource.table} t
+                WHERE t.story_id IN (SELECT id FROM test_run_stories WHERE test_run_id = ANY($1))`,
+          params: [ctx.testRunUuids],
+        };
       case 'byAppDashboard':
         return {
           sql: `SELECT row_to_json(t) AS r FROM ${resource.table} t WHERE t.application_dashboard_id = ANY($1)`,
