@@ -112,7 +112,7 @@ export class MattermostMessageBuilder {
         {
           fallback: `${headline}: ${storyDetail(story)}`,
           color: COLOR_INFO,
-          text: `${storyDetail(story)}\n\n[Read the analysis in Perfana](${story.link})`,
+          text: `${storyDetail(story)}\n\n[Read the investigation in Perfana](${story.link})`,
         },
       ],
     };

@@ -1,5 +1,5 @@
 // The Comments section's layout option (analysis stories, PR5): a stored config with no layout
-// reads as "By card" and keeps its card filter; choosing "Analysis stories" writes
+// reads as "By card" and keeps its card filter; choosing "Investigations" writes
 // `layout: 'stories'` and hides the card filter, which does not apply to stories.
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { CommentsConfigForm } from './SectionConfigs';
@@ -22,14 +22,14 @@ describe('CommentsConfigForm layout', () => {
     const onChange = jest.fn();
     render(<CommentsConfigForm config={{ cards: ['slo'] }} onChange={onChange} onTextChange={jest.fn()} />);
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Layout' }));
-    fireEvent.click(within(screen.getByRole('listbox')).getByText('Analysis stories'));
+    fireEvent.click(within(screen.getByRole('listbox')).getByText('Investigations'));
     expect(onChange).toHaveBeenCalledWith({ cards: ['slo'], layout: 'stories' });
   });
 
   it('explains the stories layout and hides the card filter', () => {
     render(<CommentsConfigForm config={{ layout: 'stories' }} onChange={jest.fn()} onTextChange={jest.fn()} />);
-    expect(screen.getByRole('combobox', { name: 'Layout' })).toHaveTextContent('Analysis stories');
-    expect(screen.getByText(/Comments in no story are left out/)).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Layout' })).toHaveTextContent('Investigations');
+    expect(screen.getByText(/Comments in no investigation are left out/)).toBeInTheDocument();
     expect(screen.queryByLabelText('Cards')).not.toBeInTheDocument();
   });
 });

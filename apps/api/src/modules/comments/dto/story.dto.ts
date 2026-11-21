@@ -18,7 +18,7 @@ export class StoryStepInputDto {
   @IsUUID()
   commentId!: string;
 
-  @ApiPropertyOptional({ type: String, nullable: true, maxLength: STORY_STEP_NOTE_MAX_LENGTH, description: "The story author's words for this step" })
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: STORY_STEP_NOTE_MAX_LENGTH, description: "The investigation author's words for this step" })
   @ValidateIf((o: StoryStepInputDto) => o.note !== undefined && o.note !== null)
   @IsString()
   @MaxLength(STORY_STEP_NOTE_MAX_LENGTH)

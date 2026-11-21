@@ -150,7 +150,7 @@ describe('sectionSummary', () => {
   });
 
   it('summarizes a comments section in the stories layout as such, whatever its card filter', () => {
-    expect(sectionSummary(section({ type: 'comments', config: { layout: 'stories', cards: ['graphs'] } }))).toBe('Analysis stories');
+    expect(sectionSummary(section({ type: 'comments', config: { layout: 'stories', cards: ['graphs'] } }))).toBe('Investigations');
     expect(sectionSummary(section({ type: 'comments', config: { layout: 'by-card' } }))).toBe('All cards');
   });
 });

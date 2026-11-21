@@ -229,7 +229,7 @@ function CommentItem({
             <>
               <Typography variant="caption" data-testid="comment-delete-confirm">
                 {stories && stories.length > 0
-                  ? `Delete this comment? It is ${stories.map((st) => `step ${st.position} of “${st.title}”`).join(', ')}; the story keeps the step as “comment deleted”.`
+                  ? `Delete this comment? It is ${stories.map((st) => `step ${st.position} of the investigation “${st.title}”`).join(', ')}; ${stories.length === 1 ? 'the investigation keeps' : 'they keep'} the step as “comment deleted”.`
                   : 'Delete this comment?'}
               </Typography>
               <Button size="small" color="error" onClick={() => onDelete().catch((e) => { setError(errorText(e)); setConfirming(false); })}>

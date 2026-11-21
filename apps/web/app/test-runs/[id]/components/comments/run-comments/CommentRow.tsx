@@ -145,7 +145,7 @@ export function CommentRow({
         >
           Show in context
         </Button>
-        {!t.deleted && <AddToStoryMenu commentId={t.id} label={`Add ${t.authorName}'s comment on ${where} to a story`} />}
+        {!t.deleted && <AddToStoryMenu commentId={t.id} label={`Add ${t.authorName}'s comment on ${where} to an investigation`} />}
       </Box>
     </Box>
   );

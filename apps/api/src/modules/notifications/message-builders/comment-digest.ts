@@ -62,17 +62,17 @@ export interface StoryAnnouncement {
 }
 
 /**
- * "<author> published an analysis on <SUT> run <id>", or for an agent's story "<reviewer>
- * published an analysis proposed by <agent> (AI) on <SUT> run <id>": a channel reader must never
+ * "<author> published an investigation on <SUT> run <id>", or for an agent's story "<reviewer>
+ * published an investigation proposed by <agent> (AI) on <SUT> run <id>": a channel reader must never
  * take an agent's root-cause claim for a colleague's.
  */
 export function storyHeadline(s: StoryAnnouncement): string {
   const where = `on ${plainText(s.systemName)} run ${plainText(s.testRunId, 120)}`;
   if (s.authorKind === 'agent') {
     const reviewer = s.publishedByName ? plainText(s.publishedByName) : 'A reviewer';
-    return `${reviewer} published an analysis proposed by ${plainText(s.authorName)} (AI) ${where}`;
+    return `${reviewer} published an investigation proposed by ${plainText(s.authorName)} (AI) ${where}`;
   }
-  return `${plainText(s.authorName)} published an analysis ${where}`;
+  return `${plainText(s.authorName)} published an investigation ${where}`;
 }
 
 /** "<title> (N steps)" */

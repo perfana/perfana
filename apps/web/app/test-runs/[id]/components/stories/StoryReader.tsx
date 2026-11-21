@@ -110,7 +110,7 @@ export default function StoryReader() {
       .catch((e: unknown) => {
         if (!live) return;
         const status = (e as { status?: number })?.status;
-        setLoadError(status === 404 ? 'This story is not available: it was deleted, unpublished, or is not yours to read.' : e instanceof Error ? e.message : 'Loading the story failed');
+        setLoadError(status === 404 ? 'This investigation is not available: it was deleted, unpublished, or is not yours to read.' : e instanceof Error ? e.message : 'Loading the investigation failed');
       });
     return () => {
       live = false;
@@ -225,7 +225,7 @@ export default function StoryReader() {
         <DialogTitle id="story-intro-title">{story.title}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            {story.authorKind === 'agent' && story.status === 'published' ? <StoryAuthorLine story={story} /> : <>A story by <StoryAuthorLine story={story} /></>}
+            {story.authorKind === 'agent' && story.status === 'published' ? <StoryAuthorLine story={story} /> : <>An investigation by <StoryAuthorLine story={story} /></>}
             {story.status === 'draft'
               ? story.authorKind === 'agent'
                 ? ` · ${AI_DRAFT_LABEL}, visible to everyone who can see this run`
@@ -257,7 +257,7 @@ export default function StoryReader() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => go(count)} disabled={count === 0}>‹ Last step</Button>
-          <Button variant="contained" onClick={exit}>Exit story</Button>
+          <Button variant="contained" onClick={exit}>Exit investigation</Button>
         </DialogActions>
       </Dialog>
       {step && screen?.kind === 'step' && (
@@ -294,7 +294,7 @@ function StoryBarFrame({ barRef, barHeight, children }: { barRef: (el: HTMLDivEl
         ref={barRef}
         elevation={8}
         role="region"
-        aria-label="Story"
+        aria-label="Investigation"
         data-testid="story-bar"
         sx={{
           position: 'fixed',
@@ -353,7 +353,7 @@ function StepBar({
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
         <Button size="small" onClick={onPrev} aria-label={index === 0 ? 'Back to the introduction' : 'Previous step'}>‹ Prev</Button>
         <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }} aria-live="polite">
-          Step {index + 1} of {count}
+          Investigation · step {index + 1} of {count}
         </Typography>
       </Box>
       <Box sx={{ flex: '1 1 320px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -404,7 +404,7 @@ function StepBar({
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, ml: 'auto' }}>
         <Button size="small" variant="contained" onClick={onNext}>{index + 1 === count ? 'Conclusion ›' : 'Next ›'}</Button>
-        <IconButton size="small" onClick={onExit} aria-label="Exit story">
+        <IconButton size="small" onClick={onExit} aria-label="Exit investigation">
           <CloseIcon fontSize="small" />
         </IconButton>
       </Box>

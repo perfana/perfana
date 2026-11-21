@@ -68,7 +68,7 @@ export class StoriesService {
    * and it is published or the caller's own draft. `forUpdate` row-locks it inside a transaction.
    */
   private async loadStory(id: string, caller: CommentCaller, em: EntityManager, forUpdate = false): Promise<TestRunStory> {
-    const notFound = new NotFoundException('Story not found');
+    const notFound = new NotFoundException('Investigation not found');
     if (!UUID_RE.test(id)) throw notFound;
     const story = await em
       .getRepository(TestRunStory)
@@ -181,7 +181,7 @@ export class StoriesService {
         );
         if (Number(counted[0]?.n ?? 0) >= AGENT_STORY_LIMIT) {
           throw new HttpException(
-            `This API key has reached its limit of ${AGENT_STORY_LIMIT} stories on this test run`,
+            `This API key has reached its limit of ${AGENT_STORY_LIMIT} investigations on this test run`,
             HttpStatus.TOO_MANY_REQUESTS,
           );
         }
@@ -227,7 +227,7 @@ export class StoriesService {
       throw new BadRequestException('Send title, summary, status or a combination');
     }
     if (dto.status !== undefined && isKey(caller)) {
-      throw new ForbiddenException('An API key cannot publish or unpublish a story: a person reviews and publishes it');
+      throw new ForbiddenException('An API key cannot publish or unpublish an investigation: a person reviews and publishes it');
     }
     const result = await this.tx(async (em) => {
       const story = await this.loadStory(id, caller, em, true);
@@ -241,7 +241,7 @@ export class StoriesService {
       if (dto.status !== undefined && dto.status !== story.status) {
         if (dto.status === 'published') {
           const steps = await em.getRepository(TestRunStoryStep).count({ where: { storyId: story.id } });
-          if (steps === 0) throw new BadRequestException('A story needs at least one step before it can be published');
+          if (steps === 0) throw new BadRequestException('An investigation needs at least one step before it can be published');
           story.publishedAt ??= new Date();
           story.publishedById = caller.userId;
           story.publishedByName = (caller.displayName || caller.userId).slice(0, 255);
@@ -269,7 +269,7 @@ export class StoriesService {
       const denial = editDenial(story, caller);
       if (denial) throw new ForbiddenException(denial);
       if (story.status === 'published' && steps.length === 0) {
-        throw new BadRequestException('A published story needs at least one step; unpublish it first');
+        throw new BadRequestException('A published investigation needs at least one step; unpublish it first');
       }
       const repo = em.getRepository(TestRunStoryStep);
       const existing = await repo.find({ where: { storyId: story.id } });
@@ -292,7 +292,7 @@ export class StoriesService {
     const story = await this.tx(async (em) => {
       const s = await this.loadStory(id, caller, em, true);
       const allowed = deletableByRule(s, caller) || (await this.canModerate(caller, s.organizationId));
-      if (!allowed) throw new ForbiddenException('Only the author or an organization admin can delete a story');
+      if (!allowed) throw new ForbiddenException('Only the author or an organization admin can delete an investigation');
       this.auditService.logDelete(s as unknown as OwnedResource, { organizationIdOverride: s.organizationId });
       await em.getRepository(TestRunStory).delete({ id: s.id });
       return s;
@@ -306,10 +306,10 @@ export class StoriesService {
    * delete of one waits for this transaction and then sees the step (and soft-deletes instead).
    */
   private async validateSteps(em: EntityManager, runId: string, steps: StoryStepInputDto[], alreadyIn: Set<string>): Promise<void> {
-    if (steps.length > STORY_MAX_STEPS) throw new BadRequestException(`A story holds at most ${STORY_MAX_STEPS} steps`);
+    if (steps.length > STORY_MAX_STEPS) throw new BadRequestException(`An investigation holds at most ${STORY_MAX_STEPS} steps`);
     const ids = steps.map((s) => s.commentId);
     if (ids.some((id) => !UUID_RE.test(id))) throw new BadRequestException('commentId must be a uuid');
-    if (new Set(ids).size !== ids.length) throw new BadRequestException('A comment can appear only once in a story');
+    if (new Set(ids).size !== ids.length) throw new BadRequestException('A comment can appear only once in an investigation');
     if (ids.length === 0) return;
     const rows: { id: string; test_run_id: string; parent_id: string | null; deleted_at: Date | null }[] = await em.query(
       `SELECT id, test_run_id, parent_id, deleted_at FROM test_run_comments WHERE id = ANY($1::uuid[]) FOR SHARE`,
@@ -319,7 +319,7 @@ export class StoriesService {
     for (const id of ids) {
       const c = byId.get(id);
       if (!c || c.test_run_id !== runId) throw new BadRequestException(`Comment ${id} is not a comment on this run`);
-      if (c.parent_id) throw new BadRequestException(`Comment ${id} is a reply; a story step is a root comment`);
+      if (c.parent_id) throw new BadRequestException(`Comment ${id} is a reply; an investigation step is a root comment`);
       if (c.deleted_at && !alreadyIn.has(id)) throw new BadRequestException(`Comment ${id} was deleted and cannot be added`);
     }
   }
@@ -385,7 +385,7 @@ export class StoriesService {
 
 function normaliseTitle(raw: string): string {
   const title = raw.trim();
-  if (title.length === 0) throw new BadRequestException('A story needs a title');
+  if (title.length === 0) throw new BadRequestException('An investigation needs a title');
   return title;
 }
 
@@ -405,15 +405,15 @@ const isKey = (caller: Pick<CommentCaller, 'userId'>): boolean => caller.userId.
  */
 export function editDenial(s: TestRunStory, caller: CommentCaller): string | null {
   if (isKey(caller)) {
-    if (caller.authorKind !== 'agent' || s.authorId !== caller.userId) return 'An API key can edit only stories it created';
-    if (s.status !== 'draft') return 'This story was published by a person; an API key can no longer change it';
+    if (caller.authorKind !== 'agent' || s.authorId !== caller.userId) return 'An API key can edit only investigations it created';
+    if (s.status !== 'draft') return 'This investigation was published by a person; an API key can no longer change it';
     return null;
   }
   if (s.authorKind === 'agent') {
     if (s.status === 'draft' || s.publishedById === caller.userId) return null;
-    return 'Only the person who published this story can change it';
+    return 'Only the person who published this investigation can change it';
   }
-  return s.authorId === caller.userId ? null : 'Only the author can edit a story';
+  return s.authorId === caller.userId ? null : 'Only the author can edit an investigation';
 }
 
 /** Delete without moderator rights: a user's own story, or an agent's story the user may edit. Keys never. */

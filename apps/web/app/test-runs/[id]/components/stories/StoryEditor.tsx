@@ -167,11 +167,11 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
     return error ? (
       <Box>
         <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>
-        <Button size="small" onClick={onClose}>Back to stories</Button>
+        <Button size="small" onClick={onClose}>Back to investigations</Button>
       </Box>
     ) : (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-        <CircularProgress size={24} aria-label="Loading story" />
+        <CircularProgress size={24} aria-label="Loading investigation" />
       </Box>
     );
   }
@@ -181,7 +181,7 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
   return (
     <Box data-testid="story-editor" sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Button size="small" onClick={onClose}>‹ Stories</Button>
+        <Button size="small" onClick={onClose}>‹ Investigations</Button>
         <Chip size="small" label={storyStatusLabel(story)} color={published ? 'success' : agentStory ? 'info' : 'default'} variant="outlined" />
         {dirty && <Typography variant="caption" color="text.secondary">Unsaved changes</Typography>}
       </Box>
@@ -190,7 +190,7 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
       </Typography>
       {agentStory && !published && (
         <Alert severity="info" data-testid="story-agent-review">
-          An AI agent proposed this story and nobody has reviewed it yet. Check each step against the run before you publish it:
+          An AI agent proposed this investigation and nobody has reviewed it yet. Check each step against the run before you publish it:
           publishing names you as the reviewer.
         </Alert>
       )}
@@ -202,12 +202,12 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
         onChange={(e) => setTitle(e.target.value)}
         inputProps={{ maxLength: STORY_TITLE_MAX_LENGTH }}
         error={!title.trim()}
-        helperText={!title.trim() ? 'A story needs a title' : ' '}
+        helperText={!title.trim() ? 'An investigation needs a title' : ' '}
       />
       <TextField
         size="small"
         label="Conclusion"
-        placeholder="What the analysis found, shown as the story's last screen"
+        placeholder="What the analysis found, shown as the investigation's last screen"
         value={summary}
         onChange={(e) => setSummary(e.target.value)}
         multiline
@@ -228,7 +228,7 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
       </Box>
       {steps.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-          No steps yet. Use “Add to story” on a comment, in All comments or in a card’s comments.
+          No steps yet. Use “Add to investigation” on a comment, in All comments or in a card’s comments.
         </Typography>
       ) : (
         <DndContext
@@ -240,7 +240,7 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
         >
           <ClearDragWhenIdle dragging={dragging} onIdle={clearDrag} />
           <SortableContext items={steps.map((s) => s.commentId)} strategy={verticalListSortingStrategy}>
-            <Box component="ol" aria-label="Story steps" sx={{ listStyle: 'none', p: 0, m: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box component="ol" aria-label="Investigation steps" sx={{ listStyle: 'none', p: 0, m: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
               {steps.map((s, i) => (
                 <SortableStep
                   key={s.commentId}
@@ -288,12 +288,12 @@ export function StoryEditor({ storyId, onClose, onRead }: { storyId: string; onC
         <Box sx={{ flex: 1 }} />
         {!story.canDelete ? null : confirmDelete ? (
           <>
-            <Typography variant="caption">Delete this story? Its comments stay.</Typography>
+            <Typography variant="caption">Delete this investigation? Its comments stay.</Typography>
             <Button size="small" color="error" disabled={busy} onClick={() => void remove()}>Delete</Button>
             <Button size="small" onClick={() => setConfirmDelete(false)}>Keep</Button>
           </>
         ) : (
-          <Button size="small" color="error" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete story</Button>
+          <Button size="small" color="error" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete investigation</Button>
         )}
       </Box>
     </Box>

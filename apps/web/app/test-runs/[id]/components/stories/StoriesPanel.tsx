@@ -60,7 +60,7 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
         setStories(s);
         setError(null);
       })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Loading stories failed'));
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Loading investigations failed'));
     return () => {
       live = false;
     };
@@ -71,22 +71,22 @@ export function StoriesPanel({ onBeforeRead }: { onBeforeRead?: () => void } = {
   return (
     <Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-        A story walks a reader through comments in your order: each step opens the card, row or chart view the comment is
-        about. Start one with “Add to story” on a comment.
+        An investigation walks a reader through comments in your order: each step opens the card, row or chart view the
+        comment is about. Start one with “Add to investigation” on a comment.
       </Typography>
       {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
       {!stories && !error && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-          <CircularProgress size={24} aria-label="Loading stories" />
+          <CircularProgress size={24} aria-label="Loading investigations" />
         </Box>
       )}
       {stories && stories.length === 0 && (
         <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-          No stories on this run yet.
+          No investigations on this run yet.
         </Typography>
       )}
       {stories && stories.length > 0 && (
-        <Box component="ul" aria-label="Stories" sx={{ listStyle: 'none', p: 0, m: 0 }}>
+        <Box component="ul" aria-label="Investigations" sx={{ listStyle: 'none', p: 0, m: 0 }}>
           {stories.map((s) => (
             <Box
               component="li"

@@ -123,7 +123,7 @@ export class TeamsMessageBuilder {
       potentialAction: [
         {
           '@type': 'OpenUri',
-          name: 'Read the analysis in Perfana',
+          name: 'Read the investigation in Perfana',
           targets: [{ os: 'default', uri: story.link }],
         },
       ],

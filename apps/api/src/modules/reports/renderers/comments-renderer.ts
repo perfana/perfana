@@ -93,7 +93,8 @@ export class CommentsRenderer {
     userId: string = '',
     roles: string[] = [],
   ): Promise<string> {
-    const title = section.title || 'Comments';
+    // A stories-layout section reads as "Investigations", the name the app uses (PR7).
+    const title = section.title || (commentsSectionLayout(section.config) === 'stories' ? 'Investigations' : 'Comments');
     const text = getSectionText(section);
     const cards = selectedCards(section.config);
 
@@ -315,7 +316,7 @@ export class CommentsRenderer {
   ): Promise<string> {
     const stories = await this.dataFetcher.getPublishedStories(testRun, userId, roles);
     if (stories.length === 0) {
-      return this.wrap(title, text, emptyState('No published analysis stories for this run.'));
+      return this.wrap(title, text, emptyState('No published investigations for this run.'));
     }
 
     let chartIdx = 0;
@@ -332,7 +333,7 @@ export class CommentsRenderer {
     const count = stories.length;
     return `
       <section class="comments-section comments-stories">
-        ${sectionHeader(title, { kicker: `${formatInt(count)} analysis stor${count !== 1 ? 'ies' : 'y'}` })}
+        ${sectionHeader(title, { kicker: `${formatInt(count)} investigation${count !== 1 ? 's' : ''}` })}
         ${sectionText(text)}
         ${rendered.join('\n')}
       </section>

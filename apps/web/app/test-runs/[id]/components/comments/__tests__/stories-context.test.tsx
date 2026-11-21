@@ -94,5 +94,5 @@ it('names the stories a root is a step of in the delete confirmation', async () 
   act(() => latest!.openDrawer('slo'));
   fireEvent.click(await screen.findByText('heap halved'));
   fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
-  expect(screen.getByTestId('comment-delete-confirm')).toHaveTextContent('It is step 3 of “Checkout latency”');
+  expect(screen.getByTestId('comment-delete-confirm')).toHaveTextContent('It is step 3 of the investigation “Checkout latency”');
 });
