@@ -1,5 +1,5 @@
 import { authenticatedFetch } from '@/lib/api';
-import type { CommentCardKey } from '@perfana/shared/constants/comment-cards';
+import type { CommentCardKey, CommentTag } from '@perfana/shared/constants/comment-cards';
 import type { SeriesConfig as PresetSeries } from '@/lib/graph-presets';
 
 /**
@@ -77,6 +77,8 @@ export interface RunComment {
   markerTime: string | null;
   /** The card's view when the root was written (Graphs, Trends, Compare); null once deleted and elsewhere. */
   chartContext: CommentView | null;
+  /** Analysis tag on a root (design: test-run-analysis-stories.md); null when untagged, always null on a reply. Optional until the API sends it. */
+  tag?: CommentTag | null;
   createdAt: string;
   editedAt: string | null;
 }

@@ -63,3 +63,33 @@ export const COMMENT_UNREAD_WINDOW_DAYS = 30;
 
 /** Maximum comment body length, mirrored by the table's CHECK. */
 export const COMMENT_BODY_MAX_LENGTH = 10_000;
+
+/**
+ * Analysis tags a root comment may carry (design: docs/designs/test-run-analysis-stories.md,
+ * "Tags"). Stored in `test_run_comments.tag` and mirrored by that column's CHECK, so a stored
+ * value must never change. The order is the suggested story order.
+ */
+export const COMMENT_TAGS = Object.freeze([
+  'symptom',
+  'hypothesis',
+  'evidence',
+  'ruled-out',
+  'root-cause',
+  'action',
+] as const);
+
+export type CommentTag = (typeof COMMENT_TAGS)[number];
+
+/** Display text for each tag. Rename freely, unlike the stored keys. */
+export const COMMENT_TAG_LABELS: Readonly<Record<CommentTag, string>> = Object.freeze({
+  symptom: 'Symptom',
+  hypothesis: 'Hypothesis',
+  evidence: 'Evidence',
+  'ruled-out': 'Ruled out',
+  'root-cause': 'Root cause',
+  action: 'Action',
+});
+
+export function isCommentTag(value: unknown): value is CommentTag {
+  return typeof value === 'string' && (COMMENT_TAGS as readonly string[]).includes(value);
+}
