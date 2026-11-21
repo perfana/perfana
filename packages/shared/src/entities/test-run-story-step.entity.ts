@@ -3,8 +3,9 @@ import { Entity, PrimaryColumn, Column, Index } from 'typeorm';
 /**
  * One step of an analysis story (migration 1830): a reference to a ROOT comment on the story's
  * run, its 1-based dense `position`, and the story author's connecting `note`. A comment appears
- * at most once per story. `comment_id` is ON DELETE NO ACTION: the service never hard-deletes a
- * comment that is a step, it soft-deletes it, and the step then reads "comment deleted".
+ * at most once per story. `comment_id` is ON DELETE NO ACTION, DEFERRABLE INITIALLY DEFERRED (so a
+ * run delete, which cascades to comments before stories, is not refused): the service never
+ * hard-deletes a comment that is a step, it soft-deletes it, and the step then reads "comment deleted".
  */
 @Entity('test_run_story_steps')
 @Index('idx_test_run_story_steps_comment', ['commentId'])

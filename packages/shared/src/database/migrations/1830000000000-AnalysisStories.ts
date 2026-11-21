@@ -12,8 +12,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * - `test_run_story_steps` is the ordered list of ROOT comments a story walks. PK
  *   `(story_id, comment_id)`: a comment appears at most once per story. `position` is 1-based and
  *   dense, unique per story. `comment_id` is ON DELETE NO ACTION, a backstop: the service never
- *   hard-deletes a comment that is a step (it soft-deletes it instead), and a run delete cascades
- *   to comments and stories in one statement, by whose end the steps are gone too. `(comment_id)`
+ *   hard-deletes a comment that is a step (it soft-deletes it instead). It is DEFERRABLE INITIALLY
+ *   DEFERRED, and that is load-bearing: a run delete cascades to comments and to stories, but each
+ *   cascade is its own statement inside the RI trigger, and the comments cascade fires first (its
+ *   FK is older), so an immediate NO ACTION check ran while the steps still existed and refused
+ *   every run delete with 23503. Measured against Postgres, not reasoned; checked at commit, by
+ *   which time the stories cascade has removed the steps. `(comment_id)`
  *   is indexed because a parent-side FK check is a scan per child without it (root CLAUDE.md #57);
  *   `story_id` is covered by the primary key.
  * - Steps carry `organization_id` (copied from the story) for RLS.
@@ -51,7 +55,8 @@ const UP_DDL = `
 
   CREATE TABLE IF NOT EXISTS public.test_run_story_steps (
     story_id uuid NOT NULL REFERENCES public.test_run_stories(id) ON DELETE CASCADE,
-    comment_id uuid NOT NULL REFERENCES public.test_run_comments(id) ON DELETE NO ACTION,
+    comment_id uuid NOT NULL REFERENCES public.test_run_comments(id) ON DELETE NO ACTION
+      DEFERRABLE INITIALLY DEFERRED,
     position integer NOT NULL,
     note text,
     organization_id uuid NOT NULL,

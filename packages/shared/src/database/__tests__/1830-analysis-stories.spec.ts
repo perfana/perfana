@@ -33,7 +33,8 @@ describe('AnalysisStories (1830)', () => {
     expect(sql).toContain('PRIMARY KEY (story_id, comment_id)');
     expect(sql).toContain('UNIQUE (story_id, position)');
     expect(sql).toMatch(/ON public\.test_run_story_steps \(comment_id\)/);
-    expect(sql).toMatch(/REFERENCES public\.test_run_comments\(id\) ON DELETE NO ACTION/);
+    // Deferred: an immediate check refuses every run delete (the comments cascade runs first).
+    expect(sql).toMatch(/REFERENCES public\.test_run_comments\(id\) ON DELETE NO ACTION\s+DEFERRABLE INITIALLY DEFERRED/);
     expect(sql).toMatch(/REFERENCES public\.test_runs\(id\) ON DELETE CASCADE/);
   });
 
