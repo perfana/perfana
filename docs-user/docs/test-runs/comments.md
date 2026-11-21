@@ -134,6 +134,10 @@ Reading a story marks nothing as read. The address of each step is shareable:
 
 Without `step`, the link opens the introduction.
 
+### Share a story
+
+When a story is published, every channel of the system that has [comment notifications](../configuration/notifications.md#notify-on-comments) turned on gets one message, for example "Daniel published an analysis on Shop run Shop-acc-load-00042: Checkout latency after deploy (6 steps)", with a link to the story's introduction. It names the story's title but not its conclusion or its comments. A story is announced once: unpublishing and publishing it again sends nothing new, and a story deleted before the message went out is not announced. To print published stories in a report, set the **Comments** report section's layout to **Analysis stories** (see [Reporting templates](../configuration/reporting-templates.md#analysis-stories-in-a-report)).
+
 ## Link to a comment
 
 Every thread has its own address:
