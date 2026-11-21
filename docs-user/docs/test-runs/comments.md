@@ -20,7 +20,7 @@ Comments are plain text, up to 10,000 characters.
 
 ## Comment on a row
 
-Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis**, an SLO, a Splunk panel, a Dynatrace service, a tracing service or a Pyroscope profiler.
+Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis**, an SLO, a Splunk panel, a Dynatrace service, a tracing service, a Pyroscope profiler, a configuration item on **Configuration** or a dashboard tile on **Dashboards**.
 
 1. Hover over the row. An outlined comment icon appears at its end.
 2. Click it.
@@ -28,6 +28,8 @@ Some cards take comments on a single row or section as well as on the whole card
 3. Write the comment and click **Comment**.
 
 A row with threads shows a filled comment icon, with a dot when someone else wrote there since you last looked. To comment on the whole card instead, click the close icon next to the row name in the composer.
+
+When you open a comment on a configuration item or a dashboard tile, from its link, **Show in context** or an investigation step, the card shows only that item, whatever filters you had set. A bar above the list reads *Showing the item from a comment:* with the item's name, and **Show all** brings back your own filters as you left them. A comment on a configuration item also records which run the card was comparing with: **Restore view** selects that run again, with **Undo** to go back, and the report prints the comparison under the comment.
 
 ## Tag a thread
 
