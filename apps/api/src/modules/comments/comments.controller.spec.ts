@@ -8,6 +8,7 @@ describe('CommentsController', () => {
     listThreads: jest.fn().mockResolvedValue([]),
     counts: jest.fn().mockResolvedValue({}),
     createOrReplay: jest.fn().mockResolvedValue({ comment: created, created: true }),
+    replyTo: jest.fn().mockResolvedValue({ comment: created, created: true }),
     markSeen: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
@@ -26,6 +27,7 @@ describe('CommentsController', () => {
   // Design R3, as narrowed by the stories design: a key without comments:write may only read.
   it.each([
     ['create', () => controller.create('run', { card: 'graphs', body: 'x' }, key, res() as never)],
+    ['reply', () => controller.reply('c', { body: 'x' }, key, res() as never)],
     ['seen', () => controller.seen('run', { card: 'graphs' }, key)],
     ['update', () => controller.update('c', { body: 'x' }, key)],
     ['update (tag only)', () => controller.update('c', { tag: 'symptom' }, key)],
@@ -33,6 +35,7 @@ describe('CommentsController', () => {
   ])('refuses %s from an API key without comments:write with 403', async (_name, call) => {
     await expect(call()).rejects.toBeInstanceOf(ForbiddenException);
     expect(service.createOrReplay).not.toHaveBeenCalled();
+    expect(service.replyTo).not.toHaveBeenCalled();
     expect(service.markSeen).not.toHaveBeenCalled();
     expect(service.update).not.toHaveBeenCalled();
     expect(service.remove).not.toHaveBeenCalled();
@@ -58,6 +61,8 @@ describe('CommentsController', () => {
     const agent = { userId: 'api-key:456', displayName: 'Claude analysis agent', orgIds: ['org-a'], authorKind: 'agent' };
     expect(service.createOrReplay).toHaveBeenCalledWith('run', { card: 'graphs', body: 'x' }, agent);
     expect(r.status).not.toHaveBeenCalled();
+    await controller.reply('c', { body: 'answer', clientRef: 'r' }, agentKey, res() as never);
+    expect(service.replyTo).toHaveBeenCalledWith('c', { body: 'answer', clientRef: 'r' }, agent);
     await controller.update('c', { tag: 'evidence' }, agentKey);
     expect(service.update).toHaveBeenCalledWith('c', { tag: 'evidence' }, agent);
   });

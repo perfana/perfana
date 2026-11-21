@@ -140,6 +140,16 @@ describe('Agent comments against a real database', () => {
     expect(n).toBe(1);
   });
 
+  it('replies by root id, taking the run and card from the root, and refuses a reply as the root', async () => {
+    const root = await service.create(runUuid, { card: 'slo', body: 'Is this the GC?' }, anna);
+    const { comment: reply, created } = await service.replyTo(root.id, { body: 'Yes: see heap.max', clientRef: `reply-${suffix}` }, agent);
+    expect(created).toBe(true);
+    expect(reply).toMatchObject({ parentId: root.id, cardKey: 'slo', testRunId: runUuid, authorKind: 'agent' });
+    expect((await service.replyTo(root.id, { body: 'again', clientRef: `reply-${suffix}` }, agent)).comment.id).toBe(reply.id);
+    await expect(service.replyTo(reply.id, { body: 'x' }, agent)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.replyTo(root.id, { body: 'x' }, otherOrgAgent)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it('refuses the 101st root comment per key per run with a 429', async () => {
     const capped: CommentCaller = { ...agent, userId: `api-key:${randomUUID()}` };
     const [{ n }] = await ds.query(`SELECT count(*)::int AS n FROM test_run_comments WHERE author_id = $1`, [capped.userId]);

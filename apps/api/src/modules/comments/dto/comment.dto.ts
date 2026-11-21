@@ -270,6 +270,20 @@ export class UpdateCommentDto {
   tag?: CommentTag | null;
 }
 
+/** A reply addressed by its root's id (`POST /comments/:id/replies`). */
+export class ReplyCommentDto {
+  @ApiProperty({ minLength: 1, maxLength: COMMENT_BODY_MAX_LENGTH })
+  @IsString()
+  @Length(1, COMMENT_BODY_MAX_LENGTH)
+  body!: string;
+
+  @ApiPropertyOptional({ description: 'Idempotency key, for API keys; ignored for signed-in users', maxLength: COMMENT_CLIENT_REF_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @Length(1, COMMENT_CLIENT_REF_MAX_LENGTH)
+  clientRef?: string;
+}
+
 export class MarkSeenDto {
   @ApiProperty({ enum: COMMENT_CARD_KEYS })
   @IsIn(COMMENT_CARD_KEYS as string[])

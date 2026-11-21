@@ -6,7 +6,7 @@ import { UserCtx, UserContext } from '../../common/decorators/user-context.decor
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { CommentCaller, CommentsService } from './comments.service';
-import { CreateCommentDto, MarkSeenDto, UpdateCommentDto } from './dto/comment.dto';
+import { CreateCommentDto, MarkSeenDto, ReplyCommentDto, UpdateCommentDto } from './dto/comment.dto';
 import type { CommentResponse, CommentThreadResponse } from './dto/comment.dto';
 
 @ApiTags('Test Run Comments')
@@ -89,6 +89,30 @@ export class CommentsController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<CommentResponse> {
     const { comment, created } = await this.comments.createOrReplay(id, dto, await this.caller(ctx, 'agent'));
+    if (!created) res.status(HttpStatus.OK);
+    return comment;
+  }
+
+  @Post('comments/:id/replies')
+  @ApiOperation({
+    summary: 'Reply to a root comment by its id',
+    description:
+      'The same as posting with `parentId`, for a client that holds only the comment id (the MCP server): the run and ' +
+      'card come from the root. Takes `body` and, for an API key, an optional `clientRef`.',
+  })
+  @ApiResponse({ status: 201, description: 'Created' })
+  @ApiResponse({ status: 200, description: 'An API key repeated a clientRef: the reply it already wrote' })
+  @ApiResponse({ status: 400, description: 'The comment is a reply or deleted' })
+  @ApiResponse({ status: 403, description: `An API key without the ${API_KEY_COMMENTS_WRITE_ROLE} role` })
+  @ApiResponse({ status: 404, description: 'Not found, or outside your organizations' })
+  @ApiResponse({ status: 429, description: 'The API key reached its per-run limit of replies' })
+  async reply(
+    @Param('id') id: string,
+    @Body() dto: ReplyCommentDto,
+    @UserCtx() ctx: UserContext,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<CommentResponse> {
+    const { comment, created } = await this.comments.replyTo(id, dto, await this.caller(ctx, 'agent'));
     if (!created) res.status(HttpStatus.OK);
     return comment;
   }

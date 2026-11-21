@@ -241,18 +241,66 @@ export class PerfanaClient {
     );
   }
 
+  // ─── Comments ──────────────────────────────────────────────────────────────
+
+  /** Threads on a run (optionally one card), roots with their replies, oldest first. */
+  async getTestRunComments(testRunId: string, card?: string): Promise<CommentThreadsResponse> {
+    const q = card ? `?card=${encodeURIComponent(card)}` : '';
+    return this.get<CommentThreadsResponse>(`/test-runs/${encodeURIComponent(testRunId)}/comments${q}`);
+  }
+
+  /**
+   * Post a root comment. The anchor is passed through untouched: the API resolves it into the
+   * card's item key and view, so this client never needs the web's key formats.
+   */
+  async addTestRunComment(testRunId: string, input: AddCommentInput): Promise<RunComment> {
+    return this.send<RunComment>('POST', `/test-runs/${encodeURIComponent(testRunId)}/comments`, input);
+  }
+
+  async replyToTestRunComment(commentId: string, input: { body: string; clientRef?: string }): Promise<RunComment> {
+    return this.send<RunComment>('POST', `/comments/${encodeURIComponent(commentId)}/replies`, input);
+  }
+
+  async updateTestRunComment(commentId: string, input: { body?: string; tag?: string | null }): Promise<RunComment> {
+    return this.send<RunComment>('PATCH', `/comments/${encodeURIComponent(commentId)}`, input);
+  }
+
   // ─── HTTP ──────────────────────────────────────────────────────────────────
 
-  private async get<T>(path: string): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
+  private headers(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
+    return headers;
+  }
 
-    const res = await fetch(url, { headers });
+  /** A write. A 403 is answered with what the key lacks, since that is the likely cause. */
+  private async send<T>(method: 'POST' | 'PATCH', path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${this.baseUrl}${path}`, { method, headers: this.headers(), body: JSON.stringify(body) });
+    const text = await res.text().catch(() => '');
+    if (!res.ok) {
+      const message = apiMessage(text);
+      if (res.status === 403) {
+        throw new Error(
+          `Perfana refused the write (403): ${message}. Writing comments needs an API key with the ` +
+            `${COMMENTS_WRITE_ROLE} role; ask a Perfana user to create one (Settings, API keys, "Allow writing comments") and set PERFANA_API_KEY to it.`,
+        );
+      }
+      throw new Error(`Perfana API error ${res.status} for ${path}: ${message}`);
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`Perfana API returned invalid JSON for ${path}: ${text.slice(0, 200)}`);
+    }
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const res = await fetch(url, { headers: this.headers() });
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -272,6 +320,77 @@ export class PerfanaClient {
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+/**
+ * The API-key role that lets a key write comments. A copy of `API_KEY_COMMENTS_WRITE_ROLE` in
+ * `@perfana/shared/constants/comment-cards`: apps/mcp cannot import the shared package.
+ */
+export const COMMENTS_WRITE_ROLE = 'comments:write';
+
+/** The API's error text out of a NestJS error body, or the raw text. */
+export function apiMessage(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown };
+    if (typeof parsed.message === 'string') return parsed.message;
+    if (Array.isArray(parsed.message)) return parsed.message.join('; ');
+  } catch {
+    /* not JSON */
+  }
+  return text || 'no details';
+}
+
+/** What a root comment is about; resolved by the API (see add_test_run_comment). */
+export type CommentAnchor =
+  | { type: 'card'; card: string }
+  | { type: 'transaction'; name: string; scenario?: string }
+  | { type: 'config'; key: string; comparedToTestRunId?: string }
+  | { type: 'dashboard'; applicationDashboardId: string }
+  | { type: 'slo'; checkResultId: string }
+  | {
+      type: 'marker';
+      time: string;
+      series: Array<{ dashboardLabel: string; panelId: number; metricName: string; applicationDashboardId?: string }>;
+      range?: [string, string];
+    };
+
+export interface AddCommentInput {
+  body: string;
+  /** Required unless `anchor` names it. */
+  card?: string;
+  tag?: string;
+  anchor?: CommentAnchor;
+  clientRef?: string;
+}
+
+export interface RunComment {
+  id: string;
+  testRunId: string;
+  cardKey: string;
+  parentId: string | null;
+  itemKey: string | null;
+  itemLabel: string | null;
+  body: string | null;
+  deleted: boolean;
+  authorId: string;
+  authorName: string;
+  authorKind?: 'user' | 'agent';
+  markerSeq: number | null;
+  markerTime: string | null;
+  chartContext: Record<string, unknown> | null;
+  tag: string | null;
+  createdAt: string;
+  editedAt: string | null;
+}
+
+export interface CommentThread extends RunComment {
+  replies: RunComment[];
+}
+
+export interface CommentThreadsResponse {
+  threads: CommentThread[];
+  lastSeenAt: string | null;
+  canModerate: boolean;
+}
 
 export interface TestRun {
   test_run_id: string;
@@ -332,6 +451,8 @@ export interface TestRunConfigItem {
 }
 
 export interface CheckResult {
+  /** The check result's id: what an `slo` comment anchor names (`checkResultId`). */
+  id?: string;
   checkName: string;
   passed: boolean;
   description?: string;
@@ -401,6 +522,10 @@ export interface AvailablePanel {
   unit: string | null;
   metric_count: string;
   metric_names: string[];
+  /** The application dashboard behind the label, when exactly one has it. */
+  application_dashboard_id?: string | null;
+  /** Every application dashboard with this label (more than one: name the id in a marker series). */
+  application_dashboard_ids?: string[];
 }
 
 export interface MetricDataPoint {

@@ -230,6 +230,24 @@ export class CommentsService {
   }
 
   /**
+   * A reply addressed by its root's id: the run and card come from the root, which must be one
+   * the caller can read (else 404). The usual reply rules then apply in createOrReplay.
+   */
+  async replyTo(
+    rootId: string,
+    dto: { body: string; clientRef?: string },
+    caller: CommentCaller,
+  ): Promise<{ comment: CommentResponse; created: boolean }> {
+    const root = await this.loadComment(rootId, caller);
+    if (root.parentId) throw new BadRequestException('Reply to the root comment; threads are one level deep');
+    return this.createOrReplay(
+      root.testRunId,
+      { card: root.cardKey as CreateCommentDto['card'], parentId: root.id, body: dto.body, clientRef: dto.clientRef },
+      caller,
+    );
+  }
+
+  /**
    * Resolve `anchor` into the fields a web client would have sent, after checking it is used
    * alone. Without an anchor the DTO is returned as it came, with its card required.
    */
