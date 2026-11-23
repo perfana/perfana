@@ -57,7 +57,6 @@
     "packages/shared/src/services/grafana/index.ts": [],
     "scripts/pregate-runner.sh": [],
     "tsconfig*.json": [],
-    "**/.eslintrc.js": [],
     "packages/shared/src/database/migrations/1827000000000-TestRunComments.ts": [
       "apps/api/src/test/rls/test-run-comments.spec.ts"
     ],
@@ -65,6 +64,9 @@
       "apps/api/src/modules/sut-transfer/sut-import.service.spec.ts"
     ],
     "apps/perfana-report/src/modules/pdf/confluence-render.processor.ts": [
+      "apps/perfana-report/src/modules/pdf/confluence-render.processor.spec.ts"
+    ],
+    "apps/perfana-report/.eslintrc.js": [
       "apps/perfana-report/src/modules/pdf/confluence-render.processor.spec.ts"
     ],
     "apps/perfana-report/src/modules/pdf/pdf.module.ts": [
