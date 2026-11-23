@@ -135,6 +135,22 @@ describe('ConfluenceService.publishReport', () => {
     await expect(publish).rejects.toThrow('Confluence: A page with this title already exists');
     expect(reportRepo.update).not.toHaveBeenCalled();
   });
+
+  /*
+   * Value: protects=a page created before a failed chart upload is remembered, so the retry updates it
+   *   instead of POSTing a same-title page Confluence refuses; fails_when=the page is recorded only after
+   *   the upload again; why_new=no case covered a failed upload; seam=none; no_claim=real Confluence
+   *   (client functions mocked; unit only)
+   */
+  it('remembers the created page when the chart upload fails, without marking it published', async () => {
+    const { service, reportRepo } = build();
+    mockedUpload.mockRejectedValue(new ConfluenceError('Request entity too large', 413));
+
+    await expect(service.publishReport(REPORT, { configId: CFG }, 'u', [], 'https://perfana.example.com'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(reportRepo.update).toHaveBeenCalledWith(REPORT, expect.objectContaining({ confluence_config_id: CFG, confluence_page_id: '9001' }));
+    expect(reportRepo.update).not.toHaveBeenCalledWith(REPORT, expect.objectContaining({ confluence_published_at: expect.anything() }));
+  });
 });
 
 describe('ConfluenceService guards (pass 2)', () => {

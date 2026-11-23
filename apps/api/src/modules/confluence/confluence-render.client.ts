@@ -8,6 +8,7 @@ import IORedis from 'ioredis';
  * Twin constants and the result contract: apps/perfana-report/src/modules/pdf/confluence-render.processor.ts.
  */
 const CONFLUENCE_RENDER_QUEUE_NAME = 'perfana-report-confluence-render';
+// perfana-report skips a job queued longer ago than this (API_RENDER_WAIT_MS there); keep them equal.
 const RENDER_WAIT_MS = 180_000;
 
 export interface ConfluenceRenderResult {

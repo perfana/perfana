@@ -35,7 +35,7 @@ describe('confluence client', () => {
 
   it('updates an existing Data Center page through v1 as the next version, with Bearer auth', async () => {
     const { impl, calls } = fakeFetch({
-      'GET https://wiki.acme.io/confluence/rest/api/content/123?expand=version': { body: { version: { number: 4 } } },
+      'GET https://wiki.acme.io/confluence/rest/api/content/123?expand=version,space': { body: { version: { number: 4 }, space: { key: 'PERF' } } },
       'PUT https://wiki.acme.io/confluence/rest/api/content/123': { body: { _links: { base: 'https://wiki.acme.io/confluence', webui: '/display/PERF/T' } } },
     });
     const page = await upsertPage(dc, { spaceKey: 'PERF', existingPageId: '123', title: 'T', storage: '<p>y</p>' }, { fetchImpl: impl });
@@ -126,10 +126,35 @@ describe('confluence client', () => {
    */
   it('rethrows a non-404 failure reading the earlier page and never POSTs a new one', async () => {
     const { impl, calls } = fakeFetch({
-      'GET https://wiki.acme.io/confluence/rest/api/content/123?expand=version': { status: 500, body: { message: 'boom' } },
+      'GET https://wiki.acme.io/confluence/rest/api/content/123?expand=version,space': { status: 500, body: { message: 'boom' } },
     });
     await expect(upsertPage(dc, { spaceKey: 'PERF', existingPageId: '123', title: 'T', storage: '' }, { fetchImpl: impl }))
       .rejects.toMatchObject({ status: 500 });
     expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+  });
+
+  /*
+   * Value: protects=a republish never overwrites a page outside the configured space (a connection
+   *   re-pointed at another host or space keeps the report's stored page id); fails_when=the space
+   *   check in currentVersion is removed or inverted; why_new=the update test only covers a page in
+   *   the right space; seam=none; no_claim=real Confluence (fake fetch; unit only)
+   */
+  it.each([
+    ['Data Center', dc, {
+      'GET https://wiki.acme.io/confluence/rest/api/content/123?expand=version,space': { body: { version: { number: 4 }, space: { key: 'OTHER' } } },
+      'POST https://wiki.acme.io/confluence/rest/api/content': { body: { id: 556, _links: { webui: '/display/PERF/T' } } },
+    }],
+    ['Cloud', cloud, {
+      'GET https://acme.atlassian.net/wiki/api/v2/pages/123': { body: { version: { number: 4 }, spaceId: '7' } },
+      'GET https://acme.atlassian.net/wiki/api/v2/spaces?keys=PERF': { body: { results: [{ id: 42, name: 'Perf' }] } },
+      'POST https://acme.atlassian.net/wiki/api/v2/pages': { body: { id: '556', _links: { webui: '/spaces/PERF/pages/556' } } },
+    }],
+  ] as const)('creates a new page instead of updating a %s page that sits in another space', async (_label, conn, routes) => {
+    const { impl, calls } = fakeFetch(routes as Record<string, { status?: number; body?: unknown }>);
+    const page = await upsertPage(conn, { spaceKey: 'PERF', existingPageId: '123', title: 'T', storage: '' }, { fetchImpl: impl });
+
+    expect(page.id).toBe('556');
+    expect(calls.filter((c) => c.method === 'PUT')).toEqual([]);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
   });
 });

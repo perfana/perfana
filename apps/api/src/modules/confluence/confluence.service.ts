@@ -208,18 +208,19 @@ export class ConfluenceService {
         title,
         storage: banner + storage,
       }, opts);
+      // Remember the page before uploading: if the upload fails, a retry updates this page instead
+      // of creating a second one, which Confluence refuses because titles are unique per space.
+      await withRequestEm(this.reportRepo).update(report.id, {
+        confluence_config_id: config.id,
+        confluence_page_id: page.id,
+        confluence_page_url: page.url,
+      });
       await uploadAttachments(conn, page.id, charts.map((i) => ({
         filename: chartFilename(i),
         data: Buffer.from(rendered.images[i]!, 'base64'),
         contentType: 'image/png',
       })), opts);
-
-      await withRequestEm(this.reportRepo).update(report.id, {
-        confluence_config_id: config.id,
-        confluence_page_id: page.id,
-        confluence_page_url: page.url,
-        confluence_published_at: publishedAt,
-      });
+      await withRequestEm(this.reportRepo).update(report.id, { confluence_published_at: publishedAt });
       this.logger.log(`Published report ${reportId} to Confluence page ${page.id} (${charts.length} chart(s)) via connection ${config.id}`);
       return { pageId: page.id, url: page.url, publishedAt, charts: charts.length };
     } catch (err) {

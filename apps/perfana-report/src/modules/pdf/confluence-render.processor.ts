@@ -25,6 +25,8 @@ import { BrowserPoolService } from './browser-pool.service';
  */
 export const CONFLUENCE_RENDER_QUEUE_NAME = 'perfana-report-confluence-render';
 const RESULT_TTL_SECONDS = 600;
+/** Twin of RENDER_WAIT_MS in the API's confluence-render.client.ts. */
+const API_RENDER_WAIT_MS = 180_000;
 
 export interface ConfluenceRenderJobData {
   reportId: string;
@@ -92,6 +94,13 @@ export class ConfluenceRenderProcessor
   ): Promise<{ resultKey: string }> {
     const { reportId } = job.data;
     const started = Date.now();
+    // The API gave up on a job queued this long ago; rendering it would only hold the single slot
+    // while a retry waits behind it.
+    if (started - job.timestamp > API_RENDER_WAIT_MS) {
+      throw new Error(
+        `Skipped: queued ${Math.round((started - job.timestamp) / 1000)}s ago, the API stopped waiting`
+      );
+    }
     const report = await this.reportRepo.findOne({
       where: { id: reportId },
       select: ['id', 'html_content'],

@@ -146,12 +146,20 @@ export async function confluenceSpace(c: ConfluenceConnection, spaceKey: string,
   return { id: String(space.id), name: space.name };
 }
 
-/** The current version of a page, or null when it no longer exists (deleted, or moved out of reach). */
-async function currentVersion(c: ConfluenceConnection, pageId: string, opts: ConfluenceRequestOptions): Promise<number | null> {
-  const path = c.deployment === 'cloud' ? `/api/v2/pages/${encodeURIComponent(pageId)}` : `/rest/api/content/${encodeURIComponent(pageId)}?expand=version`;
+/**
+ * The current version of a page, or null when it no longer exists (deleted, or moved out of reach)
+ * or sits outside the configured space. The space check matters because a page id is only unique
+ * within one Confluence: after a connection is pointed at another host or space, the stored id can
+ * name an unrelated page there, and updating it would overwrite someone else's page.
+ */
+async function currentVersion(c: ConfluenceConnection, pageId: string, spaceKey: string, opts: ConfluenceRequestOptions): Promise<number | null> {
+  const path = c.deployment === 'cloud' ? `/api/v2/pages/${encodeURIComponent(pageId)}` : `/rest/api/content/${encodeURIComponent(pageId)}?expand=version,space`;
   try {
-    const page = await call<{ version?: { number?: number } }>(c, path, { method: 'GET' }, opts);
-    return page.version?.number ?? null;
+    const page = await call<{ version?: { number?: number }; spaceId?: string | number; space?: { key?: string } }>(c, path, { method: 'GET' }, opts);
+    const inSpace = c.deployment === 'cloud'
+      ? page.spaceId !== undefined && String(page.spaceId) === (await confluenceSpace(c, spaceKey, opts)).id
+      : page.space?.key?.toUpperCase() === spaceKey.toUpperCase();
+    return inSpace ? page.version?.number ?? null : null;
   } catch (err) {
     if (err instanceof ConfluenceError && err.status === 404) return null;
     throw err;
@@ -168,7 +176,7 @@ export interface UpsertPageInput {
 }
 
 export async function upsertPage(c: ConfluenceConnection, input: UpsertPageInput, opts: ConfluenceRequestOptions = {}): Promise<PublishedPage> {
-  const version = input.existingPageId ? await currentVersion(c, input.existingPageId, opts) : null;
+  const version = input.existingPageId ? await currentVersion(c, input.existingPageId, input.spaceKey, opts) : null;
 
   if (input.existingPageId && version !== null) {
     const id = input.existingPageId;

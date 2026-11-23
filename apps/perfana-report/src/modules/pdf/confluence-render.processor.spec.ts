@@ -99,4 +99,17 @@ describe('ConfluenceRenderProcessor.process', () => {
       (processor as unknown as { process: (j: unknown) => Promise<unknown> }).process({ id: '1', data: { reportId: 'r1' } }),
     ).rejects.toThrow('Report r1 has no HTML content');
   });
+
+  /*
+   * Value: protects=a job the API already gave up on (queued > 180 s ago) never takes the single render
+   *   slot; fails_when=the staleness check is removed or compares the wrong way; why_new=no case covered
+   *   queue age; seam=none; no_claim=BullMQ scheduling (job object faked; unit only)
+   */
+  it('skips a job queued longer ago than the API waits, without loading or rendering the report', async () => {
+    const { processor, reportRepo } = setup([svgHandle({ width: 800, height: 400 })]);
+    const process = (processor as unknown as { process: (j: unknown) => Promise<unknown> }).process.bind(processor);
+
+    await expect(process({ id: '7', timestamp: Date.now() - 181_000, data: { reportId: 'r1' } })).rejects.toThrow(/the API stopped waiting/);
+    expect(reportRepo.findOne).not.toHaveBeenCalled();
+  });
 });
