@@ -484,6 +484,61 @@ aggregations (and adjust the run summary's totals), or pin the span per workload
   no-status-row guard), `collectSplunkForWholeRun`, updateQuery's SPL validation, and the
   `mappingsInScope` predicate (mocked away in the service spec).
 
+## Confluence integration
+
+Filed from the /ship review of Confluence publishing (v0.2.97.95). Three review findings were fixed on
+the branch; the review loop was at its cap for the rest, so these are what it deferred.
+
+### One connection-test SSRF guard for every integration (P1)
+
+`ConfluenceService.checkBaseUrl` uses `validateExternalUrl`, the same literal-pattern check as Splunk
+(see "The Splunk host SSRF guard matches hostnames, not resolved addresses" above). A name that
+resolves to an internal address passes, and `POST /confluence/configs/test-connection` reflects the
+response's message to anyone holding `integration:confluence:create`. Conversely a Data Center
+instance at a literal private IP is refused outright while the same host under a DNS name is
+accepted, which is common on-prem. Deliberately not fixed for Confluence alone: the fix is one
+connect-time guard (`webhook-target-guard.ts`'s lookup hook) with a deployment allowlist in the
+mould of `NOTIFICATION_WEBHOOK_ALLOWED_HOSTS`, applied to Confluence, Splunk, Grafana and Dynatrace
+together, so internal installs get one setting rather than four.
+
+### A same-title page is a permanent 400 until the user retitles (P2)
+
+The client creates a page whenever the report has no usable `confluence_page_id`, and Confluence
+refuses a duplicate title in a space. Ordinary paths reach it: a regenerated report with the same
+name on the same run (the default title is `name (testRunId)`), publishing with connection A, then B,
+then A again (`confluence_config_id` was overwritten by B), and two concurrent publishes. Fix: on a
+create, look the title up in the space (`GET /api/v2/pages?space-id=&title=` /
+`/rest/api/content?spaceKey=&title=`) and update that page.
+
+### The early page bookkeeping is rolled back when RLS mode is on (P2)
+
+`publishReport` records the page right after creating it so a failed chart upload can be retried in
+place. With `DB_ENABLE_RLS_ROLE=true`, `withRequestEm` is the interceptor's request transaction, the
+upload failure throws, and the rollback loses that record, so the retry hits the same-title 400
+above. Default deploys (RLS off) are unaffected. Fix: write that bookkeeping outside the request
+transaction, or return the partial result instead of throwing. Related: a republish via another
+connection whose upload fails leaves the new page id beside the old connection's
+`confluence_published_at` (nothing reads it yet; clear it in the first update).
+
+### Confluence review polish (P3)
+
+- `escapeText` / `escapeAttr` in `storage-format.ts` do not strip XML-illegal control characters
+  (U+0000-U+0008, U+000B, U+000C, U+000E-U+001F); one in a JMeter error message or response code
+  makes Confluence reject the whole page with "error parsing xhtml".
+- `PublishToConfluenceDialog` lists every organization's connections and preselects the first; pass
+  the run's organization to `fetchConfluenceConfigs` so the default is never a cross-org 400.
+- `ConfluenceRenderClient` calls `waitUntilFinished` before `QueueEvents` is ready, so a very fast
+  first render after boot can lose its completion event and time out after 180 s; its events Redis
+  connection is never disconnected on shutdown.
+- `ConfluenceIntegration` tests the saved connection when the token is masked and the URL unchanged,
+  even when the deployment, username or space key was edited, so a green test can precede a failing
+  publish.
+- `isBlockish` in `storage-format.ts` looks at direct children only, so an inline container whose
+  block content arrives through a span is wrapped in `<p>` around a table or macro. Check whether any
+  renderer emits that shape.
+- The end-to-end flow (connection, generate, publish, open the page with charts) has not been run
+  against a real Confluence or the containers; it shipped on unit tests and review only.
+
 ## Series grouping
 
 Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.43
