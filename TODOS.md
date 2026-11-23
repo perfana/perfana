@@ -510,13 +510,25 @@ then A again (`confluence_config_id` was overwritten by B), and two concurrent p
 create, look the title up in the space (`GET /api/v2/pages?space-id=&title=` /
 `/rest/api/content?spaceKey=&title=`) and update that page.
 
+### A republish after a connection moved hosts can still reach an unrelated page (P2)
+
+v0.2.97.95 made `currentVersion` (`confluence.client.ts`) reuse a report's stored page only when the
+page is in the configured space. That catches a space-key change and most host moves, but not a
+move between two Confluence instances that both have a space with the configured key: the stored
+numeric page id is looked up on the new host, its space key matches, and the page is updated. Its
+comment overstates the guard. Fix: bind the stored page to the host it was created on (store the
+host beside `confluence_page_id` and pass `existingPageId` only when it matches `config.baseUrl`),
+or clear the reports' page id when `updateConfig` changes `baseUrl`.
+
 ### The early page bookkeeping is rolled back when RLS mode is on (P2)
 
 `publishReport` records the page right after creating it so a failed chart upload can be retried in
 place. With `DB_ENABLE_RLS_ROLE=true`, `withRequestEm` is the interceptor's request transaction, the
 upload failure throws, and the rollback loses that record, so the retry hits the same-title 400
 above. Default deploys (RLS off) are unaffected. Fix: write that bookkeeping outside the request
-transaction, or return the partial result instead of throwing. Related: a republish via another
+transaction, or return the partial result instead of throwing. Until then the user guide's
+promise in `docs-user/docs/integrations/connect-confluence.md` (a retry after a failed upload updates
+the same page) holds only with RLS off; qualify it or add a troubleshooting entry. Related: a republish via another
 connection whose upload fails leaves the new page id beside the old connection's
 `confluence_published_at` (nothing reads it yet; clear it in the first update).
 
