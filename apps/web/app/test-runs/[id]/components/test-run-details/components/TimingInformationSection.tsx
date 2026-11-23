@@ -48,10 +48,13 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
   };
 
   const saveTimes = async () => {
-    // A datetime-local value parses as local time, which is what the inputs show.
+    // A datetime-local value parses as local time, which is what the inputs show. Compare
+    // parsed times, not strings: the browser rewrites `HH:mm:00` as `HH:mm`.
+    const changed = (input: string, iso?: string | null) =>
+      new Date(input).getTime() !== new Date(toLocalInput(iso)).getTime();
     const body: { startTime?: string; endTime?: string } = {};
-    if (startInput !== toLocalInput(testRun.start_time)) body.startTime = new Date(startInput).toISOString();
-    if (endInput !== toLocalInput(testRun.end_time)) body.endTime = new Date(endInput).toISOString();
+    if (changed(startInput, testRun.start_time)) body.startTime = new Date(startInput).toISOString();
+    if (changed(endInput, testRun.end_time)) body.endTime = new Date(endInput).toISOString();
     if (!body.startTime && !body.endTime) {
       setEditingTimes(false);
       return;

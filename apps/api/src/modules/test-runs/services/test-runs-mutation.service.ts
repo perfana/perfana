@@ -14,7 +14,7 @@
  * @pattern Orchestrator Pattern + Command Pattern
  */
 
-import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsSelect, FindOptionsWhere, Repository } from 'typeorm';
 import { withRequestEm, runAfterRequestCommit } from '../../../common/db/request-em';
@@ -23,6 +23,7 @@ import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
 import { ResourceExistsException, DatabaseException } from '../../../common/exceptions/business.exception';
 import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
+import { JobProgressService } from '../../data-science/services/job-progress.service';
 import { CreateTestRunCommand } from '../commands/create-test-run.command';
 import { UpdateTestRunCommand } from '../commands/update-test-run.command';
 import { DeleteTestRunCommand } from '../commands/delete-test-run.command';
@@ -121,6 +122,7 @@ export class TestRunsMutationService {
     private readonly auditService: AuditService,
     private readonly testRunsGateway: TestRunsGateway,
     private readonly authzService: AuthorizationService,
+    private readonly jobProgressService: JobProgressService,
   ) {}
 
 
@@ -578,6 +580,28 @@ export class TestRunsMutationService {
     this.logger.debug(`updateTestRunTimes: id=${id}, userId=${userId}`);
 
     await this.assertCanModify({ id }, id, userId, roles);
+
+    // Refuse before writing when the workload already has a job running. The worker's
+    // sut:env:workload scope lock refuses a second job rather than queuing it, so the
+    // re-fetch below would fail and leave the new bounds over old-window metrics.
+    // Same probe as POST /data/refresh/batch. ponytail: check-then-enqueue, a job that
+    // starts in between still wins the lock; a queued follow-up would close that.
+    const scope = await withRequestEm(this.testRunRepo).findOne({
+      where: { id },
+      select: { id: true, systemUnderTestId: true, testEnvironment: true, workload: true },
+    });
+    if (scope) {
+      const block = await this.jobProgressService.isJobBlocked(
+        scope.systemUnderTestId,
+        scope.testEnvironment,
+        scope.workload,
+      );
+      if (block.blocked) {
+        throw new ConflictException(
+          'An analysis is running for this workload. Try again when it has finished.',
+        );
+      }
+    }
 
     const result = await this.updateTestRunTimesHandler.execute({ id, ...times });
 

@@ -8,6 +8,7 @@ import {
   ResourceExistsException,
 } from '../../../common/exceptions/business.exception';
 import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
+import { JobProgressService } from '../../data-science/services/job-progress.service';
 import { CreateTestRunHandler } from '../handlers/create-test-run.handler';
 import { UpdateTestRunHandler } from '../handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
@@ -26,7 +27,7 @@ import { createMockRepository, MockRepository } from '../../../../test/helpers/m
 import { createAuthorizationServiceMock } from '../../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AuditService } from '../../audit/audit.service';
-import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { Capability } from '../../../constants/capabilities.constants';
 
 describe('TestRunsMutationService', () => {
@@ -119,6 +120,7 @@ describe('TestRunsMutationService', () => {
       enqueueTransactionStatsRollup: jest.fn(),
       enqueueTransactionStatsRollupBulk: jest.fn().mockResolvedValue([]),
       reevaluateBatch: jest.fn(),
+      refreshBatch: jest.fn().mockResolvedValue(undefined),
     };
     const mockCreateHandler = { execute: jest.fn() };
     const mockUpdateHandler = { execute: jest.fn() };
@@ -152,7 +154,7 @@ describe('TestRunsMutationService', () => {
         { provide: UpdateAnnotationsHandler, useValue: mockUpdateAnnotationsHandler },
         { provide: UpdateApplicationReleaseHandler, useValue: mockUpdateApplicationReleaseHandler },
         { provide: UpdateAnalysisStartOffsetHandler, useValue: mockUpdateAnalysisStartOffsetHandler },
-        { provide: UpdateTestRunTimesHandler, useValue: { execute: jest.fn() } },
+        { provide: UpdateTestRunTimesHandler, useValue: { execute: jest.fn().mockResolvedValue({ id: 'test-run-uuid-123', test_run_id: 'run-001' }) } },
         { provide: UpdateAnalysisTimeRangeHandler, useValue: mockUpdateAnalysisTimeRangeHandler },
         { provide: UpdateAdaptConfigHandler, useValue: mockUpdateAdaptConfigHandler },
         { provide: InitTestHandler, useValue: mockInitTestHandler },
@@ -169,6 +171,10 @@ describe('TestRunsMutationService', () => {
         {
           provide: TestRunsGateway,
           useValue: { emitTestRunUpdated: jest.fn() },
+        },
+        {
+          provide: JobProgressService,
+          useValue: { isJobBlocked: jest.fn().mockResolvedValue({ blocked: false }) },
         },
       ],
     }).compile();
@@ -818,6 +824,60 @@ describe('TestRunsMutationService', () => {
    * method returns. All three are load-bearing: this preview is what the user confirms
    * before a workload-wide rewrite.
    */
+  describe('updateTestRunTimes', () => {
+    // Value: protects=the re-collection that makes a time edit take effect; fails_when=the
+    // follow-up is not a forceRefetch (stale ds_metrics re-analysed over the wrong window),
+    // is keyed on the row UUID instead of test_run_id, or a rollup enqueue failure skips the
+    // re-fetch; why_new=the handler spec stops at the UPDATE and nothing exercised the
+    // after-commit hook; seam=none; no_claim=does not prove the hook runs after COMMIT
+    // (outside a request context runAfterRequestCommit just defers).
+    const flushDeferred = async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    };
+
+    it('enqueues a force re-fetch for the canonical run id even when the rollup enqueue fails', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(mockResult) };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn().mockRejectedValue(new Error('redis down')),
+        refreshBatch: jest.fn().mockResolvedValue(undefined),
+      };
+      (service as any).updateTestRunTimesHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+      const endTime = new Date('2026-11-20T11:00:00Z');
+
+      const result = await service.updateTestRunTimes('uuid-1', { endTime }, 'user-1', []);
+      await flushDeferred();
+
+      expect(result).toBe(mockResult);
+      expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', endTime });
+      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
+      expect(mockBullmq.refreshBatch).toHaveBeenCalledWith(['run-001'], { adapt: true, forceRefetch: true });
+    });
+
+    // Value: protects=a time edit never committing when its re-fetch cannot start;
+    // fails_when=the scope-lock probe is removed or runs after the handler, so the run keeps
+    // new bounds over old-window metrics while the refused re-fetch dies in BullMQ;
+    // why_new=no case made the workload busy; seam=none; no_claim=does not cover a job that
+    // takes the lock between the probe and the enqueue.
+    it('refuses with 409 and writes nothing while the workload has a job running', async () => {
+      const mockHandler = { execute: jest.fn() };
+      const mockBullmq = { enqueueTransactionStatsRollup: jest.fn(), refreshBatch: jest.fn() };
+      (service as any).updateTestRunTimesHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+      (service as any).jobProgressService = {
+        isJobBlocked: jest.fn().mockResolvedValue({ blocked: true, reason: 'analyze running' }),
+      };
+
+      await expect(
+        service.updateTestRunTimes('uuid-1', { endTime: new Date('2026-11-20T11:00:00Z') }, 'user-1', []),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(mockHandler.execute).not.toHaveBeenCalled();
+      expect(mockBullmq.refreshBatch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('previewAnalysisTimeRangeScope', () => {
     const scopeRun = (overrides?: Partial<TestRunEntity>): TestRunEntity =>
       createMockTestRunEntity({
@@ -1125,6 +1185,7 @@ describe('TestRunsMutationService', () => {
       ['updateApplicationRelease', (u) => service.updateApplicationRelease('test-run-uuid-123', '2.0', u, mockRoles)],
       ['updateAnalysisStartOffset', (u) => service.updateAnalysisStartOffset('test-run-uuid-123', 60, u, mockRoles)],
       ['updateAnalysisTimeRange', (u) => service.updateAnalysisTimeRange('test-run-uuid-123', 60, 30, u, mockRoles)],
+      ['updateTestRunTimes', (u) => service.updateTestRunTimes('test-run-uuid-123', { endTime: new Date() }, u, mockRoles)],
       ['updateAdaptConfig', (u) => service.updateAdaptConfig('run-001', 'ACCEPTED', u, mockRoles)],
       ['deleteTestRun', (u) => service.deleteTestRun('test-run-uuid-123', u, mockRoles)],
       ['abortTestRun', (u) => service.abortTestRun('test-run-uuid-123', u, mockRoles, 'someone@example.com')],
