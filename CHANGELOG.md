@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.96] - 2026-11-23
+
+### Added
+- **Change a test run's start and end time from the UI.** "Change start / end time" under Timing Information in the expanded test run details takes a corrected start, end or both, for a run whose recorded window is wrong (a load generator clock that was off, a late completion call). Saving updates the run's duration and re-collects every metric source for the new window, then re-runs statistics, SLO checks and anomaly detection. Only a completed run can be changed, and it needs permission to edit the run. CI can do the same with `PUT /api/test-runs/:id/time-range`.
+
 ## [0.2.97.95] - 2026-11-23
 
 ### Added

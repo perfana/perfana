@@ -421,6 +421,10 @@ export class TestRunsService {
     return this.mutationService.updateAnalysisStartOffset(id, analysisStartOffset, userId, roles);
   }
 
+  async updateTestRunTimes(id: string, times: { startTime?: Date; endTime?: Date }, userId: string, roles: string[]): Promise<TestRun> {
+    return this.mutationService.updateTestRunTimes(id, times, userId, roles);
+  }
+
   async previewAnalysisTimeRangeScope(id: string, analysisStartOffset: number, analysisEndOffset: number, userId: string, roles: string[]) {
     return this.mutationService.previewAnalysisTimeRangeScope(id, analysisStartOffset, analysisEndOffset, userId, roles);
   }

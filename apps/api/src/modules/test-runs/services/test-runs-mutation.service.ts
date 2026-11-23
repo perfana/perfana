@@ -33,6 +33,7 @@ import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateApplicationReleaseHandler } from '../handlers/update-application-release.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
 import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
+import { UpdateTestRunTimesHandler } from '../handlers/update-test-run-times.handler';
 import {
   UpdateAnalysisTimeRangeHandler,
   partitionAnalysisTimeRangeScope,
@@ -111,6 +112,7 @@ export class TestRunsMutationService {
     private readonly updateAnnotationsHandler: UpdateAnnotationsHandler,
     private readonly updateApplicationReleaseHandler: UpdateApplicationReleaseHandler,
     private readonly updateAnalysisStartOffsetHandler: UpdateAnalysisStartOffsetHandler,
+    private readonly updateTestRunTimesHandler: UpdateTestRunTimesHandler,
     private readonly updateAnalysisTimeRangeHandler: UpdateAnalysisTimeRangeHandler,
     private readonly updateAdaptConfigHandler: UpdateAdaptConfigHandler,
     private readonly initTestHandler: InitTestHandler,
@@ -552,6 +554,48 @@ export class TestRunsMutationService {
         // dashboard falls back to live aggregation if the rollup is stale.
       }
     }
+
+    return result;
+  }
+
+  /**
+   * Correct a completed run's start and/or end time, then re-collect over the new window.
+   *
+   * Force re-fetch, not a re-evaluate: the stored ds_metrics were collected for the OLD
+   * window, so statistics alone would be recomputed over the wrong data. The force path
+   * re-collects every source from test_runs' current bounds, rebuilds the perf-test panels
+   * from requests_raw/transactions, then runs statistics, checks and ADAPT. Grafana and
+   * Dynatrace rows outside a narrowed window are kept by design (the source may no longer
+   * hold them) and fall outside the analysis window via the ramp_up flag. The transaction
+   * rollup reads the window too and is not part of that path, so it is enqueued alongside.
+   */
+  async updateTestRunTimes(
+    id: string,
+    times: { startTime?: Date; endTime?: Date },
+    userId: string,
+    roles: string[],
+  ): Promise<TestRun> {
+    this.logger.debug(`updateTestRunTimes: id=${id}, userId=${userId}`);
+
+    await this.assertCanModify({ id }, id, userId, roles);
+
+    const result = await this.updateTestRunTimesHandler.execute({ id, ...times });
+
+    // After commit, so the worker reads the new bounds and no Redis stall holds a pooled
+    // connection idle-in-transaction. Never rejects: see enqueueAnalysisTimeRangeFollowUp.
+    runAfterRequestCommit(async () => {
+      try {
+        await this.bullmqClientService.enqueueTransactionStatsRollup(result.test_run_id);
+      } catch (err) {
+        this.logger.error(`Failed to enqueue stats rollup after time edit for ${result.test_run_id}:`, err);
+      }
+      try {
+        await this.bullmqClientService.refreshBatch([result.test_run_id], { adapt: true, forceRefetch: true });
+        this.logger.log(`Force re-fetch enqueued for ${result.test_run_id} after time range edit`);
+      } catch (err) {
+        this.logger.error(`Failed to enqueue force re-fetch after time edit for ${result.test_run_id}:`, err);
+      }
+    });
 
     return result;
   }

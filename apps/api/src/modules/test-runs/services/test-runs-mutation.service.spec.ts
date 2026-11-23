@@ -15,6 +15,7 @@ import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
 import { UpdateApplicationReleaseHandler } from '../handlers/update-application-release.handler';
 import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
+import { UpdateTestRunTimesHandler } from '../handlers/update-test-run-times.handler';
 import { UpdateAnalysisTimeRangeHandler } from '../handlers/update-analysis-time-range.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
@@ -151,6 +152,7 @@ describe('TestRunsMutationService', () => {
         { provide: UpdateAnnotationsHandler, useValue: mockUpdateAnnotationsHandler },
         { provide: UpdateApplicationReleaseHandler, useValue: mockUpdateApplicationReleaseHandler },
         { provide: UpdateAnalysisStartOffsetHandler, useValue: mockUpdateAnalysisStartOffsetHandler },
+        { provide: UpdateTestRunTimesHandler, useValue: { execute: jest.fn() } },
         { provide: UpdateAnalysisTimeRangeHandler, useValue: mockUpdateAnalysisTimeRangeHandler },
         { provide: UpdateAdaptConfigHandler, useValue: mockUpdateAdaptConfigHandler },
         { provide: InitTestHandler, useValue: mockInitTestHandler },
