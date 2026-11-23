@@ -484,6 +484,20 @@ aggregations (and adjust the run summary's totals), or pin the span per workload
   no-status-row guard), `collectSplunkForWholeRun`, updateQuery's SPL validation, and the
   `mappingsInScope` predicate (mocked away in the service spec).
 
+## Test suite
+
+### `test-run-stories.spec.ts` races the local worker and fails its cleanup (P0)
+
+`apps/api/src/test/rls/test-run-stories.spec.ts` creates a system and test runs in the shared dev
+database. A running worker (the dockerized local stack) picks those runs up on its minute tick and
+writes `metrics_sources` rows for the spec's system (`created_by = 'worker-pipeline'`, seen at
+15:15:00 and 15:38:00 on 2026-11-23). When that lands before `afterAll`, `DELETE FROM
+systems_under_test` fails on `FK_41fde009f014dff1c3f4f5396da` and the suite reports "Test suite failed
+to run" although all 24 tests passed: 2 failures in 5 runs while shipping v0.2.97.95, which did not
+touch the spec. Fix: delete the worker-written rows for the spec's system (`metrics_sources`, and any
+other `worker-pipeline` writes such as `ds_compare_config`) before the system delete in `afterAll`.
+Each failed run also leaves a `stories-spec-sut-*` system behind in the dev database.
+
 ## Confluence integration
 
 Filed from the /ship review of Confluence publishing (v0.2.97.95). Three review findings were fixed on
