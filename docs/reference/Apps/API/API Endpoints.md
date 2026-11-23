@@ -54,6 +54,7 @@ tags:
 | `GET` | `/api/test-runs/:id` | Get test run by ID |
 | `PUT` | `/api/test-runs/:id/annotations` | Update annotations |
 | `PUT` | `/api/test-runs/:id/tags` | Update tags |
+| `PUT` | `/api/test-runs/:id/time-range` | Correct a completed run's `startTime` and/or `endTime`, then queue a force re-fetch re-evaluation and the transaction rollup. 400 for a running run or invalid times, 409 while a job runs for the workload |
 | `DELETE` | `/api/test-runs/:id` | Delete test run |
 
 ### Initialization

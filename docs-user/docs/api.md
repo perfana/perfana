@@ -98,6 +98,8 @@ For a run whose recorded window is wrong, for example because the load generator
 off or the completion call came late. Takes the run's **UUID** and a body with `startTime`,
 `endTime` or both, as ISO 8601 date-times; an omitted field keeps its stored value. The run
 must be completed, the start must be before the end, and the end may not be in the future.
+While an analysis is running for the same workload the request is refused with `409 Conflict`;
+try again when it has finished.
 
 Perfana then re-collects every metric source for the new window and re-runs statistics, SLO
 checks and anomaly detection, as a force re-fetch would. In the UI this is **Change start /
