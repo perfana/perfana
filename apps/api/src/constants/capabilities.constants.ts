@@ -22,6 +22,9 @@ export const Capability = {
   IntegrationSplunkCreate: 'integration:splunk:create',
   IntegrationSplunkUpdate: 'integration:splunk:update',
   IntegrationSplunkDelete: 'integration:splunk:delete',
+  IntegrationConfluenceCreate: 'integration:confluence:create',
+  IntegrationConfluenceUpdate: 'integration:confluence:update',
+  IntegrationConfluenceDelete: 'integration:confluence:delete',
 
   // Test runs
   TestRunRead: 'test-run:read',
@@ -84,6 +87,9 @@ const integrationCrud: CapabilityValue[] = [
   Capability.IntegrationSplunkCreate,
   Capability.IntegrationSplunkUpdate,
   Capability.IntegrationSplunkDelete,
+  Capability.IntegrationConfluenceCreate,
+  Capability.IntegrationConfluenceUpdate,
+  Capability.IntegrationConfluenceDelete,
 ];
 
 const testRunCrud: CapabilityValue[] = [

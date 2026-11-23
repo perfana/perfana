@@ -82,6 +82,16 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     ],
     "rls": true,
   },
+  "confluence_configs": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_confluence_configs_delete",
+      "INSERT:rls_confluence_configs_insert",
+      "SELECT:rls_confluence_configs_select",
+      "UPDATE:rls_confluence_configs_update",
+    ],
+    "rls": true,
+  },
   "data_sources": {
     "force": false,
     "policies": [],

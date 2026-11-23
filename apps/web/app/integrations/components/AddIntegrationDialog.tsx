@@ -17,7 +17,7 @@ import {
   Timeline,
   LocalFireDepartment,
   Speed,
-  Article,
+  Article, MenuBook,
 } from '@mui/icons-material';
 import { IntegrationType, IntegrationTypeDefinition } from '../types';
 
@@ -69,6 +69,15 @@ export const INTEGRATION_TYPES: IntegrationTypeDefinition[] = [
     icon: <Article />,
     color: '#65A637',
     features: ['Log levels over time', 'Errors by host', 'Exceptions by type', 'SPL filters'],
+  },
+  {
+    id: 'confluence',
+    name: 'Confluence',
+    description: 'Publish generated reports as Confluence pages, with tables, status lozenges and charts as images. Publishing a report again updates its page.',
+    category: 'Reporting',
+    icon: <MenuBook />,
+    color: '#1868DB',
+    features: ['Cloud and Data Center', 'Charts as images', 'Republish updates the page', 'Space and parent page'],
   },
 ];
 

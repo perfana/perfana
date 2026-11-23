@@ -26,6 +26,8 @@ import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
 import { SplunkConfig } from '@/lib/splunk';
 import { SplunkExpandedContent } from './SplunkIntegration';
+import { ConfluenceConfig } from '@/lib/confluence';
+import { ConfluenceExpandedContent } from './ConfluenceIntegration';
 import { TracingInstance } from '@/lib/distributed-tracing';
 import { getStatusIcon, getStatusLabel, getIntegrationTypeLabel } from '../utils';
 import {
@@ -62,6 +64,7 @@ export function IntegrationCardComponent({
   const isPyroscopeInstance = card.integrationType === 'pyroscope' && card.instanceData;
   const isTracingInstance = card.integrationType === 'tracing' && card.instanceData;
   const isSplunkInstance = card.integrationType === 'splunk' && card.instanceData;
+  const isConfluenceInstance = card.integrationType === 'confluence' && card.instanceData;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -115,8 +118,9 @@ export function IntegrationCardComponent({
           >
             {card.icon}
           </Avatar>
-          <Box sx={{ flex: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+          {/* minWidth 0 + wrap: a long name and its type chip wrap instead of pushing the action buttons off the card. */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 0.5 }}>
               <Typography variant="h6" sx={{ fontSize: '1.1rem', fontWeight: 600 }}>
                 {card.name}
               </Typography>
@@ -209,6 +213,9 @@ export function IntegrationCardComponent({
               <TracingExpandedContent instance={card.instanceData as TracingInstance} />
             )}
 
+            {isConfluenceInstance && (
+              <ConfluenceExpandedContent config={card.instanceData as ConfluenceConfig} />
+            )}
             {isSplunkInstance && (
               <SplunkExpandedContent config={card.instanceData as SplunkConfig} />
             )}

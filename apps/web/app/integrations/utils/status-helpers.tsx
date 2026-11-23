@@ -42,5 +42,7 @@ export const getIntegrationTypeLabel = (type: IntegrationType): string => {
       return 'Tracing';
     case 'splunk':
       return 'Splunk';
+    case 'confluence':
+      return 'Confluence';
   }
 };

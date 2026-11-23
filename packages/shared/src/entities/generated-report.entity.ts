@@ -115,6 +115,23 @@ export class GeneratedReport {
   last_shared_at?: Date;
 
   // ========================================
+  // Confluence (migration 1835): where this report was last published, so a republish updates
+  // that page. No FK on the config id; a stale id just means the next publish creates a page.
+  // ========================================
+
+  @Column({ type: 'uuid', nullable: true })
+  confluence_config_id?: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  confluence_page_id?: string | null;
+
+  @Column({ type: 'varchar', length: 1000, nullable: true })
+  confluence_page_url?: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  confluence_published_at?: Date | null;
+
+  // ========================================
   // PDF Storage Fields
   // ========================================
 

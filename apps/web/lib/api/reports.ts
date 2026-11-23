@@ -181,6 +181,8 @@ export interface ReportListItem {
   download_count: number;
   has_pdf: boolean;
   file_size?: number;
+  /** Confluence page this report was last published to; null/absent when never published. */
+  confluence_page_url?: string | null;
   created_at: string;
   completed_at?: string;
 }

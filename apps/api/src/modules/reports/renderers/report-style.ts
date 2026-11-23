@@ -376,7 +376,8 @@ export function statusFor(
 /** Generic colored pill. Label is uppercased with letter-spacing per rule 06. */
 export function pill(label: string, kind: PillKind): string {
   const { bg, fg } = PILL_FILLS[kind];
-  return `<span style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml(label)}</span>`;
+  // data-pill: the Confluence converter turns it into a status lozenge (modules/confluence/storage-format.ts).
+  return `<span data-pill="${kind}" style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml(label)}</span>`;
 }
 
 /** Status pill for the five-state scale (rule 01 + 06). */
@@ -452,14 +453,14 @@ export function deltaChip(
   higherIsWorse = true,
 ): string {
   const pct = toFiniteNumber(diffPercent);
-  const chipStyle = (bg: string, fg: string, content: string): string =>
-    `<span style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:999px; overflow-wrap:normal; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums; background:${bg}; color:${fg};">${content}</span>`;
+  // data-pill: the Confluence converter turns the delta into a status lozenge of the same colour.
+  const chipStyle = (kind: PillKind, content: string): string =>
+    `<span data-pill="${kind}" style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:999px; overflow-wrap:normal; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums; background:${PILL_FILLS[kind].bg}; color:${PILL_FILLS[kind].fg};">${content}</span>`;
   if (pct == null || pct === 0) {
-    return chipStyle(PILL_FILLS.neutral.bg, PILL_FILLS.neutral.fg, '—');
+    return chipStyle('neutral', '—');
   }
   const status = statusFor(pct, thresholds, higherIsWorse);
-  const { bg, fg } = PILL_FILLS[STATUS_PILL_KIND[status]];
-  return chipStyle(bg, fg, `${deltaArrow(pct)} ${pct > 0 ? '+' : ''}${formatPercent(pct)}`);
+  return chipStyle(STATUS_PILL_KIND[status], `${deltaArrow(pct)} ${pct > 0 ? '+' : ''}${formatPercent(pct)}`);
 }
 
 // ---------------------------------------------------------------------------

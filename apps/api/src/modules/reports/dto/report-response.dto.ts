@@ -212,6 +212,12 @@ export class ReportListItemDto {
   has_pdf!: boolean;
 
   @ApiPropertyOptional({
+    description: 'Confluence page this report was last published to (null when never published)',
+    nullable: true,
+  })
+  confluence_page_url?: string | null;
+
+  @ApiPropertyOptional({
     description: 'File size in bytes',
     example: 1024000,
   })
