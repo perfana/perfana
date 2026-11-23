@@ -38,7 +38,9 @@ The Confluence page is a static copy. Hover readouts and table filters stay in P
 4. Click **Publish**.
    Perfana renders the charts, creates the page and uploads the charts as attachments. A large report takes up to a minute. When it is done, **Open the page in Confluence** takes you there, and the share menu gains **Open Confluence page**.
 
-To update the page after regenerating or editing the report, publish it again to the same connection.
+To update the page after regenerating or editing the report, publish it again to the same connection. If the earlier page has been deleted, or no longer sits in the connection's space (because it was moved, or the connection now points at another space or Confluence), Perfana creates a new page instead.
+
+If publishing fails while the charts are being uploaded, the page has already been created. Publish again and Perfana updates that page rather than creating a second one.
 
 Publishing needs the same permission as sharing a report: you must be able to update the test run.
 
@@ -48,4 +50,4 @@ Publishing needs the same permission as sharing a report: you must be able to up
 - *The Confluence account lacks permission (403)*: the account cannot add pages in that space. Ask the space administrator for **Add page** and **Add attachment** permission.
 - *A page with this title already exists*: Confluence titles are unique within a space. Choose another title.
 - *Confluence answered with something other than JSON*: the URL points at a login page or a proxy, not at Confluence itself. Check the context path, for example `/confluence`.
-- *The report service did not render the charts in time*: the `perfana-report` service is not running, or is busy. Try again; ask your Perfana administrator if it keeps happening.
+- *The report service did not render the charts in time*: the `perfana-report` service is not running, or is busy. Perfana waits three minutes for the charts. Try again; ask your Perfana administrator if it keeps happening.

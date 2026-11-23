@@ -52,6 +52,7 @@ Perfana collects metrics from performance tests and compares them against histor
 - [[Templates]] — Standardized checks, reports, and dashboards
 - [[AWR Reports]] — Oracle AWR report analysis
 - [[Reports in CI-CD]] — Generating and downloading HTML reports from a pipeline
+- [[Confluence Publishing]] — Publishing a generated report as a Confluence page
 - [[Trace Analysis]] — Distributed trace analysis
 
 ### Operations

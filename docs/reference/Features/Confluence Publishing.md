@@ -18,6 +18,10 @@ Publishes a generated report as a Confluence page (v0.2.97.95, migration 1835). 
    **The result is not the job's return value**: BullMQ copies return values into its events stream,
    which keeps thousands of entries, and a rendered report is MBs. The job writes
    `confluence-render:<jobId>` with a 600 s TTL and returns the key; the API reads and deletes it.
+   The API waits 180 s (`RENDER_WAIT_MS`) and answers 503 after that. The processor (concurrency 1)
+   fails any job queued longer ago than the same 180 s (`API_RENDER_WAIT_MS`, a twin constant: keep
+   the two equal) instead of rendering it, so a backlog of abandoned jobs never holds the slot a
+   retry is waiting for.
 3. **Convert** (`apps/api/src/modules/confluence/storage-format.ts`): one generic HTML-to-storage
    converter, not a Confluence variant per renderer. Headings, paragraphs, lists, tables (only
    `colspan`/`rowspan` kept), `http(s)` links, `<details>` → `expand` macro, `data-pill` spans
@@ -36,11 +40,18 @@ Publishes a generated report as a Confluence page (v0.2.97.95, migration 1835). 
    summary's parts with " · ". Output is built by hand as XHTML (escaped, every tag closed).
 4. **Upsert the page.** Cloud uses REST v2 (`/wiki/api/v2/pages`; Atlassian is retiring v1 content
    endpoints there), Data Center v1 (`/rest/api/content`). A report republished to the same
-   connection updates `confluence_page_id` as version n+1; a page that 404s is recreated.
-5. **Upload charts** with v1 `PUT .../child/attachment` (create-or-replace by filename, so republish
+   connection updates `confluence_page_id` as version n+1, but only while that page still sits in
+   the connection's configured space: a page id is unique only within one Confluence, so after the
+   connection is pointed at another host or space the stored id could name an unrelated page.
+   A page that 404s or is outside the space gets a new page instead.
+5. **Record the page** (`confluence_config_id`, `confluence_page_id`, `confluence_page_url` on
+   `generated_reports`) straight after the upsert, before any upload. If the upload then fails, a
+   retry updates this page rather than creating a second one, which Confluence would refuse anyway
+   because titles are unique per space.
+6. **Upload charts** with v1 `PUT .../child/attachment` (create-or-replace by filename, so republish
    is idempotent), 10 files per request, `X-Atlassian-Token: no-check`.
-6. Record `confluence_config_id`, `confluence_page_id`, `confluence_page_url`,
-   `confluence_published_at` on `generated_reports`.
+7. Stamp `confluence_published_at` once the uploads succeed. A page recorded with no
+   `confluence_published_at` (or an older one) is a publish whose upload failed.
 
 ## Connections
 

@@ -40,6 +40,7 @@ The Perfana Report service generates PDF performance reports using Puppeteer hea
 | `PdfService` | Core PDF generation from HTML |
 | `BrowserPoolService` | Manages Puppeteer browser instance pool |
 | `PdfQueueProcessor` | BullMQ job processor for async generation |
+| `ConfluenceRenderProcessor` | Queue `perfana-report-confluence-render`: screenshots a report's chart SVGs to PNG for Confluence publishing and hands the HTML + images back through a Redis key with a 10-minute TTL. Concurrency 1; fails, without rendering, any job queued longer than the API's 180 s wait (`API_RENDER_WAIT_MS`, twin of the API's `RENDER_WAIT_MS`). See [[Confluence Publishing]] |
 
 ## Browser Pool
 
