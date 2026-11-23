@@ -37,6 +37,7 @@ export * from './ds-panels.entity';
 export * from './dynatrace-config.entity';
 export * from './dynatrace-entity-mapping.entity';
 export * from './dynatrace-query.entity';
+export * from './confluence-config.entity';
 export * from './splunk-config.entity';
 export * from './splunk-entity-mapping.entity';
 export * from './splunk-query.entity';

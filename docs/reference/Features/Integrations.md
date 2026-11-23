@@ -229,3 +229,7 @@ unchanged.
 - [[Data Flow]] — Data collection pipeline
 - [[Worker Overview]] — Metric collection pipelines
 - [[Splunk Log Metrics (spec)]] — Splunk log metrics design
+
+## Confluence
+
+Publishes generated reports as Confluence pages (Cloud and Data Center 7.9+). Not a metrics source: it is configured on the Integrations page like the others, and used from the Reports card's share menu. Design and limits: [[Confluence Publishing]]; operator guide: `docs-user/docs/integrations/connect-confluence.md`.

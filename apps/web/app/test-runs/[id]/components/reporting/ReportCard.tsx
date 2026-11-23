@@ -79,6 +79,8 @@ import {
   type ReportStatus,
 } from '@/lib/api/reports';
 import KPIDisplay from '../shared/KPIDisplay';
+import { PublishToConfluenceDialog } from './PublishToConfluenceDialog';
+import { safeConfluenceHref } from '@/lib/confluence';
 import SoftBadge from '../shared/SoftBadge';
 import { HtmlReportViewerModal } from '@/components/reports/HtmlReportViewerModal';
 
@@ -163,6 +165,7 @@ export function ReportCard({
 
   // Which report's share menu is open, and what it is anchored to
   const [shareMenu, setShareMenu] = useState<{ anchor: HTMLElement; report: ReportListItem } | null>(null);
+  const [confluenceReport, setConfluenceReport] = useState<ReportListItem | null>(null);
 
   // Snackbar callback - defined early to avoid initialization errors
   const handleSnackbar = useCallback(
@@ -703,7 +706,39 @@ export function ReportCard({
                 />
               </MenuItem>
             )}
+        {shareMenu && (
+          <MenuItem
+            onClick={() => {
+              setConfluenceReport(shareMenu.report);
+              setShareMenu(null);
+            }}
+          >
+            <ListItemText
+              primary={shareMenu.report.confluence_page_url ? 'Publish to Confluence again' : 'Publish to Confluence'}
+              secondary="Creates a page in your Confluence space, charts included"
+            />
+          </MenuItem>
+        )}
+        {shareMenu && safeConfluenceHref(shareMenu.report.confluence_page_url) && (
+          <MenuItem
+            component="a"
+            href={safeConfluenceHref(shareMenu.report.confluence_page_url)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setShareMenu(null)}
+          >
+            Open Confluence page
+          </MenuItem>
+        )}
       </Menu>
+
+      <PublishToConfluenceDialog
+        report={confluenceReport}
+        onClose={() => setConfluenceReport(null)}
+        onPublished={(reportId, publication) =>
+          setReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, confluence_page_url: publication.url } : r)))
+        }
+      />
 
       {/* Loading State */}
       {loading && (

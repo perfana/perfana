@@ -18,6 +18,8 @@ This lets you turn a test run into a shareable HTML report and send it to people
 3. **Share the report.** A new report is private: turn sharing on from the share menu on the
    Reports card. Its link points to `/reports/share/[shareId]`, and anyone with the link can open
    the report without signing in to Perfana until you turn sharing off again.
+   To keep reports in Confluence instead, choose **Publish to Confluence** from the same menu; see
+   [Connect Confluence](../integrations/connect-confluence.md).
 
 **Result**
 You have an HTML report for the run and a link you can send to others.

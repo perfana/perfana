@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.95] - 2026-11-23
+
+### Added
+- **Publish a generated report to Confluence.** "Publish to Confluence" in a report's share menu turns the report into a Confluence page, with its charts attached as images, tables kept as tables and collapsible groups as expand sections. Publishing the same report again updates that page as a new version, and "Open Confluence page" takes you there. CI can do the same with `POST /api/confluence/reports/:reportId/publish`. It needs the same permission as sharing the report.
+- **Connect Confluence Cloud or Data Center on the Integrations page.** A connection names the site, the space and optionally a parent page. Cloud uses an Atlassian account email with an API token, and Data Center 7.9 or later uses a personal access token. The token is stored encrypted and shown masked, the connection can go through the organization's proxy, and "Test connection" checks that the space is reachable. A report can only be published with a connection of its own organization.
+
+### Changed
+- **Integration card titles wrap** instead of pushing the expand button off the card.
+- **Upgrading: run the database migrations before starting the new API.** Migration 1835 adds the Confluence connections table and four columns on generated reports; an API started first fails every report read until it has run.
+
 ## [0.2.97.94] - 2026-11-21
 
 ### Fixed

@@ -36,6 +36,14 @@
 
     [:octicons-arrow-right-24: Connect Splunk](connect-splunk.md)
 
+-   :material-book-open-variant:{ .lg .middle } **Connect Confluence**
+
+    ---
+
+    Publish generated reports as Confluence pages.
+
+    [:octicons-arrow-right-24: Connect Confluence](connect-confluence.md)
+
 -   :material-transit-connection-variant:{ .lg .middle } **Connect distributed tracing**
 
     ---

@@ -19,6 +19,7 @@ import {
   Add,
   Business,
   Article,
+  MenuBook,
 } from '@mui/icons-material';
 import { useOrganizationContext } from '@/lib/contexts/organization-context';
 import { NoOrganizationMembership } from '@/components/NoOrganizationMembership';
@@ -28,6 +29,7 @@ import { GrafanaInstance } from '@/lib/grafana-instances';
 import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
 import { SplunkConfig } from '@/lib/splunk';
+import { ConfluenceConfig } from '@/lib/confluence';
 import { TracingInstance } from '@/lib/distributed-tracing';
 
 // Types
@@ -62,6 +64,9 @@ import {
   useSplunkIntegration,
   SplunkFormDialog,
   SplunkDeleteDialog,
+  useConfluenceIntegration,
+  ConfluenceFormDialog,
+  ConfluenceDeleteDialog,
 } from './components';
 
 export default function IntegrationsPage() {
@@ -84,6 +89,7 @@ export default function IntegrationsPage() {
   const pyroscope = usePyroscopeIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
   const tracing = useTracingIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
   const splunk = useSplunkIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
+  const confluence = useConfluenceIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
 
   // Load all data on mount and when organization changes
   useEffect(() => {
@@ -96,6 +102,7 @@ export default function IntegrationsPage() {
         pyroscope.loadInstances(),
         tracing.loadInstances(),
         splunk.loadConfigs(),
+        confluence.loadConfigs(),
         authenticatedFetch('/proxy').then(r => r.ok ? r.json() : null).then(data => {
           setProxyConfigured(data != null);
         }).catch(() => setProxyConfigured(false)),
@@ -238,6 +245,28 @@ export default function IntegrationsPage() {
       });
     });
 
+    // Confluence connections
+    confluence.configs.forEach((config) => {
+      const hostname = (() => {
+        try {
+          return new URL(config.baseUrl).host;
+        } catch {
+          return config.baseUrl;
+        }
+      })();
+      cards.push({
+        id: `confluence-${config.id}`,
+        integrationType: 'confluence',
+        name: config.label,
+        tldr: `${hostname} • Space ${config.spaceKey} • ${config.deployment === 'cloud' ? 'Cloud' : 'Data Center'}`,
+        category: INTEGRATION_CATEGORIES.confluence,
+        status: 'connected',
+        icon: <MenuBook />,
+        color: INTEGRATION_COLORS.confluence,
+        instanceData: config,
+      });
+    });
+
     return cards;
   };
 
@@ -276,6 +305,8 @@ export default function IntegrationsPage() {
       tracing.openEditDialog(card.instanceData as TracingInstance);
     } else if (card.integrationType === 'splunk' && card.instanceData) {
       splunk.openEdit(card.instanceData as SplunkConfig);
+    } else if (card.integrationType === 'confluence' && card.instanceData) {
+      confluence.openEdit(card.instanceData as ConfluenceConfig);
     }
   };
 
@@ -290,6 +321,8 @@ export default function IntegrationsPage() {
       tracing.openDeleteDialog(card.instanceData as TracingInstance);
     } else if (card.integrationType === 'splunk' && card.instanceData) {
       splunk.openDelete(card.instanceData as SplunkConfig);
+    } else if (card.integrationType === 'confluence' && card.instanceData) {
+      confluence.openDelete(card.instanceData as ConfluenceConfig);
     }
   };
 
@@ -304,6 +337,8 @@ export default function IntegrationsPage() {
       tracing.setCreateDialogOpen(true);
     } else if (integrationType === 'splunk') {
       splunk.openCreate();
+    } else if (integrationType === 'confluence') {
+      confluence.openCreate();
     }
   };
 
@@ -499,6 +534,17 @@ export default function IntegrationsPage() {
         onSave={splunk.save}
       />
       <SplunkDeleteDialog config={splunk.deleting} onClose={splunk.closeDelete} onConfirm={splunk.confirmDelete} />
+
+      {/* Confluence Dialogs */}
+      <ConfluenceFormDialog
+        open={confluence.dialogOpen}
+        editing={confluence.editing}
+        organizationId={currentOrganizationId}
+        proxyConfigured={proxyConfigured}
+        onClose={confluence.closeDialog}
+        onSave={confluence.save}
+      />
+      <ConfluenceDeleteDialog config={confluence.deleting} onClose={confluence.closeDelete} onConfirm={confluence.confirmDelete} />
 
       {/* Add Integration Dialog */}
       <AddIntegrationDialog

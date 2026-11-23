@@ -202,6 +202,7 @@ export class ReportGenerationController {
           download_count: report.download_count || 0,
           has_pdf: report.status === 'pdf_complete',
           file_size: report.file_size,
+          confluence_page_url: report.confluence_page_url ?? null,
           created_at: report.created_at,
           completed_at: report.completed_at,
         })),
