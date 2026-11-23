@@ -1352,5 +1352,15 @@ describe('MetricsPipeline', () => {
       const rows = flatten(300, 300, [30, 300, 570]);
       expect(rows.map((r) => r.ramp_up)).toEqual([false, false, false]);
     });
+
+    // Value: protects=samples outside [start_time, end_time] never counting as analysed;
+    // fails_when=the outside-run arm is dropped, so a run whose end was pulled in keeps its
+    // old tail's Grafana/Dynatrace rows in the statistics whenever ramp_down is 0;
+    // why_new=every case above only placed samples inside the run; seam=none;
+    // no_claim=RAMP_UP_EXPR's SQL twin is checked separately in StatisticsPipeline.test.ts.
+    test('flags samples before the start or after the end, with no offsets and when they do not fit', () => {
+      expect(flatten(0, 0, [-30, 300, 630]).map((r) => r.ramp_up)).toEqual([true, false, true]);
+      expect(flatten(400, 300, [-30, 300, 630]).map((r) => r.ramp_up)).toEqual([true, false, true]);
+    });
   });
 });

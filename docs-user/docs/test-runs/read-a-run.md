@@ -12,6 +12,7 @@ Open a single test run and find your way around its tabs to understand how the t
    *Figure: the test run detail page and its three tabs.*
 2. Read the **details card** for the run's metadata (system, environment, workload, timing). Use it to edit the run's **tags** and **annotations**.
    Your tags and notes are saved to the run for later reference.
+   If a completed run's recorded window is wrong, use **Change start / end time** under Timing Information to correct it. Perfana then re-collects the run's metrics for the new window and analyses it again. See [`PUT /api/test-runs/{id}/time-range`](../api.md) for the rules.
 3. Open the **Results** tab to review what happened. It groups several sections:
    - **Configuration comparison** — what changed versus a previous run.
    - **Dashboards** — the Grafana dashboards captured for the run.

@@ -306,6 +306,46 @@ export class TestRunsController {
     return this.testRunsService.updateAnalysisStartOffset(id, body.analysisStartOffset, ctx.userId, ctx.roles);
   }
 
+  @Put(':id/time-range')
+  @ApiOperation({
+    summary: "Correct a completed test run's start and/or end time",
+    description:
+      'Rewrites start_time, end_time and duration, then queues a force re-fetch re-evaluation so ' +
+      'metrics, statistics, SLO checks and ADAPT are rebuilt for the new window. Omit a field to keep it.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        startTime: { type: 'string', format: 'date-time' },
+        endTime: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Time range updated, re-collection queued' })
+  @ApiResponse({ status: 400, description: 'Invalid times, or the test run is still running' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  async updateTestRunTimes(
+    @Param('id', UuidValidationPipe) id: string,
+    @Body() body: { startTime?: unknown; endTime?: unknown },
+    @UserCtx() ctx: UserContext,
+  ) {
+    const parse = (raw: unknown, name: string): Date | undefined => {
+      if (raw === undefined) return undefined;
+      const d = typeof raw === 'string' ? new Date(raw) : new Date(Number.NaN);
+      if (Number.isNaN(d.getTime())) {
+        throw new ValidationException(`${name} must be an ISO 8601 date-time string`);
+      }
+      return d;
+    };
+    const startTime = parse(body?.startTime, 'startTime');
+    const endTime = parse(body?.endTime, 'endTime');
+    if (!startTime && !endTime) {
+      throw new ValidationException('Provide startTime, endTime or both');
+    }
+    return this.testRunsService.updateTestRunTimes(id, { startTime, endTime }, ctx.userId, ctx.roles);
+  }
+
   @Get(':id/analysis-time-range/scope')
   @ApiOperation({
     summary: 'Preview which runs an "apply to all" analysis time range change would affect',

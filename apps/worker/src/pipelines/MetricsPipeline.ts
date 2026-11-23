@@ -416,9 +416,12 @@ export class MetricsPipeline extends BasePipelineTypeORM {
           // Analyse the whole run instead; same guard as RAMP_UP_EXPR in
           // StatisticsPipeline, which recomputes this flag later.
           const offsetsFit = durationSeconds > startOffset + endOffset;
-          isRampUp = offsetsFit
+          // Outside the run is outside the analysis window, offsets or not; same rule as
+          // RAMP_UP_EXPR (a narrowed run keeps its old tail's rows).
+          const outsideRun = elapsedSeconds < 0 || elapsedSeconds > durationSeconds;
+          isRampUp = outsideRun || (offsetsFit
             && (elapsedSeconds < startOffset
-              || (endOffset > 0 && elapsedSeconds > durationSeconds - endOffset));
+              || (endOffset > 0 && elapsedSeconds > durationSeconds - endOffset)));
         }
 
         flattened.push({

@@ -1011,6 +1011,11 @@ describe('StatisticsPipeline', () => {
       // to "the UPDATE below", which is prose, not a statement.
       expect(stripSqlComments(preCheck!)).toMatch(/^\s*SELECT/);
       expect(stripSqlComments(preCheck!)).not.toMatch(/UPDATE/i);
+      // Value: protects=RAMP_UP_EXPR flagging samples outside the run regardless of offsets;
+      // fails_when=the outside-run arms are dropped or moved inside the offsets-fit guard;
+      // why_new=MetricsPipeline's JS twin has a behaviour test, this SQL had none; seam=none;
+      // no_claim=text check only, Postgres evaluation is not exercised here.
+      expect(stripSqlComments(preCheck!)).toMatch(/m\.time < tr\.start_time\s+OR \(tr\.end_time IS NOT NULL AND m\.time > tr\.end_time\)\s+OR \(/);
 
       // Nothing stale => no write, and nothing decompressed.
       expect(interceptedQueries.some((q) => q.includes('UPDATE ds_metrics'))).toBe(false);

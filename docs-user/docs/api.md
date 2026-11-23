@@ -92,6 +92,19 @@ which you then pass to `POST /api/test`.
 Aborts the run identified by its **UUID** (not the `testRunId` string). No body. This is
 an alternative to sending `abort: true` on `POST /api/test`.
 
+### `PUT /api/test-runs/{id}/time-range` — correct a completed run's start or end time
+
+For a run whose recorded window is wrong, for example because the load generator's clock was
+off or the completion call came late. Takes the run's **UUID** and a body with `startTime`,
+`endTime` or both, as ISO 8601 date-times; an omitted field keeps its stored value. The run
+must be completed, the start must be before the end, and the end may not be in the future.
+While an analysis is running for the same workload the request is refused with `409 Conflict`;
+try again when it has finished.
+
+Perfana then re-collects every metric source for the new window and re-runs statistics, SLO
+checks and anomaly detection, as a force re-fetch would. In the UI this is **Change start /
+end time** in the expanded test run details, under Timing Information.
+
 ## Attach configuration (optional)
 
 Record the configuration a run used, so Perfana can diff it against previous runs. All

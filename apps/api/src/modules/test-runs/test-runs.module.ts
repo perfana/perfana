@@ -41,6 +41,7 @@ import { UpdateTagsHandler } from './handlers/update-tags.handler';
 import { UpdateApplicationReleaseHandler } from './handlers/update-application-release.handler';
 import { UpdateAnnotationsHandler } from './handlers/update-annotations.handler';
 import { UpdateAnalysisStartOffsetHandler } from './handlers/update-analysis-start-offset.handler';
+import { UpdateTestRunTimesHandler } from './handlers/update-test-run-times.handler';
 import { UpdateAnalysisTimeRangeHandler } from './handlers/update-analysis-time-range.handler';
 import { UpdateAdaptConfigHandler } from './handlers/update-adapt-config.handler';
 import { InitTestHandler } from './handlers/init-test.handler';
@@ -173,6 +174,7 @@ import {
     UpdateAnnotationsHandler,
     UpdateApplicationReleaseHandler,
     UpdateAnalysisStartOffsetHandler,
+    UpdateTestRunTimesHandler,
     UpdateAnalysisTimeRangeHandler,
     UpdateAdaptConfigHandler,
     InitTestHandler,

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Box, Typography, Divider, Button, CircularProgress, useTheme } from '@mui/material';
-import { Timeline } from '@mui/icons-material';
+import { Box, Typography, Divider, Button, CircularProgress, TextField, Alert, useTheme } from '@mui/material';
+import { Timeline, Edit } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
 import { formatDuration } from '../utils/test-run-formatters';
@@ -20,6 +20,13 @@ interface TimingInformationSectionProps {
   showToast?: (message: string) => void;
 }
 
+/** ISO timestamp -> the browser-local `YYYY-MM-DDTHH:mm:ss` a datetime-local input takes. */
+function toLocalInput(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
+}
+
 export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }: TimingInformationSectionProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
@@ -27,6 +34,57 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
   const [timeseriesData, setTimeseriesData] = useState<SummaryTimeseriesResponse | null>(null);
   const [timeseriesLoading, setTimeseriesLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingTimes, setEditingTimes] = useState(false);
+  const [startInput, setStartInput] = useState('');
+  const [endInput, setEndInput] = useState('');
+  const [savingTimes, setSavingTimes] = useState(false);
+  const [timesError, setTimesError] = useState<string | null>(null);
+
+  const startEditingTimes = () => {
+    setStartInput(toLocalInput(testRun.start_time));
+    setEndInput(toLocalInput(testRun.end_time));
+    setTimesError(null);
+    setEditingTimes(true);
+  };
+
+  const saveTimes = async () => {
+    // A datetime-local value parses as local time, which is what the inputs show. Compare
+    // parsed times, not strings: the browser rewrites `HH:mm:00` as `HH:mm`.
+    const changed = (input: string, iso?: string | null) =>
+      new Date(input).getTime() !== new Date(toLocalInput(iso)).getTime();
+    const body: { startTime?: string; endTime?: string } = {};
+    if (changed(startInput, testRun.start_time)) body.startTime = new Date(startInput).toISOString();
+    if (changed(endInput, testRun.end_time)) body.endTime = new Date(endInput).toISOString();
+    if (!body.startTime && !body.endTime) {
+      setEditingTimes(false);
+      return;
+    }
+    if (new Date(startInput).getTime() >= new Date(endInput).getTime()) {
+      setTimesError('Start time must be before end time');
+      return;
+    }
+    setSavingTimes(true);
+    setTimesError(null);
+    try {
+      const res = await authenticatedFetch(`/test-runs/${testRun.id}/time-range`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        setTimesError(err?.message ?? `Failed to update times (${res.status})`);
+        return;
+      }
+      onTestRunUpdate?.(await res.json());
+      setEditingTimes(false);
+      showToast?.('Test run times updated — metrics are being re-collected and re-analysed');
+    } catch {
+      setTimesError('Failed to update times');
+    } finally {
+      setSavingTimes(false);
+    }
+  };
 
   useEffect(() => {
     if (!testRun.completed) return;
@@ -112,25 +170,76 @@ export function TimingInformationSection({ testRun, onTestRunUpdate, showToast }
 
       <Divider sx={{ my: 2, opacity: 0.4 }} />
 
-      {/* Start Time */}
-      <Box sx={{ mb: 2.5 }}>
-        <Typography variant="caption" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'text.secondary', mb: 0.75, opacity: 0.8 }}>
-          Start Time
-        </Typography>
-        <Typography variant="body2" sx={{ fontSize: '0.9375rem', fontWeight: 600, color: 'text.primary', lineHeight: 1.4 }}>
-          {testRun.start_time ? new Date(testRun.start_time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' }) : <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not available</span>}
-        </Typography>
-      </Box>
+      {editingTimes ? (
+        <Box>
+          <TextField
+            label="Start time"
+            type="datetime-local"
+            size="small"
+            fullWidth
+            value={startInput}
+            onChange={(e) => setStartInput(e.target.value)}
+            inputProps={{ step: 1 }}
+            InputLabelProps={{ shrink: true }}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            label="End time"
+            type="datetime-local"
+            size="small"
+            fullWidth
+            value={endInput}
+            onChange={(e) => setEndInput(e.target.value)}
+            inputProps={{ step: 1 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+            Saving re-collects all metrics for the new window and re-runs statistics, SLO checks and anomaly detection.
+          </Typography>
+          {timesError && <Alert severity="error" sx={{ mt: 1 }}>{timesError}</Alert>}
+          <Box sx={{ display: 'flex', gap: 1, mt: 1.5 }}>
+            <Button size="small" variant="contained" onClick={saveTimes} disabled={savingTimes || !startInput || !endInput} sx={{ textTransform: 'none' }}>
+              {savingTimes ? <CircularProgress size={14} /> : 'Save'}
+            </Button>
+            <Button size="small" onClick={() => setEditingTimes(false)} disabled={savingTimes} sx={{ textTransform: 'none' }}>
+              Cancel
+            </Button>
+          </Box>
+        </Box>
+      ) : (
+        <>
+          {/* Start Time */}
+          <Box sx={{ mb: 2.5 }}>
+            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'text.secondary', mb: 0.75, opacity: 0.8 }}>
+              Start Time
+            </Typography>
+            <Typography variant="body2" sx={{ fontSize: '0.9375rem', fontWeight: 600, color: 'text.primary', lineHeight: 1.4 }}>
+              {testRun.start_time ? new Date(testRun.start_time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' }) : <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not available</span>}
+            </Typography>
+          </Box>
 
-      {/* End Time */}
-      <Box>
-        <Typography variant="caption" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'text.secondary', mb: 0.75, opacity: 0.8 }}>
-          End Time
-        </Typography>
-        <Typography variant="body2" sx={{ fontSize: '0.9375rem', fontWeight: 600, color: 'text.primary', lineHeight: 1.4 }}>
-          {testRun.end_time ? new Date(testRun.end_time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' }) : <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not available</span>}
-        </Typography>
-      </Box>
+          {/* End Time */}
+          <Box>
+            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'text.secondary', mb: 0.75, opacity: 0.8 }}>
+              End Time
+            </Typography>
+            <Typography variant="body2" sx={{ fontSize: '0.9375rem', fontWeight: 600, color: 'text.primary', lineHeight: 1.4 }}>
+              {testRun.end_time ? new Date(testRun.end_time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' }) : <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not available</span>}
+            </Typography>
+          </Box>
+          {testRun.completed && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Edit sx={{ fontSize: 14 }} />}
+              onClick={startEditingTimes}
+              sx={{ mt: 1.5, fontSize: '0.75rem', py: 0.25, px: 1, borderRadius: 1.5, textTransform: 'none' }}
+            >
+              Change start / end time
+            </Button>
+          )}
+        </>
+      )}
 
       {dialogOpen && timeseriesData && (
         <AnalysisTimeRangeDialog
