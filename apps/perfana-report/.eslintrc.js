@@ -16,6 +16,13 @@ module.exports = {
     jest: true,
   },
   ignorePatterns: ['.eslintrc.js'],
+  overrides: [
+    {
+      // tsconfig.json excludes specs from the build, so lint them without a project (as the root config does).
+      files: ['**/*.spec.ts'],
+      parserOptions: { project: null },
+    },
+  ],
   rules: {
     '@typescript-eslint/interface-name-prefix': 'off',
     '@typescript-eslint/explicit-function-return-type': 'off',

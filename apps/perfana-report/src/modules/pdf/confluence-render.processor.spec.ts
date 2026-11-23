@@ -17,7 +17,10 @@ function svgHandle(box: Box, topLevel = true) {
   };
 }
 
-function setup(svgs: ReturnType<typeof svgHandle>[], html = '<html>rendered</html>') {
+function setup(
+  svgs: ReturnType<typeof svgHandle>[],
+  html = '<html>rendered</html>'
+) {
   const page = {
     setViewport: jest.fn(),
     setContent: jest.fn(),
@@ -26,12 +29,14 @@ function setup(svgs: ReturnType<typeof svgHandle>[], html = '<html>rendered</htm
     content: jest.fn(async () => html),
     close: jest.fn(async () => undefined),
   };
-  const browserPool = { getBrowser: jest.fn(async () => ({ newPage: async () => page })) };
+  const browserPool = {
+    getBrowser: jest.fn(async () => ({ newPage: async () => page })),
+  };
   const reportRepo = { findOne: jest.fn() };
   const processor = new ConfluenceRenderProcessor(
     { get: (_k: string, d: string) => d } as never,
     browserPool as never,
-    reportRepo as never,
+    reportRepo as never
   );
   return { processor, page, reportRepo };
 }
@@ -79,16 +84,31 @@ describe('ConfluenceRenderProcessor.render', () => {
 
 describe('ConfluenceRenderProcessor.process', () => {
   it('writes the result under a per-job key with a TTL and returns only the key', async () => {
-    const { processor, reportRepo } = setup([svgHandle({ width: 800, height: 400 })]);
-    reportRepo.findOne.mockResolvedValue({ id: 'r1', html_content: '<html></html>' });
+    const { processor, reportRepo } = setup([
+      svgHandle({ width: 800, height: 400 }),
+    ]);
+    reportRepo.findOne.mockResolvedValue({
+      id: 'r1',
+      html_content: '<html></html>',
+    });
     const set = jest.fn();
     (processor as unknown as { redis: unknown }).redis = { set };
 
-    const out = await (processor as unknown as { process: (j: unknown) => Promise<unknown> }).process({ id: '42', data: { reportId: 'r1' } });
+    const out = await (
+      processor as unknown as { process: (j: unknown) => Promise<unknown> }
+    ).process({ id: '42', data: { reportId: 'r1' } });
 
     expect(out).toEqual({ resultKey: 'confluence-render:42' });
-    expect(set).toHaveBeenCalledWith('confluence-render:42', expect.any(String), 'EX', 600);
-    expect(JSON.parse(set.mock.calls[0][1])).toEqual({ html: '<html>rendered</html>', images: ['png-0-800'] });
+    expect(set).toHaveBeenCalledWith(
+      'confluence-render:42',
+      expect.any(String),
+      'EX',
+      600
+    );
+    expect(JSON.parse(set.mock.calls[0][1])).toEqual({
+      html: '<html>rendered</html>',
+      images: ['png-0-800'],
+    });
   });
 
   it('refuses a report with no HTML', async () => {
@@ -96,7 +116,9 @@ describe('ConfluenceRenderProcessor.process', () => {
     reportRepo.findOne.mockResolvedValue({ id: 'r1', html_content: null });
 
     await expect(
-      (processor as unknown as { process: (j: unknown) => Promise<unknown> }).process({ id: '1', data: { reportId: 'r1' } }),
+      (
+        processor as unknown as { process: (j: unknown) => Promise<unknown> }
+      ).process({ id: '1', data: { reportId: 'r1' } })
     ).rejects.toThrow('Report r1 has no HTML content');
   });
 
@@ -106,10 +128,20 @@ describe('ConfluenceRenderProcessor.process', () => {
    *   queue age; seam=none; no_claim=BullMQ scheduling (job object faked; unit only)
    */
   it('skips a job queued longer ago than the API waits, without loading or rendering the report', async () => {
-    const { processor, reportRepo } = setup([svgHandle({ width: 800, height: 400 })]);
-    const process = (processor as unknown as { process: (j: unknown) => Promise<unknown> }).process.bind(processor);
+    const { processor, reportRepo } = setup([
+      svgHandle({ width: 800, height: 400 }),
+    ]);
+    const process = (
+      processor as unknown as { process: (j: unknown) => Promise<unknown> }
+    ).process.bind(processor);
 
-    await expect(process({ id: '7', timestamp: Date.now() - 181_000, data: { reportId: 'r1' } })).rejects.toThrow(/the API stopped waiting/);
+    await expect(
+      process({
+        id: '7',
+        timestamp: Date.now() - 181_000,
+        data: { reportId: 'r1' },
+      })
+    ).rejects.toThrow(/the API stopped waiting/);
     expect(reportRepo.findOne).not.toHaveBeenCalled();
   });
 });
