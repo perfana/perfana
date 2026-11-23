@@ -111,14 +111,23 @@ const RAMP_UP_EXPR = `(
       -- Analysing the whole run is the honest fallback: the offsets are a request
       -- to trim, not a request to discard. Mirrored in MetricsPipeline so a newly
       -- ingested run is baked the same way.
-      EXTRACT(EPOCH FROM (tr.end_time - tr.start_time))
-        > COALESCE(tr.ramp_up, 0) + COALESCE(tr.ramp_down, 0)
-      AND (
-        EXTRACT(EPOCH FROM (m.time - tr.start_time)) < COALESCE(tr.ramp_up, 0)
-        OR (
-          COALESCE(tr.ramp_down, 0) > 0
-          AND EXTRACT(EPOCH FROM (m.time - tr.start_time))
-              > EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) - COALESCE(tr.ramp_down, 0)
+      --
+      -- A sample before start_time or after end_time is outside the run, whatever the
+      -- offsets say. Needed since a run's window can be narrowed after collection
+      -- (PUT /test-runs/:id/time-range): the re-fetch keeps the old tail's Grafana and
+      -- Dynatrace rows, and with ramp_down = 0 nothing else would exclude them.
+      m.time < tr.start_time
+      OR (tr.end_time IS NOT NULL AND m.time > tr.end_time)
+      OR (
+        EXTRACT(EPOCH FROM (tr.end_time - tr.start_time))
+          > COALESCE(tr.ramp_up, 0) + COALESCE(tr.ramp_down, 0)
+        AND (
+          EXTRACT(EPOCH FROM (m.time - tr.start_time)) < COALESCE(tr.ramp_up, 0)
+          OR (
+            COALESCE(tr.ramp_down, 0) > 0
+            AND EXTRACT(EPOCH FROM (m.time - tr.start_time))
+                > EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) - COALESCE(tr.ramp_down, 0)
+          )
         )
       )
     )`;
