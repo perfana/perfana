@@ -124,6 +124,61 @@ describe('UpdateTestRunTimesHandler', () => {
     expect(query).toHaveBeenCalledWith(expect.stringContaining('UPDATE test_runs'), [start, end, 3660, 'uuid-1']);
   });
 
+  /**
+   * Value: protects=the audit record of a time edit carrying the old and new window under the
+   * run's organization; fails_when=logUpdate is handed the re-read row twice (no diff), the
+   * pre-edit row is dropped, or the organizationIdOverride is lost so the entry lands outside
+   * the tenant; why_new=the first case asserted only that logUpdate was called; seam=none;
+   * no_claim=does not check what AuditService does with the pair.
+   */
+  it('audits the edit as a diff from the stored row to the re-read row, under the run organization', async () => {
+    const newEnd = new Date('2026-11-20T10:40:00Z');
+    const before = mockTestRun();
+    const after = mockTestRun({ endTime: newEnd, duration: 2400, organizationId: 'org-2' });
+    mockRepo.findOne.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+
+    await handler.execute({ id: 'uuid-1', endTime: newEnd });
+
+    expect(mockAudit.logUpdate).toHaveBeenCalledTimes(1);
+    const [loggedBefore, loggedAfter, opts] = mockAudit.logUpdate.mock.calls[0];
+    expect(loggedBefore).toBe(before);
+    expect(loggedAfter).toBe(after);
+    expect((loggedBefore as { endTime: Date }).endTime).toEqual(END);
+    expect((loggedAfter as { endTime: Date }).endTime).toEqual(newEnd);
+    expect(opts).toEqual({ organizationIdOverride: 'org-2' });
+  });
+
+  /**
+   * Value: protects=refusing an edit that would leave one bound NULL; fails_when=the
+   * both-required check is removed, so a run with no stored start gets an UPDATE with a NULL
+   * start_time and a NaN duration; why_new=every fixture had both bounds stored; seam=none;
+   * no_claim=does not cover a NULL stored end separately.
+   */
+  it('refuses to set only the end of a run that has no stored start', async () => {
+    mockRepo.findOne.mockResolvedValueOnce(mockTestRun({ startTime: null }));
+
+    await expect(handler.execute({ id: 'uuid-1', endTime: END })).rejects.toThrow(
+      'Both a start time and an end time are required',
+    );
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Value: protects=the int4 ceiling on the derived duration; fails_when=the
+   * MAX_DURATION_SECONDS check is removed, so a mistyped century in the start time reaches
+   * Postgres as an out-of-range integer and surfaces as a 500 instead of a 400;
+   * why_new=no case used a window longer than a day; seam=none; no_claim=does not pin the
+   * exact boundary value.
+   */
+  it('refuses a window whose duration does not fit the int4 column', async () => {
+    mockRepo.findOne.mockResolvedValueOnce(mockTestRun());
+
+    await expect(
+      handler.execute({ id: 'uuid-1', startTime: new Date('1900-01-01T00:00:00Z') }),
+    ).rejects.toThrow('Test run is too long');
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it('refuses a run it cannot see', async () => {
     mockRepo.findOne.mockResolvedValueOnce(null);
 

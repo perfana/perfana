@@ -126,6 +126,59 @@ it('refuses a start after the end locally and sends nothing', async () => {
 });
 
 /**
+ * Value: protects=recovering the form after the PUT itself throws; fails_when=the catch is
+ * removed (an unhandled rejection with no message) or the finally that clears savingTimes is
+ * dropped, leaving Save disabled on a spinner after one network failure; why_new=only a
+ * refused response was tested, never a rejected fetch; seam=none; no_claim=does not cover a
+ * non-JSON error body.
+ */
+it('shows a generic error and re-enables Save when the request fails outright', async () => {
+  fetchMock.mockImplementation((url: string) =>
+    url.endsWith('/time-range')
+      ? Promise.reject(new Error('network down'))
+      : Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve(null) }),
+  );
+  const onTestRunUpdate = jest.fn();
+  render(<TimingInformationSection testRun={makeTestRun()} onTestRunUpdate={onTestRunUpdate} />);
+
+  fireEvent.click(screen.getByRole('button', { name: /change start \/ end time/i }));
+  const start = new Date('2026-11-20T10:05:00.000Z');
+  fireEvent.change(screen.getByLabelText(/start time/i), {
+    target: { value: new Date(start.getTime() - start.getTimezoneOffset() * 60_000).toISOString().slice(0, 19) },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+  expect(await screen.findByText('Failed to update times')).toBeInTheDocument();
+  expect(onTestRunUpdate).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled();
+});
+
+/**
+ * Value: protects=Cancel discarding an unsaved time edit; fails_when=Cancel sends the PUT, or
+ * reopening the form shows the abandoned value instead of re-reading the stored times, so a
+ * later Save submits an edit the user cancelled; why_new=no test pressed Cancel; seam=none;
+ * no_claim=does not cover Cancel while a save is in flight.
+ */
+it('discards the edit on Cancel and reopens with the stored times', () => {
+  routeFetch({ ok: true, status: 200, json: () => Promise.resolve(makeTestRun()) });
+  render(<TimingInformationSection testRun={makeTestRun()} />);
+
+  fireEvent.click(screen.getByRole('button', { name: /change start \/ end time/i }));
+  const original = (screen.getByLabelText(/start time/i) as HTMLInputElement).value;
+  const start = new Date('2026-11-20T10:05:00.000Z');
+  fireEvent.change(screen.getByLabelText(/start time/i), {
+    target: { value: new Date(start.getTime() - start.getTimezoneOffset() * 60_000).toISOString().slice(0, 19) },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+  expect(screen.queryByLabelText(/start time/i)).not.toBeInTheDocument();
+  expect(putCalls()).toHaveLength(0);
+
+  fireEvent.click(screen.getByRole('button', { name: /change start \/ end time/i }));
+  expect((screen.getByLabelText(/start time/i) as HTMLInputElement).value).toBe(original);
+});
+
+/**
  * Value: protects=hiding the time edit entry point on a running run; fails_when=the
  * `testRun.completed` gate on the button is removed, offering an edit the API refuses and a
  * keep-alive would overwrite; why_new=pass 1 rendered only completed runs; seam=none;
