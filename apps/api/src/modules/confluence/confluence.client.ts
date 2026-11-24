@@ -149,19 +149,27 @@ export async function confluenceSpace(c: ConfluenceConnection, spaceKey: string,
   return { id: String(space.id), name: space.name };
 }
 
+/** Text the publish banner starts with; a page whose body lacks it was not published by Perfana. */
+export const PERFANA_PAGE_MARKER = 'Published from Perfana';
+
 /**
  * The current version of a page, or null when it no longer exists (deleted, or moved out of reach)
  * or sits outside the configured space. The space check matters because a page id is only unique
  * within one Confluence: after a connection is pointed at another host or space, the stored id can
- * name an unrelated page there, and updating it would overwrite someone else's page.
+ * name an unrelated page there, and updating it would overwrite someone else's page. With
+ * `perfanaOnly`, a page whose body does not carry the publish banner is null too.
  */
-async function currentVersion(c: ConfluenceConnection, pageId: string, spaceKey: string, opts: ConfluenceRequestOptions): Promise<number | null> {
-  const path = c.deployment === 'cloud' ? `/api/v2/pages/${encodeURIComponent(pageId)}` : `/rest/api/content/${encodeURIComponent(pageId)}?expand=version,space`;
+async function currentVersion(c: ConfluenceConnection, pageId: string, spaceKey: string, opts: ConfluenceRequestOptions, perfanaOnly = false): Promise<number | null> {
+  const id = encodeURIComponent(pageId);
+  const path = c.deployment === 'cloud'
+    ? `/api/v2/pages/${id}${perfanaOnly ? '?body-format=storage' : ''}`
+    : `/rest/api/content/${id}?expand=version,space${perfanaOnly ? ',body.storage' : ''}`;
   try {
-    const page = await call<{ version?: { number?: number }; spaceId?: string | number; space?: { key?: string } }>(c, path, { method: 'GET' }, opts);
+    const page = await call<{ version?: { number?: number }; spaceId?: string | number; space?: { key?: string }; body?: { storage?: { value?: string } } }>(c, path, { method: 'GET' }, opts);
     const inSpace = c.deployment === 'cloud'
       ? page.spaceId !== undefined && String(page.spaceId) === (await confluenceSpace(c, spaceKey, opts)).id
       : page.space?.key?.toUpperCase() === spaceKey.toUpperCase();
+    if (perfanaOnly && !page.body?.storage?.value?.includes(PERFANA_PAGE_MARKER)) return null;
     return inSpace ? page.version?.number ?? null : null;
   } catch (err) {
     if (err instanceof ConfluenceError && err.status === 404) return null;
@@ -186,24 +194,32 @@ export interface UpsertPageInput {
 export async function upsertPage(c: ConfluenceConnection, input: UpsertPageInput, opts: ConfluenceRequestOptions = {}): Promise<PublishedPage> {
   const version = input.existingPageId ? await currentVersion(c, input.existingPageId, input.spaceKey, opts) : null;
 
-  if (input.existingPageId && version !== null) {
-    const id = input.existingPageId;
-    const next = { number: version + 1, message: 'Republished from Perfana' };
-    const page =
-      c.deployment === 'cloud'
-        ? await call<Links>(c, `/api/v2/pages/${encodeURIComponent(id)}`, json('PUT', {
-            id, status: 'current', title: input.title, version: next,
-            body: { representation: 'storage', value: input.storage },
-          }), opts)
-        : await call<Links>(c, `/rest/api/content/${encodeURIComponent(id)}`, json('PUT', {
-            id, type: 'page', title: input.title, version: next,
-            body: { storage: { value: input.storage, representation: 'storage' } },
-          }), opts);
-    return { id, url: pageUrl(c, page, id) };
-  }
+  if (input.existingPageId && version !== null) return updatePage(c, input.existingPageId, version, input.title, input.storage, opts);
 
   const parentPageId = input.resolveParentPageId ? await input.resolveParentPageId() : input.parentPageId;
+  // Titles are unique per space on Data Center (and many Cloud spaces), so creating a page whose
+  // title is taken fails. A page of this title under the same parent that Perfana published (its
+  // body carries the banner) is this report's page, whose link was lost or which went out through
+  // another connection: update it. Any other page, wherever it sits, is never overwritten.
+  const sibling = (await pagesTitled(c, input.spaceKey, input.title, opts)).find((p) => p.under(parentPageId || null));
+  const siblingVersion = sibling ? await currentVersion(c, sibling.id, input.spaceKey, opts, true) : null;
+  if (sibling && siblingVersion !== null) return updatePage(c, sibling.id, siblingVersion, input.title, input.storage, opts);
   return createPage(c, input.spaceKey, parentPageId, input.title, input.storage, opts);
+}
+
+async function updatePage(c: ConfluenceConnection, id: string, version: number, title: string, storage: string, opts: ConfluenceRequestOptions): Promise<PublishedPage> {
+  const next = { number: version + 1, message: 'Republished from Perfana' };
+  const page =
+    c.deployment === 'cloud'
+      ? await call<Links>(c, `/api/v2/pages/${encodeURIComponent(id)}`, json('PUT', {
+          id, status: 'current', title, version: next,
+          body: { representation: 'storage', value: storage },
+        }), opts)
+      : await call<Links>(c, `/rest/api/content/${encodeURIComponent(id)}`, json('PUT', {
+          id, type: 'page', title, version: next,
+          body: { storage: { value: storage, representation: 'storage' } },
+        }), opts);
+  return { id, url: pageUrl(c, page, id) };
 }
 
 async function createPage(c: ConfluenceConnection, spaceKey: string, parentPageId: string | null | undefined, title: string, storage: string, opts: ConfluenceRequestOptions): Promise<PublishedPage> {
@@ -230,23 +246,38 @@ export function parsePagePath(path: string | null | undefined): string[] {
   return (path ?? '').split('/').map((t) => t.trim()).filter(Boolean);
 }
 
-/** A page with this title directly under `parentId` (or at the space root when null), else null. */
-async function findChildPage(c: ConfluenceConnection, spaceKey: string, parentId: string | null, title: string, opts: ConfluenceRequestOptions): Promise<string | null> {
+interface TitledPage {
+  id: string;
+  /** Whether the page sits directly under `parentId` (the space root when null). */
+  under: (parentId: string | null) => boolean;
+  /** Whether the page sits anywhere below `rootId` (the whole space when null). */
+  within: (rootId: string | null) => boolean;
+}
+
+/** Every current page with this title in the space. */
+async function pagesTitled(c: ConfluenceConnection, spaceKey: string, title: string, opts: ConfluenceRequestOptions): Promise<TitledPage[]> {
   if (c.deployment === 'cloud') {
     const space = await confluenceSpace(c, spaceKey, opts);
     const res = await call<{ results?: Array<{ id: string | number; parentId?: string | number | null }> }>(
       c, `/api/v2/pages?space-id=${encodeURIComponent(space.id)}&title=${encodeURIComponent(title)}&status=current&limit=250`, { method: 'GET' }, opts);
-    // Cloud files a top-level page under the space homepage, so at the root either counts.
-    const hit = res.results?.find((p) => (parentId ? String(p.parentId ?? '') === parentId : !p.parentId || String(p.parentId) === space.homepageId));
-    return hit ? String(hit.id) : null;
+    return (res?.results ?? []).map((p) => ({
+      id: String(p.id),
+      // Cloud files a top-level page under the space homepage, so at the root either counts.
+      under: (parentId) => (parentId ? String(p.parentId ?? '') === parentId : !p.parentId || String(p.parentId) === space.homepageId),
+      // ponytail: v2 search gives the parent only, so below a configured root only a direct child is known; walk ancestors if Cloud needs it.
+      within: (rootId) => !rootId || String(p.parentId ?? '') === rootId,
+    }));
   }
   const res = await call<{ results?: Array<{ id: string | number; ancestors?: Array<{ id: string | number }> }> }>(
     c, `/rest/api/content?type=page&spaceKey=${encodeURIComponent(spaceKey)}&title=${encodeURIComponent(title)}&expand=ancestors&limit=250`, { method: 'GET' }, opts);
-  const hit = res.results?.find((p) => {
+  return (res?.results ?? []).map((p) => {
     const direct = p.ancestors?.at(-1);
-    return parentId ? String(direct?.id ?? '') === parentId : !direct;
+    return {
+      id: String(p.id),
+      under: (parentId) => (parentId ? String(direct?.id ?? '') === parentId : !direct),
+      within: (rootId) => !rootId || (p.ancestors ?? []).some((a) => String(a.id) === rootId),
+    };
   });
-  return hit ? String(hit.id) : null;
 }
 
 // A container page lists what is published under it.
@@ -254,14 +285,20 @@ const CONTAINER_BODY = '<ac:structured-macro ac:name="children" ac:schema-versio
 
 /**
  * Walks `titles` down from `rootParentId` (the connection's parent page, or the space root),
- * creating each level that does not exist yet, and returns the id of the last one. Only a page
- * directly under the previous level counts as a match: a same-titled page elsewhere in the space
- * is never adopted, so a report cannot land under an unrelated page.
+ * creating each level that does not exist yet, and returns the id of the last one. A page directly
+ * under the previous level wins; failing that, the space's only page of that title is used when it
+ * sits below `rootParentId` (anywhere, when the connection has no parent page). Titles are unique
+ * per space on Data Center, so creating a second one would be refused, and a page made in the UI
+ * usually sits under the space homepage rather than at the root. Nothing outside the connection's
+ * parent page is ever adopted, so a report cannot land under an unrelated page.
  */
 export async function ensurePagePath(c: ConfluenceConnection, spaceKey: string, rootParentId: string | null | undefined, titles: string[], opts: ConfluenceRequestOptions = {}): Promise<string | null> {
-  let parent = rootParentId || null;
+  const root = rootParentId || null;
+  let parent = root;
   for (const title of titles) {
-    parent = (await findChildPage(c, spaceKey, parent, title, opts)) ?? (await createPage(c, spaceKey, parent, title, CONTAINER_BODY, opts)).id;
+    const pages = await pagesTitled(c, spaceKey, title, opts);
+    const hit = pages.find((p) => p.under(parent)) ?? (pages.length === 1 && pages[0]!.within(root) ? pages[0] : undefined);
+    parent = hit?.id ?? (await createPage(c, spaceKey, parent, title, CONTAINER_BODY, opts)).id;
   }
   return parent;
 }
@@ -271,8 +308,11 @@ export async function uploadAttachments(c: ConfluenceConnection, pageId: string,
   const base = `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`;
   const send = (path: string, method: string, batch: PageAttachment[]) => {
     const form = new FormData();
-    for (const f of batch) form.append('file', new Blob([new Uint8Array(f.data)], { type: f.contentType }), f.filename);
-    form.append('minorEdit', 'true');
+    // Data Center wants one minorEdit flag per file (or none); Cloud accepts either.
+    for (const f of batch) {
+      form.append('file', new Blob([new Uint8Array(f.data)], { type: f.contentType }), f.filename);
+      form.append('minorEdit', 'true');
+    }
     // Confluence's XSRF check refuses a multipart POST/PUT without this header.
     return call(c, path, { method, headers: { 'X-Atlassian-Token': 'no-check' }, body: form }, { timeoutMs: 120_000, ...opts });
   };

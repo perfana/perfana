@@ -18,6 +18,7 @@ import {
   confluenceSpace,
   ensurePagePath,
   parsePagePath,
+  PERFANA_PAGE_MARKER,
   uploadAttachments,
   upsertPage,
 } from './confluence.client';
@@ -197,7 +198,7 @@ export class ConfluenceService {
     const { storage, chartIndexes } = htmlToStorage(rendered.html);
     const publishedAt = new Date();
     const banner =
-      `<ac:structured-macro ac:name="info"><ac:rich-text-body><p>Published from Perfana on ${publishedAt.toISOString().slice(0, 16).replace('T', ' ')} UTC. ` +
+      `<ac:structured-macro ac:name="info"><ac:rich-text-body><p>${PERFANA_PAGE_MARKER} on ${publishedAt.toISOString().slice(0, 16).replace('T', ' ')} UTC. ` +
       `<a href="${escapeAttr(`${appUrl}/test-runs/${encodeURIComponent(testRunId)}`)}">Open test run ${escapeText(testRunId)} in Perfana</a> for the interactive version.</p></ac:rich-text-body></ac:structured-macro>`;
 
     const conn = this.connectionOf(config);

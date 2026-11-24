@@ -39,7 +39,7 @@ place, possibly several levels deep:
 2. For each connection, enter a **page path**, with the levels separated by `/`, for example `Performance / Payment API / Load tests`.
 3. Click **Save**.
 
-The path is created below the connection's parent page (or at the space root if it has none) the next time a report of this system is published. Levels that already exist directly under the level above are reused. Leave the field empty to go back to the connection's parent page.
+The path is created below the connection's parent page (or at the space root if it has none) the next time a report of this system is published. Levels that already exist are reused: a page directly under the level above, or else the space's only page with that title, as long as it sits below the connection's parent page. Leave the field empty to go back to the connection's parent page.
 
 A report that was published before keeps its page where it is; only reports published for the first time land under the new path.
 
@@ -61,6 +61,6 @@ Publishing needs the same permission as sharing a report: you must be able to up
 
 - *Confluence rejected the credentials (401)*: the token is wrong or expired, or on Cloud the email does not belong to the token.
 - *The Confluence account lacks permission (403)*: the account cannot add pages in that space. Ask the space administrator for **Add page** and **Add attachment** permission.
-- *A page with this title already exists*: Confluence titles are unique within a space. Choose another title. If it names a level of a system's page path, a page with that title exists elsewhere in the space: rename that level in the system's **Confluence** tab.
+- *A page with this title already exists*: Confluence titles are unique within a space. Choose another title. A page of the same title that Perfana published earlier, directly under the page the report goes to, is updated rather than refused; any other page with that title is left alone.
 - *Confluence answered with something other than JSON*: the URL points at a login page or a proxy, not at Confluence itself. Check the context path, for example `/confluence`.
 - *The report service did not render the charts in time*: the `perfana-report` service is not running, or is busy. Perfana waits three minutes for the charts. Try again; ask your Perfana administrator if it keeps happening.
