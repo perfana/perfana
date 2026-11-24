@@ -120,16 +120,46 @@ describe('confluence client', () => {
       .rejects.toBeInstanceOf(ConfluenceError);
   });
 
-  it('uploads attachments with PUT (create or replace) in batches of 10, with the XSRF header', async () => {
-    const url = 'PUT https://wiki.acme.io/confluence/rest/api/content/123/child/attachment';
+  it('uploads Cloud attachments with PUT (create or replace) in batches of 10, with the XSRF header', async () => {
+    const url = 'PUT https://acme.atlassian.net/wiki/rest/api/content/123/child/attachment';
     const { impl, calls } = fakeFetch({ [url]: { body: { results: [] } } });
     const files = Array.from({ length: 12 }, (_, i) => ({ filename: `chart-${i}.png`, data: Buffer.from([i]), contentType: 'image/png' }));
-    await uploadAttachments(dc, '123', files, { fetchImpl: impl });
+    await uploadAttachments(cloud, '123', files, { fetchImpl: impl });
 
-    expect(calls).toHaveLength(2);
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([url, url]);
     expect(calls[0]!.headers['X-Atlassian-Token']).toBe('no-check');
     expect((calls[0]!.body as FormData).getAll('file')).toHaveLength(10);
     expect((calls[1]!.body as FormData).getAll('file')).toHaveLength(2);
+  });
+
+  /*
+   * Value: protects=publishing to Data Center, which answers PUT on the attachment collection with 405;
+   *   fails_when=Data Center is sent the Cloud PUT, or an existing file is re-POSTed instead of replaced;
+   *   why_new=the only upload test used PUT against a Data Center connection, mirroring the mock;
+   *   seam=none; no_claim=real Data Center (fake fetch; unit only)
+   */
+  it('on Data Center POSTs new files in batches and replaces existing ones through their /data endpoint, never PUT', async () => {
+    const root = 'https://wiki.acme.io/confluence/rest/api/content/123/child/attachment';
+    const { impl, calls } = fakeFetch({
+      [`GET ${root}?limit=1000`]: { body: { results: [{ id: 'att7', title: 'chart-0.png' }] } },
+      [`POST ${root}`]: { body: { results: [] } },
+      [`POST ${root}/att7/data`]: { body: {} },
+    });
+    const files = Array.from({ length: 12 }, (_, i) => ({ filename: `chart-${i}.png`, data: Buffer.from([i]), contentType: 'image/png' }));
+    await uploadAttachments(dc, '123', files, { fetchImpl: impl });
+
+    expect(calls.filter((c) => c.method === 'PUT')).toEqual([]);
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([`GET ${root}?limit=1000`, `POST ${root}`, `POST ${root}`, `POST ${root}/att7/data`]);
+    expect((calls[1]!.body as FormData).getAll('file')).toHaveLength(10);
+    expect((calls[2]!.body as FormData).getAll('file')).toHaveLength(1);
+    expect(((calls[3]!.body as FormData).get('file') as File).name).toBe('chart-0.png');
+    expect(calls.slice(1).every((c) => c.headers['X-Atlassian-Token'] === 'no-check')).toBe(true);
+  });
+
+  it('names the refused call when Confluence gives no reason', async () => {
+    const impl = (async () => new Response('', { status: 405 })) as unknown as typeof fetch;
+    await expect(uploadAttachments(cloud, '123', [{ filename: 'a.png', data: Buffer.from([1]), contentType: 'image/png' }], { fetchImpl: impl }))
+      .rejects.toThrow('Confluence answered HTTP 405 to PUT /rest/api/content/123/child/attachment');
   });
 
   /*

@@ -6,8 +6,10 @@ import type { ConfluenceDeployment } from '@perfana/shared/entities';
  *
  * Pages: Cloud uses REST v2 (`/wiki/api/v2/pages`), because Atlassian has been retiring the v1
  * content endpoints there; Data Center / Server only has v1 (`/rest/api/content`). Attachments are
- * v1 on both, since v2 has no upload — `PUT .../child/attachment` creates or replaces by filename,
- * which is what makes a republish idempotent.
+ * v1 on both, since v2 has no upload. Cloud creates or replaces by filename with one
+ * `PUT .../child/attachment`; Data Center has no such PUT (it answers 405), so there a new file is
+ * POSTed and an existing one replaced through `.../child/attachment/{id}/data`. Either way a
+ * republish is idempotent.
  */
 
 export interface ConfluenceConnection {
@@ -95,7 +97,8 @@ async function call<T>(c: ConfluenceConnection, path: string, init: RequestInit,
     const reason = extractMessage(text);
     if (res.status === 401) throw new ConfluenceError('Confluence rejected the credentials (401)', 401);
     if (res.status === 403) throw new ConfluenceError(`The Confluence account lacks permission for this (403)${reason ? `: ${reason}` : ''}`, 403);
-    throw new ConfluenceError(reason ?? `Confluence answered HTTP ${res.status}`, res.status);
+    // Name the call: a bare status says nothing about which of the publish steps was refused.
+    throw new ConfluenceError(reason ?? `Confluence answered HTTP ${res.status} to ${init.method ?? 'GET'} ${path.split('?')[0]}`, res.status);
   }
   if (!text) return undefined as T;
   try {
@@ -259,17 +262,31 @@ export async function ensurePagePath(c: ConfluenceConnection, spaceKey: string, 
 
 /** Creates or replaces each file by name on the page. */
 export async function uploadAttachments(c: ConfluenceConnection, pageId: string, files: PageAttachment[], opts: ConfluenceRequestOptions = {}): Promise<void> {
-  for (let i = 0; i < files.length; i += ATTACHMENTS_PER_REQUEST) {
+  const base = `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`;
+  const send = (path: string, method: string, batch: PageAttachment[]) => {
     const form = new FormData();
-    for (const f of files.slice(i, i + ATTACHMENTS_PER_REQUEST)) {
-      form.append('file', new Blob([new Uint8Array(f.data)], { type: f.contentType }), f.filename);
-    }
+    for (const f of batch) form.append('file', new Blob([new Uint8Array(f.data)], { type: f.contentType }), f.filename);
     form.append('minorEdit', 'true');
     // Confluence's XSRF check refuses a multipart POST/PUT without this header.
-    await call(c, `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, {
-      method: 'PUT',
-      headers: { 'X-Atlassian-Token': 'no-check' },
-      body: form,
-    }, { timeoutMs: 120_000, ...opts });
+    return call(c, path, { method, headers: { 'X-Atlassian-Token': 'no-check' }, body: form }, { timeoutMs: 120_000, ...opts });
+  };
+  const batches = (list: PageAttachment[]) =>
+    Array.from({ length: Math.ceil(list.length / ATTACHMENTS_PER_REQUEST) }, (_, i) => list.slice(i * ATTACHMENTS_PER_REQUEST, (i + 1) * ATTACHMENTS_PER_REQUEST));
+
+  // Cloud's PUT on the collection creates or replaces by filename in one call.
+  if (c.deployment === 'cloud') {
+    for (const batch of batches(files)) await send(base, 'PUT', batch);
+    return;
+  }
+
+  // Data Center / Server has no PUT on the collection (405): POST creates, and a file that is
+  // already there must be replaced through its own .../{attachmentId}/data, or the POST is refused.
+  // ponytail: one listing page of 1000; a page with more attachments than that re-POSTs the rest and fails loudly.
+  const listed = await call<{ results?: Array<{ id: string; title: string }> }>(c, `${base}?limit=1000`, { method: 'GET' }, opts);
+  const existing = new Map((listed?.results ?? []).map((a) => [a.title, String(a.id)]));
+  for (const batch of batches(files.filter((f) => !existing.has(f.filename)))) await send(base, 'POST', batch);
+  for (const f of files) {
+    const id = existing.get(f.filename);
+    if (id) await send(`${base}/${encodeURIComponent(id)}/data`, 'POST', [f]);
   }
 }
