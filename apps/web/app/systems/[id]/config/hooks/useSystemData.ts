@@ -10,7 +10,8 @@ import { fetchPyroscopeInstances } from '@/lib/pyroscope';
 import { fetchSplunkConfigs } from '@/lib/splunk';
 import { fetchConfluenceConfigs } from '@/lib/confluence';
 
-export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'splunk' | 'confluence' | 'notifications' | 'templates' | 'adapt-settings';
+const TAB_IDS = ['grafana', 'slo', 'deep-links', 'dynatrace', 'tracing', 'pyroscope', 'splunk', 'confluence', 'notifications', 'templates', 'adapt-settings'] as const;
+export type TabId = (typeof TAB_IDS)[number];
 
 interface UseSystemDataProps {
   onDashboardsLoad?: (systemId: string, environment: string) => void;
@@ -208,7 +209,8 @@ export function useSystemData({
         const decodedTabParam = decodeURIComponent(tabParam);
         if (TAB_NAME_MAPPING[decodedTabParam] !== undefined) {
           setActiveTab(TAB_NAME_MAPPING[decodedTabParam]);
-        } else if (TAB_INDEX_MAPPING.includes(decodedTabParam as TabId)) {
+        } else if ((TAB_IDS as readonly string[]).includes(decodedTabParam)) {
+          // Every tab id: the legacy index list lacks the newer tabs (confluence, adapt-settings).
           // Try as TabId directly (e.g. ?tab=dynatrace)
           setActiveTab(decodedTabParam as TabId);
         }
