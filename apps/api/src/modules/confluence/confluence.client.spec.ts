@@ -9,6 +9,8 @@ function fakeFetch(routes: Record<string, { status?: number; body?: unknown }>) 
     const method = init.method ?? 'GET';
     calls.push({ url, method, headers: init.headers as Record<string, string>, body: init.body });
     const route = routes[`${method} ${url}`];
+    // A title search nobody routed finds nothing.
+    if (!route && method === 'GET' && url.includes('title=')) return new Response('{"results":[]}', { status: 200 });
     if (!route) return new Response('{"message":"no route"}', { status: 404 });
     return new Response(route.body === undefined ? '' : JSON.stringify(route.body), { status: route.status ?? 200 });
   }) as unknown as typeof fetch;
@@ -25,14 +27,13 @@ describe('confluence client', () => {
     expect(parsePagePath(null)).toEqual([]);
   });
 
-  it('walks a Data Center page path, reusing a level directly under its parent and creating the missing one', async () => {
+  it('walks a Data Center page path, preferring the level directly under its parent and creating the missing one', async () => {
     const base = 'https://wiki.acme.io/confluence/rest/api/content';
     const q = (title: string) => `GET ${base}?type=page&spaceKey=PERF&title=${encodeURIComponent(title)}&expand=ancestors&limit=250`;
     const { impl, calls } = fakeFetch({
       // "Performance" exists under 77; a same-titled page elsewhere must not be adopted.
       [q('Performance')]: { body: { results: [{ id: 1, ancestors: [{ id: 5 }] }, { id: 100, ancestors: [{ id: 3 }, { id: 77 }] }] } },
-      // "MyApp" only exists under another parent, so it is created under 100.
-      [q('MyApp')]: { body: { results: [{ id: 2, ancestors: [{ id: 999 }] }] } },
+      // "MyApp" does not exist yet, so it is created under 100.
       [`POST ${base}`]: { body: { id: 200, _links: { webui: '/display/PERF/MyApp' } } },
     });
 
@@ -77,6 +78,45 @@ describe('confluence client', () => {
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
   });
 
+  /*
+   * Value: protects=a configured page path whose level already exists elsewhere in the space (a page made
+   *   in the UI sits under the space homepage) is reused, where creating it is refused as a duplicate title;
+   *   fails_when=the sole-match fallback is dropped; why_new=production 400 "A page with this title already
+   *   exists" on Data Center; seam=none; no_claim=real Confluence (fake fetch; unit only)
+   */
+  it('reuses the space\'s only page of a path title even when it is not directly under the expected parent', async () => {
+    const q = 'GET https://wiki.acme.io/confluence/rest/api/content?type=page&spaceKey=PERF&title=Perfana&expand=ancestors&limit=250';
+    const { impl, calls } = fakeFetch({ [q]: { body: { results: [{ id: 41, ancestors: [{ id: 1 }] }] } } });
+
+    expect(await ensurePagePath(dc, 'PERF', null, ['Perfana'], { fetchImpl: impl })).toBe('41');
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  /*
+   * Value: protects=publishing a report whose title already names a page under the same parent updates that
+   *   page instead of failing on the duplicate title, while one elsewhere is never overwritten;
+   *   fails_when=the sibling lookup is removed or ignores the parent; why_new=production 400 on first publish
+   *   of a title that existed; seam=none; no_claim=real Confluence (fake fetch; unit only)
+   */
+  it('updates the page of the same title under the same parent instead of creating a duplicate', async () => {
+    const base = 'https://wiki.acme.io/confluence/rest/api/content';
+    const q = `GET ${base}?type=page&spaceKey=PERF&title=T&expand=ancestors&limit=250`;
+    const { impl, calls } = fakeFetch({
+      [q]: { body: { results: [{ id: 300, ancestors: [{ id: 9 }] }] } },
+      [`GET ${base}/300?expand=version,space`]: { body: { version: { number: 2 }, space: { key: 'PERF' } } },
+      [`PUT ${base}/300`]: { body: { _links: { webui: '/display/PERF/T' } } },
+    });
+    expect((await upsertPage(dc, { spaceKey: 'PERF', parentPageId: '9', title: 'T', storage: '' }, { fetchImpl: impl })).id).toBe('300');
+    expect(JSON.parse(calls.at(-1)!.body as string).version.number).toBe(3);
+
+    const elsewhere = fakeFetch({
+      [q]: { body: { results: [{ id: 300, ancestors: [{ id: 8 }] }] } },
+      [`POST ${base}`]: { body: { id: 301, _links: { webui: '/display/PERF/T' } } },
+    });
+    await upsertPage(dc, { spaceKey: 'PERF', parentPageId: '9', title: 'T', storage: '' }, { fetchImpl: elsewhere.impl });
+    expect(elsewhere.calls.filter((c) => c.method === 'PUT')).toEqual([]);
+  });
+
   it('creates a Cloud page through v2 under /wiki, resolving the space key to its id, with Basic auth', async () => {
     const { impl, calls } = fakeFetch({
       'GET https://acme.atlassian.net/wiki/api/v2/spaces?keys=PERF': { body: { results: [{ id: 42, name: 'Perf' }] } },
@@ -85,7 +125,7 @@ describe('confluence client', () => {
     const page = await upsertPage(cloud, { spaceKey: 'PERF', parentPageId: '77', title: 'T', storage: '<p>x</p>' }, { fetchImpl: impl });
 
     expect(page).toEqual({ id: '9001', url: 'https://acme.atlassian.net/wiki/spaces/PERF/pages/9001' });
-    expect(JSON.parse(calls[1]!.body as string)).toEqual({
+    expect(JSON.parse(calls.find((c) => c.method === 'POST')!.body as string)).toEqual({
       spaceId: '42', status: 'current', title: 'T', parentId: '77', body: { representation: 'storage', value: '<p>x</p>' },
     });
     expect(calls[0]!.headers.Authorization).toBe(`Basic ${Buffer.from('me@acme.io:tok').toString('base64')}`);
@@ -133,7 +173,7 @@ describe('confluence client', () => {
     const page = await upsertPage(dc, { spaceKey: 'PERF', parentPageId: '9', existingPageId: '123', title: 'T', storage: '' }, { fetchImpl: impl });
 
     expect(page.id).toBe('555');
-    expect(JSON.parse(calls[1]!.body as string)).toMatchObject({ type: 'page', space: { key: 'PERF' }, ancestors: [{ id: '9' }] });
+    expect(JSON.parse(calls.at(-1)!.body as string)).toMatchObject({ type: 'page', space: { key: 'PERF' }, ancestors: [{ id: '9' }] });
   });
 
   it.each([
@@ -174,6 +214,9 @@ describe('confluence client', () => {
     expect(calls[0]!.headers['X-Atlassian-Token']).toBe('no-check');
     expect((calls[0]!.body as FormData).getAll('file')).toHaveLength(10);
     expect((calls[1]!.body as FormData).getAll('file')).toHaveLength(2);
+    // Data Center refuses a multipart upload whose minorEdit count differs from its file count.
+    expect((calls[0]!.body as FormData).getAll('minorEdit')).toHaveLength(10);
+    expect((calls[1]!.body as FormData).getAll('minorEdit')).toHaveLength(2);
   });
 
   /*

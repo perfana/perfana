@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.99] - 2026-11-24
+
+### Fixed
+- **Publishing to Confluence under a page path that already exists no longer fails with "A page with this title already exists".** A level of a system's page path, such as `Perfana / reports`, was reused only when it sat directly under the level above, so on Data Center a `Perfana` page made in the UI (which sits under the space homepage) was missed and created again. The space's only page with that title is now used wherever it sits. A report whose title already names a page under the same parent updates that page instead of failing.
+- **Charts attached to a Confluence Data Center page load again.** Uploading several charts in one request failed with "Must have the same number of attachment files and minorEdits flag".
+
 ## [0.2.97.98] - 2026-11-24
 
 ### Changed
