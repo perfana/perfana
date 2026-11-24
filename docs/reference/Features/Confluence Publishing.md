@@ -48,8 +48,12 @@ Publishes a generated report as a Confluence page (v0.2.97.95, migration 1835). 
    `generated_reports`) straight after the upsert, before any upload. If the upload then fails, a
    retry updates this page rather than creating a second one, which Confluence would refuse anyway
    because titles are unique per space.
-6. **Upload charts** with v1 `PUT .../child/attachment` (create-or-replace by filename, so republish
-   is idempotent), 10 files per request, `X-Atlassian-Token: no-check`.
+6. **Upload charts**, 10 files per request with `X-Atlassian-Token: no-check`, so republish is
+   idempotent. Cloud: one v1 `PUT .../child/attachment` per batch (create-or-replace by filename).
+   Data Center has **no** PUT on that collection and answers 405 (fixed in v0.2.97.98; the local mock
+   accepted it, which is how it shipped): the page's attachments are listed once, new files are
+   POSTed to the collection, and a file already there is replaced through
+   `POST .../child/attachment/{id}/data` (a second POST of the same name is refused).
 7. Stamp `confluence_published_at` once the uploads succeed. A page recorded with no
    `confluence_published_at` (or an older one) is a publish whose upload failed.
 
