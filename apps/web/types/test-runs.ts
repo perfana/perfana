@@ -90,6 +90,8 @@ export interface SystemUnderTest {
   pyroscope_instance_id?: string;
   pyroscope_configurations?: PyroscopeConfiguration[];
   pyroscopeInstance?: PyroscopeInstance;
+  /** Confluence connection id -> page path this system's reports are published under. */
+  confluence_parent_pages?: Record<string, string>;
   team?: {
     id: string;
     name: string;

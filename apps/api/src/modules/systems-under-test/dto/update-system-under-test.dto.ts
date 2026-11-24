@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsUUID, IsString, IsOptional } from 'class-validator';
+import { IsUUID, IsString, IsOptional, IsObject } from 'class-validator';
 
 /**
  * DTO for updating general System Under Test properties
@@ -41,4 +41,17 @@ export class UpdateSystemUnderTestDto {
   @IsOptional()
   @IsString()
   tracing_service?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Confluence parent page per connection: connection id -> page path, levels separated by "/". ' +
+      'Reports of this system are published under that path, below the connection\'s parent page; ' +
+      'missing levels are created. Replaces the whole map; an empty path removes the entry.',
+    example: { '550e8400-e29b-41d4-a716-446655440000': 'Performance / Payment API' },
+    type: 'object',
+    additionalProperties: { type: 'string' },
+  })
+  @IsOptional()
+  @IsObject()
+  confluence_parent_pages?: Record<string, string>;
 }

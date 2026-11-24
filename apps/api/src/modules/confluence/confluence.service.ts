@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OwnedResource } from '@perfana/shared';
-import { ConfluenceConfig, GeneratedReport } from '../../entities';
+import { ConfluenceConfig, GeneratedReport, SystemUnderTest } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
@@ -16,6 +16,8 @@ import {
   ConfluenceError,
   ConfluenceRequestOptions,
   confluenceSpace,
+  ensurePagePath,
+  parsePagePath,
   uploadAttachments,
   upsertPage,
 } from './confluence.client';
@@ -57,6 +59,7 @@ export class ConfluenceService {
   constructor(
     @InjectRepository(ConfluenceConfig) private readonly configRepo: Repository<ConfluenceConfig>,
     @InjectRepository(GeneratedReport) private readonly reportRepo: Repository<GeneratedReport>,
+    @InjectRepository(SystemUnderTest) private readonly sutRepo: Repository<SystemUnderTest>,
     private readonly authzService: AuthorizationService,
     private readonly auditService: AuditService,
     private readonly proxyResolver: ProxyResolverService,
@@ -201,9 +204,10 @@ export class ConfluenceService {
     const opts = await this.requestOptions(config.organizationId, config.useProxy);
     const charts = [...new Set(chartIndexes)].filter((i) => rendered.images[i]);
     try {
+      const parentPageId = await this.parentPageFor(conn, config, report.test_run?.systemUnderTestId, opts);
       const page = await upsertPage(conn, {
         spaceKey: config.spaceKey,
-        parentPageId: config.parentPageId,
+        parentPageId,
         existingPageId: report.confluence_config_id === config.id ? report.confluence_page_id : null,
         title,
         storage: banner + storage,
@@ -256,6 +260,18 @@ export class ConfluenceService {
       this.logger.warn(`Confluence connection test to ${new URL(conn.baseUrl).host} failed: ${errMsg(err)}`);
       return { success: false, message: errMsg(err) };
     }
+  }
+
+  /**
+   * The connection's parent page, or the system's page path below it when the system sets one for
+   * this connection; missing levels are created. A report published before keeps its page where it
+   * is: updating a page never moves it.
+   */
+  private async parentPageFor(conn: ConfluenceConnection, config: ConfluenceConfig, sutId: string | undefined, opts: ConfluenceRequestOptions): Promise<string | null> {
+    const sut = sutId ? await withRequestEm(this.sutRepo).findOne({ where: { id: sutId }, select: ['id', 'confluence_parent_pages'] }) : null;
+    const titles = parsePagePath(sut?.confluence_parent_pages?.[config.id]);
+    if (titles.length === 0) return config.parentPageId ?? null;
+    return ensurePagePath(conn, config.spaceKey, config.parentPageId, titles, opts);
   }
 
   private connectionOf(c: ConfluenceConfig): ConfluenceConnection {

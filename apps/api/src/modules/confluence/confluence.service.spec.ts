@@ -9,17 +9,18 @@
  */
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfluenceService } from './confluence.service';
-import { ConfluenceError, confluenceSpace, upsertPage, uploadAttachments } from './confluence.client';
+import { ConfluenceError, confluenceSpace, ensurePagePath, upsertPage, uploadAttachments } from './confluence.client';
 import { chartFilename } from './storage-format';
 
 jest.mock('./confluence.client', () => {
   const actual = jest.requireActual('./confluence.client');
-  return { ...actual, upsertPage: jest.fn(), uploadAttachments: jest.fn(), confluenceSpace: jest.fn() };
+  return { ...actual, upsertPage: jest.fn(), uploadAttachments: jest.fn(), confluenceSpace: jest.fn(), ensurePagePath: jest.fn() };
 });
 
 const mockedUpsert = upsertPage as jest.MockedFunction<typeof upsertPage>;
 const mockedUpload = uploadAttachments as jest.MockedFunction<typeof uploadAttachments>;
 const mockedSpace = confluenceSpace as jest.MockedFunction<typeof confluenceSpace>;
+const mockedEnsurePath = ensurePagePath as jest.MockedFunction<typeof ensurePagePath>;
 
 const ORG_A = '00000000-0000-0000-0000-00000000000a';
 const ORG_B = '00000000-0000-0000-0000-00000000000b';
@@ -41,7 +42,7 @@ const storedConfig = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function build(opts: { caps?: string[] } = {}) {
+function build(opts: { caps?: string[]; sutParentPages?: Record<string, string> } = {}) {
   const configRepo = {
     create: jest.fn((x) => x),
     save: jest.fn(async (x) => ({ id: CFG, ...x })),
@@ -50,6 +51,10 @@ function build(opts: { caps?: string[] } = {}) {
     target: 'ConfluenceConfig',
   };
   const reportRepo = { update: jest.fn(), target: 'GeneratedReport' };
+  const sutRepo = {
+    findOne: jest.fn(async () => ({ id: 'sut-1', confluence_parent_pages: opts.sutParentPages ?? {} })),
+    target: 'SystemUnderTest',
+  };
   const authz = {
     getAccessibleOrganizations: jest.fn(async () => [ORG_A]),
     isGlobalAdmin: jest.fn(() => false),
@@ -67,7 +72,7 @@ function build(opts: { caps?: string[] } = {}) {
       name: 'Load test report',
       html_content: '<html></html>',
       test_run_id: 'run-uuid',
-      test_run: { testRunId: 'SYSTEM-env-load-0001', organizationId: ORG_A },
+      test_run: { testRunId: 'SYSTEM-env-load-0001', organizationId: ORG_A, systemUnderTestId: 'sut-1' },
       confluence_config_id: CFG,
       confluence_page_id: '9001',
     })),
@@ -79,18 +84,39 @@ function build(opts: { caps?: string[] } = {}) {
     })),
   };
   const service = new ConfluenceService(
-    configRepo as never, reportRepo as never, authz as never, audit as never,
+    configRepo as never, reportRepo as never, sutRepo as never, authz as never, audit as never,
     proxy as never, reports as never, renderer as never,
   );
-  return { service, configRepo, reportRepo, authz, reports, renderer };
+  return { service, configRepo, reportRepo, sutRepo, authz, reports, renderer };
 }
 
 beforeEach(() => {
   mockedUpsert.mockReset().mockResolvedValue({ id: '9001', url: 'https://example.atlassian.net/wiki/spaces/SPACE/pages/9001' });
   mockedUpload.mockReset().mockResolvedValue(undefined);
+  mockedEnsurePath.mockReset().mockResolvedValue('5555');
 });
 
 describe('ConfluenceService.publishReport', () => {
+  it("publishes under the system's page path for this connection, resolved below the connection's parent page", async () => {
+    const { service, configRepo } = build({ sutParentPages: { [CFG]: 'Performance / MyApp', [OTHER_CFG]: 'Elsewhere' } });
+    configRepo.findOne.mockResolvedValue(storedConfig({ parentPageId: '77' }));
+
+    await service.publishReport(REPORT, { configId: CFG }, 'u', [], 'https://perfana.example.com');
+
+    expect(mockedEnsurePath).toHaveBeenCalledWith(expect.anything(), 'SPACE', '77', ['Performance', 'MyApp'], expect.anything());
+    expect(mockedUpsert.mock.calls[0]![1].parentPageId).toBe('5555');
+  });
+
+  it("falls back to the connection's parent page when the system sets no path for this connection", async () => {
+    const { service, configRepo } = build({ sutParentPages: { [OTHER_CFG]: 'Elsewhere' } });
+    configRepo.findOne.mockResolvedValue(storedConfig({ parentPageId: '77' }));
+
+    await service.publishReport(REPORT, { configId: CFG }, 'u', [], 'https://perfana.example.com');
+
+    expect(mockedEnsurePath).not.toHaveBeenCalled();
+    expect(mockedUpsert.mock.calls[0]![1].parentPageId).toBe('77');
+  });
+
   it("refuses a connection that belongs to another organization than the report's run, before rendering or calling Confluence", async () => {
     const { service, configRepo, renderer, reportRepo } = build();
     configRepo.findOne.mockResolvedValue(storedConfig({ organizationId: ORG_B }));

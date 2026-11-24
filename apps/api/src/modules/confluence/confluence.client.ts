@@ -135,12 +135,12 @@ function pageUrl(c: ConfluenceConnection, page: Links, fallbackId: string): stri
 }
 
 /** Resolves the space and returns its display name; doubles as the connection test. */
-export async function confluenceSpace(c: ConfluenceConnection, spaceKey: string, opts: ConfluenceRequestOptions = {}): Promise<{ id: string; name: string }> {
+export async function confluenceSpace(c: ConfluenceConnection, spaceKey: string, opts: ConfluenceRequestOptions = {}): Promise<{ id: string; name: string; homepageId?: string }> {
   if (c.deployment === 'cloud') {
-    const res = await call<{ results: Array<{ id: string; name: string }> }>(c, `/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`, { method: 'GET' }, opts);
+    const res = await call<{ results: Array<{ id: string; name: string; homepageId?: string | number | null }> }>(c, `/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`, { method: 'GET' }, opts);
     const space = res.results?.[0];
     if (!space) throw new ConfluenceError(`Space "${spaceKey}" was not found, or this account cannot see it`, 404);
-    return { id: String(space.id), name: space.name };
+    return { id: String(space.id), name: space.name, ...(space.homepageId ? { homepageId: String(space.homepageId) } : {}) };
   }
   const space = await call<{ id: number; name: string }>(c, `/rest/api/space/${encodeURIComponent(spaceKey)}`, { method: 'GET' }, opts);
   return { id: String(space.id), name: space.name };
@@ -194,21 +194,67 @@ export async function upsertPage(c: ConfluenceConnection, input: UpsertPageInput
     return { id, url: pageUrl(c, page, id) };
   }
 
+  return createPage(c, input.spaceKey, input.parentPageId, input.title, input.storage, opts);
+}
+
+async function createPage(c: ConfluenceConnection, spaceKey: string, parentPageId: string | null | undefined, title: string, storage: string, opts: ConfluenceRequestOptions): Promise<PublishedPage> {
   if (c.deployment === 'cloud') {
-    const space = await confluenceSpace(c, input.spaceKey, opts);
+    const space = await confluenceSpace(c, spaceKey, opts);
     const page = await call<Links & { id: string }>(c, '/api/v2/pages', json('POST', {
-      spaceId: space.id, status: 'current', title: input.title,
-      ...(input.parentPageId ? { parentId: input.parentPageId } : {}),
-      body: { representation: 'storage', value: input.storage },
+      spaceId: space.id, status: 'current', title,
+      ...(parentPageId ? { parentId: parentPageId } : {}),
+      body: { representation: 'storage', value: storage },
     }), opts);
     return { id: String(page.id), url: pageUrl(c, page, String(page.id)) };
   }
   const page = await call<Links & { id: string }>(c, '/rest/api/content', json('POST', {
-    type: 'page', title: input.title, space: { key: input.spaceKey },
-    ...(input.parentPageId ? { ancestors: [{ id: input.parentPageId }] } : {}),
-    body: { storage: { value: input.storage, representation: 'storage' } },
+    type: 'page', title, space: { key: spaceKey },
+    ...(parentPageId ? { ancestors: [{ id: parentPageId }] } : {}),
+    body: { storage: { value: storage, representation: 'storage' } },
   }), opts);
   return { id: String(page.id), url: pageUrl(c, page, String(page.id)) };
+}
+
+/** Splits "A / B / C" into its page titles; empty segments are dropped. */
+export function parsePagePath(path: string | null | undefined): string[] {
+  // ponytail: '/' is the separator, so a title that itself contains '/' cannot be a path level.
+  return (path ?? '').split('/').map((t) => t.trim()).filter(Boolean);
+}
+
+/** A page with this title directly under `parentId` (or at the space root when null), else null. */
+async function findChildPage(c: ConfluenceConnection, spaceKey: string, parentId: string | null, title: string, opts: ConfluenceRequestOptions): Promise<string | null> {
+  if (c.deployment === 'cloud') {
+    const space = await confluenceSpace(c, spaceKey, opts);
+    const res = await call<{ results?: Array<{ id: string | number; parentId?: string | number | null }> }>(
+      c, `/api/v2/pages?space-id=${encodeURIComponent(space.id)}&title=${encodeURIComponent(title)}&status=current&limit=250`, { method: 'GET' }, opts);
+    // Cloud files a top-level page under the space homepage, so at the root either counts.
+    const hit = res.results?.find((p) => (parentId ? String(p.parentId ?? '') === parentId : !p.parentId || String(p.parentId) === space.homepageId));
+    return hit ? String(hit.id) : null;
+  }
+  const res = await call<{ results?: Array<{ id: string | number; ancestors?: Array<{ id: string | number }> }> }>(
+    c, `/rest/api/content?type=page&spaceKey=${encodeURIComponent(spaceKey)}&title=${encodeURIComponent(title)}&expand=ancestors&limit=250`, { method: 'GET' }, opts);
+  const hit = res.results?.find((p) => {
+    const direct = p.ancestors?.at(-1);
+    return parentId ? String(direct?.id ?? '') === parentId : !direct;
+  });
+  return hit ? String(hit.id) : null;
+}
+
+// A container page lists what is published under it.
+const CONTAINER_BODY = '<ac:structured-macro ac:name="children" ac:schema-version="2" />';
+
+/**
+ * Walks `titles` down from `rootParentId` (the connection's parent page, or the space root),
+ * creating each level that does not exist yet, and returns the id of the last one. Only a page
+ * directly under the previous level counts as a match: a same-titled page elsewhere in the space
+ * is never adopted, so a report cannot land under an unrelated page.
+ */
+export async function ensurePagePath(c: ConfluenceConnection, spaceKey: string, rootParentId: string | null | undefined, titles: string[], opts: ConfluenceRequestOptions = {}): Promise<string | null> {
+  let parent = rootParentId || null;
+  for (const title of titles) {
+    parent = (await findChildPage(c, spaceKey, parent, title, opts)) ?? (await createPage(c, spaceKey, parent, title, CONTAINER_BODY, opts)).id;
+  }
+  return parent;
 }
 
 /** Creates or replaces each file by name on the page. */

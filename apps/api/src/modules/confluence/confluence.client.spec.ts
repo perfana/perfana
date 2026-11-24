@@ -1,4 +1,4 @@
-import { ConfluenceConnection, ConfluenceError, uploadAttachments, upsertPage } from './confluence.client';
+import { ConfluenceConnection, ConfluenceError, ensurePagePath, parsePagePath, uploadAttachments, upsertPage } from './confluence.client';
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
 
@@ -19,6 +19,41 @@ const cloud: ConfluenceConnection = { baseUrl: 'https://acme.atlassian.net', dep
 const dc: ConfluenceConnection = { baseUrl: 'https://wiki.acme.io/confluence', deployment: 'datacenter', apiToken: 'pat' };
 
 describe('confluence client', () => {
+  it('parses a page path into trimmed titles, dropping empty levels', () => {
+    expect(parsePagePath(' Performance /  MyApp // Reports ')).toEqual(['Performance', 'MyApp', 'Reports']);
+    expect(parsePagePath('')).toEqual([]);
+    expect(parsePagePath(null)).toEqual([]);
+  });
+
+  it('walks a Data Center page path, reusing a level directly under its parent and creating the missing one', async () => {
+    const base = 'https://wiki.acme.io/confluence/rest/api/content';
+    const q = (title: string) => `GET ${base}?type=page&spaceKey=PERF&title=${encodeURIComponent(title)}&expand=ancestors&limit=250`;
+    const { impl, calls } = fakeFetch({
+      // "Performance" exists under 77; a same-titled page elsewhere must not be adopted.
+      [q('Performance')]: { body: { results: [{ id: 1, ancestors: [{ id: 5 }] }, { id: 100, ancestors: [{ id: 3 }, { id: 77 }] }] } },
+      // "MyApp" only exists under another parent, so it is created under 100.
+      [q('MyApp')]: { body: { results: [{ id: 2, ancestors: [{ id: 999 }] }] } },
+      [`POST ${base}`]: { body: { id: 200, _links: { webui: '/display/PERF/MyApp' } } },
+    });
+
+    const id = await ensurePagePath(dc, 'PERF', '77', ['Performance', 'MyApp'], { fetchImpl: impl });
+
+    expect(id).toBe('200');
+    const created = calls.filter((c) => c.method === 'POST');
+    expect(created).toHaveLength(1);
+    expect(JSON.parse(created[0]!.body as string)).toMatchObject({ title: 'MyApp', ancestors: [{ id: '100' }], space: { key: 'PERF' } });
+  });
+
+  it('treats a Cloud page under the space homepage as a root-level match when the connection has no parent', async () => {
+    const { impl, calls } = fakeFetch({
+      'GET https://acme.atlassian.net/wiki/api/v2/spaces?keys=PERF': { body: { results: [{ id: 42, name: 'Perf', homepageId: 10 }] } },
+      'GET https://acme.atlassian.net/wiki/api/v2/pages?space-id=42&title=Performance&status=current&limit=250': { body: { results: [{ id: '300', parentId: '10' }] } },
+    });
+
+    expect(await ensurePagePath(cloud, 'PERF', null, ['Performance'], { fetchImpl: impl })).toBe('300');
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
   it('creates a Cloud page through v2 under /wiki, resolving the space key to its id, with Basic auth', async () => {
     const { impl, calls } = fakeFetch({
       'GET https://acme.atlassian.net/wiki/api/v2/spaces?keys=PERF': { body: { results: [{ id: 42, name: 'Perf' }] } },
