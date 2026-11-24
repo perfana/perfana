@@ -155,3 +155,68 @@ it('adds a group under its group name', async () => {
   expect(onAddSeries).toHaveBeenCalledTimes(1);
   expect(onAddSeries.mock.calls[0][0].map((p: { metricName: string }) => p.metricName)).toEqual(['api']);
 });
+
+/*
+ * Value: protects=Graphs (podsByDefault) lists a grouped panel's raw pods, from the grouped answer's own
+ *   membership, with "show groups" to switch back, and keeps the switch off an ungrouped panel;
+ *   fails_when=the Graphs picker lists group names again (groups are for comparing runs) or the switch
+ *   appears on every panel; why_new=only the groups-by-default mode was covered; seam=none;
+ *   no_claim=the chart's raw read of a pod name (fetches mocked; unit only)
+ */
+describe('with podsByDefault (Graphs)', () => {
+  it('lists the pods of a grouped panel, not its groups, and switches to the groups and back', async () => {
+    const user = userEvent.setup();
+    setup({ podsByDefault: true });
+    await pickEverything();
+
+    await waitFor(() => expect(screen.getByText(POD_A)).toBeInTheDocument());
+    expect(screen.getByText(POD_C)).toBeInTheDocument();
+    expect(screen.queryByTestId('series-members-badge')).not.toBeInTheDocument();
+    // The grouped answer is expanded locally: no per-pod request.
+    expect((fetchSeriesForPanels as jest.Mock).mock.calls.every((call) => call.length === 2)).toBe(true);
+    // Only the grouped panel offers the switch; the JVM panel has nothing to group.
+    expect(screen.getAllByRole('button', { name: 'Show groups' })).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Show groups' }));
+    await waitFor(() => expect(screen.getByTestId('series-members-badge')).toBeInTheDocument());
+    expect(screen.queryByText(POD_A)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show individual pods' }));
+    await waitFor(() => expect(screen.getByText(POD_A)).toBeInTheDocument());
+  });
+
+  it('adds a pod under its own name', async () => {
+    const { onAddSeries } = setup({ podsByDefault: true });
+    await pickEverything();
+    await waitFor(() => expect(screen.getByText(POD_B)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText(POD_B));
+    fireEvent.click(screen.getByRole('button', { name: /^Add/ }));
+
+    expect(onAddSeries.mock.calls[0][0].map((p: { metricName: string }) => p.metricName)).toEqual([POD_B]);
+  });
+});
+
+describe('expandGroupsToPods', () => {
+  const { expandGroupsToPods } = jest.requireActual('../metric-options') as typeof import('../metric-options');
+
+  it('lists each pod once across the series a group emits, keeps ungrouped series, and records the groups', () => {
+    const out = expandGroupsToPods([
+      { metricName: 'api (avg)', panel: cpu, members: [POD_A, POD_B] },
+      { metricName: 'api (sum)', panel: cpu, members: [POD_A, POD_B] },
+      { metricName: 'standalone', panel: cpu },
+    ]);
+    expect(out.map((o) => o.metricName)).toEqual([POD_A, POD_B, 'standalone']);
+    expect(out[0]!.fromGroups).toEqual(['api (avg)', 'api (sum)']);
+    expect(out[0]!.members).toBeUndefined();
+    expect(out[2]!.fromGroups).toBeUndefined();
+  });
+
+  it('keeps the same pod name on two panels apart', () => {
+    const out = expandGroupsToPods([
+      { metricName: 'api (avg)', panel: cpu, members: [POD_A] },
+      { metricName: 'api (avg)', panel: heap, members: [POD_A] },
+    ]);
+    expect(out).toHaveLength(2);
+  });
+});
