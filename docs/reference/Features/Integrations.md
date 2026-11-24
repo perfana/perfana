@@ -232,4 +232,4 @@ unchanged.
 
 ## Confluence
 
-Publishes generated reports as Confluence pages (Cloud and Data Center 7.9+). Not a metrics source: it is configured on the Integrations page like the others, and used from the Reports card's share menu. Design and limits: [[Confluence Publishing]]; operator guide: `docs-user/docs/integrations/connect-confluence.md`.
+Publishes generated reports as Confluence pages (Cloud and Data Center 7.9+). Not a metrics source: it is configured on the Integrations page like the others, and used from the Reports card's share menu. A system can publish under its own page path below the connection's parent page, set per connection in the system's **Confluence** configuration tab (`systems_under_test.confluence_parent_pages`, v0.2.97.97). Design and limits: [[Confluence Publishing]]; operator guide: `docs-user/docs/integrations/connect-confluence.md`.

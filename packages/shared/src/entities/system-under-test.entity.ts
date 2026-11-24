@@ -48,6 +48,13 @@ export class SystemUnderTest {
   pyroscope_configurations?: Array<{ application: string; profiler: string }>;
 
   /**
+   * Confluence connection id -> page path ("Performance / MyApp") that this system's reports are
+   * published under, below the connection's own parent page. Missing key = the connection's parent.
+   */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb", name: 'confluence_parent_pages' })
+  confluence_parent_pages!: Record<string, string>;
+
+  /**
    * Background-deletion state, mirroring `test_runs.deletion_status` and
    * `application_dashboards.deletion_status`: NULL when idle, `queued` before the job is
    * enqueued, `deleting` while a worker holds it, `failed` once retries are exhausted. The

@@ -26,7 +26,8 @@ You **don't** create a SUT in the web app. Perfana creates one automatically the
    - **Grafana dashboards**
    - **Service Level Objectives** — see [Define SLOs](define-slos.md)
    - **Deep Links**
-   - **Dynatrace**, **Distributed Tracing**, **Pyroscope**
+   - **Dynatrace**, **Distributed Tracing**, **Pyroscope**, **Splunk**
+   - **Confluence** — the page this system's reports are published under; see [Connect Confluence](../integrations/connect-confluence.md#publish-a-systems-reports-under-its-own-page)
    - **Notifications**
    - **Reporting Templates** — see [Manage reporting templates](reporting-templates.md)
    - **ADAPT Settings** — see [Configure ADAPT](adapt-settings.md)

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.97] - 2026-11-24
+
+### Added
+- **Publish each system's reports under its own Confluence page.** A new **Confluence** tab in a system's configuration, shown once a Confluence connection exists, takes a page path per connection, such as `Performance / Payment API / Load tests`. Reports of that system are then published under that path, below the connection's own parent page, and levels that do not exist yet are created on the next publish. A level is reused only when it sits directly under the level above, so a same-titled page elsewhere in the space is never taken over. Leaving the field empty publishes under the connection's parent page as before. A report that was published earlier keeps its page where it is, and republishing it creates no pages. CI can set it with `PATCH /api/systems-under-test/:id` and `confluence_parent_pages`.
+
+### Fixed
+- **Publishing to Confluence Data Center no longer fails with "Confluence answered HTTP 405".** The charts were uploaded with a call only Confluence Cloud accepts; Data Center now gets its own upload, which also replaces the charts of a page published before. A Confluence error that carries no reason of its own now names the request that was refused.
+- **Reloading a system's configuration page on the ADAPT Settings tab opens that tab again** instead of Grafana dashboards. A `?tab=` link to any tab now opens it.
+- **A system settings change the API refuses now says why.** `PATCH /api/systems-under-test/:id` returns the refusal's own status and message, such as a 400 naming the invalid field, instead of a 500 reading "Failed to update system under test".
+
 ## [0.2.97.96] - 2026-11-23
 
 ### Added

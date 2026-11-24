@@ -38,20 +38,55 @@ Publishes a generated report as a Confluence page (v0.2.97.95, migration 1835). 
    since report HTML is stored — a pill-shaped span in one of the five `PILL_FILLS` colours. The
    Comparisons "Show rows" filter (`.report-band-filter`) is dropped; expand titles join the
    summary's parts with " · ". Output is built by hand as XHTML (escaped, every tag closed).
-4. **Upsert the page.** Cloud uses REST v2 (`/wiki/api/v2/pages`; Atlassian is retiring v1 content
+4. **Resolve the parent page.** The connection's `parent_page_id` (NULL = space root), or, when the
+   report's system sets a page path for this connection in `systems_under_test.confluence_parent_pages`
+   (v0.2.97.97, migration 1836), that path below it — see "Per-system parent pages".
+5. **Upsert the page.** Cloud uses REST v2 (`/wiki/api/v2/pages`; Atlassian is retiring v1 content
    endpoints there), Data Center v1 (`/rest/api/content`). A report republished to the same
    connection updates `confluence_page_id` as version n+1, but only while that page still sits in
    the connection's configured space: a page id is unique only within one Confluence, so after the
    connection is pointed at another host or space the stored id could name an unrelated page.
    A page that 404s or is outside the space gets a new page instead.
-5. **Record the page** (`confluence_config_id`, `confluence_page_id`, `confluence_page_url` on
+6. **Record the page** (`confluence_config_id`, `confluence_page_id`, `confluence_page_url` on
    `generated_reports`) straight after the upsert, before any upload. If the upload then fails, a
    retry updates this page rather than creating a second one, which Confluence would refuse anyway
    because titles are unique per space.
-6. **Upload charts** with v1 `PUT .../child/attachment` (create-or-replace by filename, so republish
-   is idempotent), 10 files per request, `X-Atlassian-Token: no-check`.
-7. Stamp `confluence_published_at` once the uploads succeed. A page recorded with no
+7. **Upload charts**, 10 files per request with `X-Atlassian-Token: no-check`, so republish is
+   idempotent. Cloud: one v1 `PUT .../child/attachment` per batch (create-or-replace by filename).
+   Data Center has **no** PUT on that collection and answers 405 (fixed in v0.2.97.97; the local mock
+   accepted it, which is how it shipped): the page's attachments are listed once, new files are
+   POSTed to the collection, and a file already there is replaced through
+   `POST .../child/attachment/{id}/data` (a second POST of the same name is refused).
+8. Stamp `confluence_published_at` once the uploads succeed. A page recorded with no
    `confluence_published_at` (or an older one) is a publish whose upload failed.
+
+## Per-system parent pages
+
+`systems_under_test.confluence_parent_pages` (jsonb, default `{}`) maps a connection id to a page
+path such as `Performance / MyApp`, edited in the system's **Confluence** settings tab (shown only
+when a Confluence connection exists) and saved through `PATCH /api/systems-under-test/:id`, which
+replaces the whole map. `normalizeConfluenceParentPages` validates it (a refusal is a 400 with the reason; `null` clears the map): keys must be uuids, at most 10
+levels of at most 255 characters, an empty path removes the entry, paths are stored as `A / B / C`.
+
+On publish `ensurePagePath` (`confluence.client.ts`) walks the titles down from the connection's
+parent page, creating each missing level with a `children` macro body. Four things to know:
+
+1. **A level matches only a page DIRECTLY under the previous level.** A same-titled page elsewhere
+   in the space is never adopted, so a report cannot land under an unrelated page. On Data Center,
+   where titles are unique per space, such a page makes the create fail with Confluence's own
+   "title already exists" message; rename the level.
+2. **At the space root on Cloud, a page under the space homepage counts as root-level**, because
+   Cloud files top-level pages under the homepage (`homepageId` from `GET /api/v2/spaces`).
+3. **Republishing never moves a page, and never walks the path.** `upsertPage` resolves the parent
+   (`resolveParentPageId`) only when it creates a page, so a report published before keeps its page
+   where it is when the path changes, and its republish neither creates container pages nor fails on a
+   Data Center title clash in the new path. Only new reports (or one whose page was deleted) land
+   under the new path. Two first publishes of one system at the same moment can create the same
+   container twice on Cloud, which allows duplicate titles; Data Center refuses the second.
+4. **A map on the system, not a table.** It is edited and deleted with the system, travels in the
+   SUT export, and a key naming a connection that does not exist (deleted, or from another
+   environment after an import) is ignored. `/` is the separator, so a title containing `/` cannot
+   be a level.
 
 ## Connections
 

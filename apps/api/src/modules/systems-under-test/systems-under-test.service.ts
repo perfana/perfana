@@ -13,10 +13,12 @@ import { withRequestEm } from '../../common/db/request-em';
 import { CreateSystemUnderTestDto, UpdatePyroscopeConfigDto } from './dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
+import { parsePagePath } from '../confluence/confluence.client';
 
 export interface SystemSummary {
   id: string;
   name: string;
+  organization_id?: string;
   description?: string;
   team_id?: string | null;
   team?: {
@@ -29,6 +31,7 @@ export interface SystemSummary {
   }>;
   pyroscope_instance_id?: string;
   pyroscope_configurations?: Array<{ application: string; profiler: string }>;
+  confluence_parent_pages?: Record<string, string>;
   created_at: string;
 }
 
@@ -44,6 +47,7 @@ export interface UpdateSystemUnderTestDto {
   description?: string;
   team_id?: string | null;
   tracing_service?: string;
+  confluence_parent_pages?: Record<string, string>;
 }
 
 /**
@@ -341,10 +345,12 @@ export class SystemsUnderTestService {
       return {
         id: system.id,
         name: system.name,
+        organization_id: system.organization_id,
         description: system.description,
         environments,
         pyroscope_instance_id: system.pyroscope_instance_id,
         pyroscope_configurations: system.pyroscope_configurations,
+        confluence_parent_pages: system.confluence_parent_pages ?? {},
         created_at: system.created_at.toISOString(),
       };
     } catch (error) {
@@ -518,13 +524,17 @@ export class SystemsUnderTestService {
       const systemBefore = Object.assign(new SystemUnderTestEntity(), system);
 
       // Build update object, handling null values explicitly for TypeORM
-      const updateData: Record<string, string | null | undefined> = {};
+      const updateData: Record<string, string | null | undefined | Record<string, string>> = {};
       if (updateDto.name !== undefined) updateData.name = updateDto.name;
       if (updateDto.description !== undefined) updateData.description = updateDto.description;
       if (updateDto.tracing_service !== undefined) updateData.tracing_service = updateDto.tracing_service;
       if (updateDto.team_id !== undefined) {
         // Explicitly handle null to set column to NULL
         updateData.team_id = updateDto.team_id;
+      }
+
+      if (updateDto.confluence_parent_pages !== undefined) {
+        updateData.confluence_parent_pages = normalizeConfluenceParentPages(updateDto.confluence_parent_pages ?? {}); // null clears the map
       }
 
       // Always update the updated_by field
@@ -686,4 +696,22 @@ export class SystemsUnderTestService {
       throw error;
     }
   }
+}
+
+const MAX_PAGE_PATH_LEVELS = 10;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Validates the connection-id -> page-path map and stores each path as "A / B / C". */
+export function normalizeConfluenceParentPages(raw: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [configId, path] of Object.entries(raw)) {
+    if (!UUID_RE.test(configId)) throw new BadRequestException(`confluence_parent_pages: "${configId}" is not a connection id`);
+    if (path !== null && typeof path !== 'string') throw new BadRequestException('confluence_parent_pages: a page path must be a string');
+    const titles = parsePagePath(path);
+    if (titles.length === 0) continue;
+    if (titles.length > MAX_PAGE_PATH_LEVELS) throw new BadRequestException(`confluence_parent_pages: at most ${MAX_PAGE_PATH_LEVELS} levels`);
+    if (titles.some((t) => t.length > 255)) throw new BadRequestException('confluence_parent_pages: a page title is at most 255 characters');
+    out[configId.toLowerCase()] = titles.join(' / ');
+  }
+  return out;
 }

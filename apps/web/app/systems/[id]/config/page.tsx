@@ -21,6 +21,7 @@ import {
   Notifications as NotificationsIcon,
   Description as DescriptionIcon,
   TuneRounded as TuneIcon,
+  MenuBook as MenuBookIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/auth-context';
 import { GLOBAL_ADMIN_ROLES } from '@/lib/constants/roles';
@@ -39,6 +40,7 @@ import DynatraceSection from './components/DynatraceSection';
 import DistributedTracingSection from './components/DistributedTracingSection';
 import PyroscopeSection from './components/PyroscopeSection';
 import SplunkSection from './components/SplunkSection';
+import ConfluenceSection from './components/ConfluenceSection';
 import NotificationsSection from './components/NotificationsSection';
 import ReportingTemplatesSection from './components/ReportingTemplatesSection';
 import AdaptSettingsSection from './components/AdaptSettingsSection';
@@ -214,6 +216,7 @@ export default function SystemConfigurationPage() {
             {systemData.hasTracing && <Tab value="tracing" icon={<TimelineIcon />} label="Distributed Tracing" />}
             {systemData.hasPyroscope && <Tab value="pyroscope" icon={<MemoryIcon />} label="Pyroscope" />}
             {systemData.hasSplunk && <Tab value="splunk" icon={<ArticleIcon />} label="Splunk" />}
+            {systemData.hasConfluence && <Tab value="confluence" icon={<MenuBookIcon />} label="Confluence" />}
             <Tab value="notifications" icon={<NotificationsIcon />} label="Notifications" />
             <Tab value="templates" icon={<DescriptionIcon />} label="Reporting Templates" />
             <Tab value="adapt-settings" icon={<TuneIcon />} label="ADAPT Settings" />
@@ -319,6 +322,9 @@ export default function SystemConfigurationPage() {
               selectedEnvironment={selectedEnvironment}
               selectedWorkload={selectedWorkload}
             />
+          )}
+          {activeTab === 'confluence' && systemData.hasConfluence && (
+            <ConfluenceSection systemUnderTest={system} onUpdate={systemData.setSystem} />
           )}
           {activeTab === 'notifications' && (
             <NotificationsSection systemId={systemId} systemName={system.name} />

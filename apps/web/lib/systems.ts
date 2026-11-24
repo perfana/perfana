@@ -30,6 +30,8 @@ export interface UpdateSystemUnderTestDto {
   description?: string;
   team_id?: string | null;
   tracing_service?: string;
+  /** Confluence connection id -> page path ("Performance / MyApp"); replaces the whole map. */
+  confluence_parent_pages?: Record<string, string>;
 }
 
 /**

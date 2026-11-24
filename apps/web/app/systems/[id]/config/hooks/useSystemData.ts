@@ -8,8 +8,10 @@ import { fetchDynatraceConfigs } from '@/lib/dynatrace';
 import { fetchTracingInstances } from '@/lib/distributed-tracing';
 import { fetchPyroscopeInstances } from '@/lib/pyroscope';
 import { fetchSplunkConfigs } from '@/lib/splunk';
+import { fetchConfluenceConfigs } from '@/lib/confluence';
 
-export type TabId = 'grafana' | 'slo' | 'deep-links' | 'dynatrace' | 'tracing' | 'pyroscope' | 'splunk' | 'notifications' | 'templates' | 'adapt-settings';
+const TAB_IDS = ['grafana', 'slo', 'deep-links', 'dynatrace', 'tracing', 'pyroscope', 'splunk', 'confluence', 'notifications', 'templates', 'adapt-settings'] as const;
+export type TabId = (typeof TAB_IDS)[number];
 
 interface UseSystemDataProps {
   onDashboardsLoad?: (systemId: string, environment: string) => void;
@@ -37,6 +39,7 @@ interface UseSystemDataReturn {
   hasTracing: boolean;
   hasPyroscope: boolean;
   hasSplunk: boolean;
+  hasConfluence: boolean;
 
   // Handlers
   handleEnvironmentChange: (environment: string) => void;
@@ -55,6 +58,7 @@ const TAB_NAME_MAPPING: { [key: string]: TabId } = {
   'Distributed Tracing': 'tracing',
   'Pyroscope': 'pyroscope',
   'Splunk': 'splunk',
+  'Confluence': 'confluence',
   'Notifications': 'notifications',
   'Reporting Templates': 'templates',
 };
@@ -91,16 +95,19 @@ export function useSystemData({
   const [hasTracing, setHasTracing] = useState(false);
   const [hasPyroscope, setHasPyroscope] = useState(false);
   const [hasSplunk, setHasSplunk] = useState(false);
+  const [hasConfluence, setHasConfluence] = useState(false);
 
   // Fetch integration availability
   const fetchIntegrations = useCallback(async () => {
     try {
-      const [dynatraceConfigs, tracingInstances, pyroscopeInstances, splunkConfigs] = await Promise.all([
+      const [dynatraceConfigs, tracingInstances, pyroscopeInstances, splunkConfigs, confluenceConfigs] = await Promise.all([
         fetchDynatraceConfigs().catch(() => []),
         fetchTracingInstances().catch(() => []),
         fetchPyroscopeInstances().catch(() => []),
         fetchSplunkConfigs().catch(() => []),
+        fetchConfluenceConfigs().catch(() => []),
       ]);
+      setHasConfluence(confluenceConfigs.length > 0);
       setHasSplunk(splunkConfigs.length > 0);
       setHasDynatrace(dynatraceConfigs.length > 0);
       setHasTracing(tracingInstances.length > 0);
@@ -202,7 +209,8 @@ export function useSystemData({
         const decodedTabParam = decodeURIComponent(tabParam);
         if (TAB_NAME_MAPPING[decodedTabParam] !== undefined) {
           setActiveTab(TAB_NAME_MAPPING[decodedTabParam]);
-        } else if (TAB_INDEX_MAPPING.includes(decodedTabParam as TabId)) {
+        } else if ((TAB_IDS as readonly string[]).includes(decodedTabParam)) {
+          // Every tab id: the legacy index list lacks the newer tabs (confluence, adapt-settings).
           // Try as TabId directly (e.g. ?tab=dynatrace)
           setActiveTab(decodedTabParam as TabId);
         }
@@ -279,6 +287,7 @@ export function useSystemData({
     hasTracing,
     hasPyroscope,
     hasSplunk,
+    hasConfluence,
     handleEnvironmentChange,
     handleWorkloadChange,
     handleTabChange,

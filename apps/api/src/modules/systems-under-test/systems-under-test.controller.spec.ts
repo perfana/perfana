@@ -4,7 +4,7 @@ import { SystemsUnderTestService, SystemSummary } from './systems-under-test.ser
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
 import { SystemUnderTestDeletionProcessor } from './processors/system-under-test-deletion.processor';
 import { SystemUnderTest as SystemUnderTestEntity } from '../../entities';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { UserContext } from '../../common/decorators/user-context.decorator';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
@@ -476,6 +476,32 @@ describe('SystemsUnderTestController', () => {
    * must not call the handler, an in-flight delete must not enqueue a second time, and the
    * synchronous arm must be reachable only when the queue is not.
    */
+  describe('update', () => {
+    /*
+     * Value: protects=a validation error from the service (e.g. a bad Confluence connection id) reaches the
+     *   client as its own 400 with its reason; fails_when=the catch block turns every non-"not found" error
+     *   into a 500 again (found by /ship smoke QA: PATCH answered 500); why_new=no controller test covered
+     *   update's error mapping; seam=none; no_claim=ValidationPipe and the HTTP layer (controller called directly)
+     */
+    it('lets a deliberate HTTP error from the service through with its status and reason', async () => {
+      service.update.mockRejectedValue(new BadRequestException('confluence_parent_pages: "x" is not a connection id'));
+
+      const err = await controller.update('sys-123', mockUserContext, { confluence_parent_pages: { x: 'A' } }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect(err.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect(err.message).toContain('is not a connection id');
+    });
+
+    it('still answers 500 for an unexpected failure', async () => {
+      service.update.mockRejectedValue(new Error('connection reset'));
+
+      const err = await controller.update('sys-123', mockUserContext, { name: 'x' }).catch((e) => e);
+
+      expect(err.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
+    });
+  });
+
   describe('remove', () => {
     it('queues the cascade and does not run it in the request', async () => {
       service.findOne.mockResolvedValue(mockSystemUnderTest);

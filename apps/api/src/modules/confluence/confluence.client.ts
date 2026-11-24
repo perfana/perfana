@@ -6,8 +6,10 @@ import type { ConfluenceDeployment } from '@perfana/shared/entities';
  *
  * Pages: Cloud uses REST v2 (`/wiki/api/v2/pages`), because Atlassian has been retiring the v1
  * content endpoints there; Data Center / Server only has v1 (`/rest/api/content`). Attachments are
- * v1 on both, since v2 has no upload — `PUT .../child/attachment` creates or replaces by filename,
- * which is what makes a republish idempotent.
+ * v1 on both, since v2 has no upload. Cloud creates or replaces by filename with one
+ * `PUT .../child/attachment`; Data Center has no such PUT (it answers 405), so there a new file is
+ * POSTed and an existing one replaced through `.../child/attachment/{id}/data`. Either way a
+ * republish is idempotent.
  */
 
 export interface ConfluenceConnection {
@@ -95,7 +97,8 @@ async function call<T>(c: ConfluenceConnection, path: string, init: RequestInit,
     const reason = extractMessage(text);
     if (res.status === 401) throw new ConfluenceError('Confluence rejected the credentials (401)', 401);
     if (res.status === 403) throw new ConfluenceError(`The Confluence account lacks permission for this (403)${reason ? `: ${reason}` : ''}`, 403);
-    throw new ConfluenceError(reason ?? `Confluence answered HTTP ${res.status}`, res.status);
+    // Name the call: a bare status says nothing about which of the publish steps was refused.
+    throw new ConfluenceError(reason ?? `Confluence answered HTTP ${res.status} to ${init.method ?? 'GET'} ${path.split('?')[0]}`, res.status);
   }
   if (!text) return undefined as T;
   try {
@@ -135,12 +138,12 @@ function pageUrl(c: ConfluenceConnection, page: Links, fallbackId: string): stri
 }
 
 /** Resolves the space and returns its display name; doubles as the connection test. */
-export async function confluenceSpace(c: ConfluenceConnection, spaceKey: string, opts: ConfluenceRequestOptions = {}): Promise<{ id: string; name: string }> {
+export async function confluenceSpace(c: ConfluenceConnection, spaceKey: string, opts: ConfluenceRequestOptions = {}): Promise<{ id: string; name: string; homepageId?: string }> {
   if (c.deployment === 'cloud') {
-    const res = await call<{ results: Array<{ id: string; name: string }> }>(c, `/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`, { method: 'GET' }, opts);
+    const res = await call<{ results: Array<{ id: string; name: string; homepageId?: string | number | null }> }>(c, `/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`, { method: 'GET' }, opts);
     const space = res.results?.[0];
     if (!space) throw new ConfluenceError(`Space "${spaceKey}" was not found, or this account cannot see it`, 404);
-    return { id: String(space.id), name: space.name };
+    return { id: String(space.id), name: space.name, ...(space.homepageId ? { homepageId: String(space.homepageId) } : {}) };
   }
   const space = await call<{ id: number; name: string }>(c, `/rest/api/space/${encodeURIComponent(spaceKey)}`, { method: 'GET' }, opts);
   return { id: String(space.id), name: space.name };
@@ -169,6 +172,11 @@ async function currentVersion(c: ConfluenceConnection, pageId: string, spaceKey:
 export interface UpsertPageInput {
   spaceKey: string;
   parentPageId?: string | null;
+  /**
+   * Resolves the parent instead of `parentPageId`, called only when a page is created: a republish
+   * that updates its page in place never walks (or creates) a page path it would not use.
+   */
+  resolveParentPageId?: () => Promise<string | null>;
   /** The page this report was published to before; updated in place when it still exists. */
   existingPageId?: string | null;
   title: string;
@@ -194,36 +202,97 @@ export async function upsertPage(c: ConfluenceConnection, input: UpsertPageInput
     return { id, url: pageUrl(c, page, id) };
   }
 
+  const parentPageId = input.resolveParentPageId ? await input.resolveParentPageId() : input.parentPageId;
+  return createPage(c, input.spaceKey, parentPageId, input.title, input.storage, opts);
+}
+
+async function createPage(c: ConfluenceConnection, spaceKey: string, parentPageId: string | null | undefined, title: string, storage: string, opts: ConfluenceRequestOptions): Promise<PublishedPage> {
   if (c.deployment === 'cloud') {
-    const space = await confluenceSpace(c, input.spaceKey, opts);
+    const space = await confluenceSpace(c, spaceKey, opts);
     const page = await call<Links & { id: string }>(c, '/api/v2/pages', json('POST', {
-      spaceId: space.id, status: 'current', title: input.title,
-      ...(input.parentPageId ? { parentId: input.parentPageId } : {}),
-      body: { representation: 'storage', value: input.storage },
+      spaceId: space.id, status: 'current', title,
+      ...(parentPageId ? { parentId: parentPageId } : {}),
+      body: { representation: 'storage', value: storage },
     }), opts);
     return { id: String(page.id), url: pageUrl(c, page, String(page.id)) };
   }
   const page = await call<Links & { id: string }>(c, '/rest/api/content', json('POST', {
-    type: 'page', title: input.title, space: { key: input.spaceKey },
-    ...(input.parentPageId ? { ancestors: [{ id: input.parentPageId }] } : {}),
-    body: { storage: { value: input.storage, representation: 'storage' } },
+    type: 'page', title, space: { key: spaceKey },
+    ...(parentPageId ? { ancestors: [{ id: parentPageId }] } : {}),
+    body: { storage: { value: storage, representation: 'storage' } },
   }), opts);
   return { id: String(page.id), url: pageUrl(c, page, String(page.id)) };
 }
 
+/** Splits "A / B / C" into its page titles; empty segments are dropped. */
+export function parsePagePath(path: string | null | undefined): string[] {
+  // ponytail: '/' is the separator, so a title that itself contains '/' cannot be a path level.
+  return (path ?? '').split('/').map((t) => t.trim()).filter(Boolean);
+}
+
+/** A page with this title directly under `parentId` (or at the space root when null), else null. */
+async function findChildPage(c: ConfluenceConnection, spaceKey: string, parentId: string | null, title: string, opts: ConfluenceRequestOptions): Promise<string | null> {
+  if (c.deployment === 'cloud') {
+    const space = await confluenceSpace(c, spaceKey, opts);
+    const res = await call<{ results?: Array<{ id: string | number; parentId?: string | number | null }> }>(
+      c, `/api/v2/pages?space-id=${encodeURIComponent(space.id)}&title=${encodeURIComponent(title)}&status=current&limit=250`, { method: 'GET' }, opts);
+    // Cloud files a top-level page under the space homepage, so at the root either counts.
+    const hit = res.results?.find((p) => (parentId ? String(p.parentId ?? '') === parentId : !p.parentId || String(p.parentId) === space.homepageId));
+    return hit ? String(hit.id) : null;
+  }
+  const res = await call<{ results?: Array<{ id: string | number; ancestors?: Array<{ id: string | number }> }> }>(
+    c, `/rest/api/content?type=page&spaceKey=${encodeURIComponent(spaceKey)}&title=${encodeURIComponent(title)}&expand=ancestors&limit=250`, { method: 'GET' }, opts);
+  const hit = res.results?.find((p) => {
+    const direct = p.ancestors?.at(-1);
+    return parentId ? String(direct?.id ?? '') === parentId : !direct;
+  });
+  return hit ? String(hit.id) : null;
+}
+
+// A container page lists what is published under it.
+const CONTAINER_BODY = '<ac:structured-macro ac:name="children" ac:schema-version="2" />';
+
+/**
+ * Walks `titles` down from `rootParentId` (the connection's parent page, or the space root),
+ * creating each level that does not exist yet, and returns the id of the last one. Only a page
+ * directly under the previous level counts as a match: a same-titled page elsewhere in the space
+ * is never adopted, so a report cannot land under an unrelated page.
+ */
+export async function ensurePagePath(c: ConfluenceConnection, spaceKey: string, rootParentId: string | null | undefined, titles: string[], opts: ConfluenceRequestOptions = {}): Promise<string | null> {
+  let parent = rootParentId || null;
+  for (const title of titles) {
+    parent = (await findChildPage(c, spaceKey, parent, title, opts)) ?? (await createPage(c, spaceKey, parent, title, CONTAINER_BODY, opts)).id;
+  }
+  return parent;
+}
+
 /** Creates or replaces each file by name on the page. */
 export async function uploadAttachments(c: ConfluenceConnection, pageId: string, files: PageAttachment[], opts: ConfluenceRequestOptions = {}): Promise<void> {
-  for (let i = 0; i < files.length; i += ATTACHMENTS_PER_REQUEST) {
+  const base = `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`;
+  const send = (path: string, method: string, batch: PageAttachment[]) => {
     const form = new FormData();
-    for (const f of files.slice(i, i + ATTACHMENTS_PER_REQUEST)) {
-      form.append('file', new Blob([new Uint8Array(f.data)], { type: f.contentType }), f.filename);
-    }
+    for (const f of batch) form.append('file', new Blob([new Uint8Array(f.data)], { type: f.contentType }), f.filename);
     form.append('minorEdit', 'true');
     // Confluence's XSRF check refuses a multipart POST/PUT without this header.
-    await call(c, `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, {
-      method: 'PUT',
-      headers: { 'X-Atlassian-Token': 'no-check' },
-      body: form,
-    }, { timeoutMs: 120_000, ...opts });
+    return call(c, path, { method, headers: { 'X-Atlassian-Token': 'no-check' }, body: form }, { timeoutMs: 120_000, ...opts });
+  };
+  const batches = (list: PageAttachment[]) =>
+    Array.from({ length: Math.ceil(list.length / ATTACHMENTS_PER_REQUEST) }, (_, i) => list.slice(i * ATTACHMENTS_PER_REQUEST, (i + 1) * ATTACHMENTS_PER_REQUEST));
+
+  // Cloud's PUT on the collection creates or replaces by filename in one call.
+  if (c.deployment === 'cloud') {
+    for (const batch of batches(files)) await send(base, 'PUT', batch);
+    return;
+  }
+
+  // Data Center / Server has no PUT on the collection (405): POST creates, and a file that is
+  // already there must be replaced through its own .../{attachmentId}/data, or the POST is refused.
+  // ponytail: one listing page of 1000; a page with more attachments than that re-POSTs the rest and fails loudly.
+  const listed = await call<{ results?: Array<{ id: string; title: string }> }>(c, `${base}?limit=1000`, { method: 'GET' }, opts);
+  const existing = new Map((listed?.results ?? []).map((a) => [a.title, String(a.id)]));
+  for (const batch of batches(files.filter((f) => !existing.has(f.filename)))) await send(base, 'POST', batch);
+  for (const f of files) {
+    const id = existing.get(f.filename);
+    if (id) await send(`${base}/${encodeURIComponent(id)}/data`, 'POST', [f]);
   }
 }

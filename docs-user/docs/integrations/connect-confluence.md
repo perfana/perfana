@@ -30,6 +30,19 @@ The Confluence page is a static copy. Hover readouts and table filters stay in P
    Perfana looks up the space with these credentials and shows its name, or says why it could not.
 10. Click **Add**.
 
+## Publish a system's reports under its own page
+
+By default every report is published under the connection's parent page. To give a system its own
+place, possibly several levels deep:
+
+1. Open the system's configuration and choose the **Confluence** tab. The tab only appears once a Confluence connection has been added.
+2. For each connection, enter a **page path**, with the levels separated by `/`, for example `Performance / Payment API / Load tests`.
+3. Click **Save**.
+
+The path is created below the connection's parent page (or at the space root if it has none) the next time a report of this system is published. Levels that already exist directly under the level above are reused. Leave the field empty to go back to the connection's parent page.
+
+A report that was published before keeps its page where it is; only reports published for the first time land under the new path.
+
 ## Publish a report
 
 1. Open the test run and expand the **Reports** card.
@@ -48,6 +61,6 @@ Publishing needs the same permission as sharing a report: you must be able to up
 
 - *Confluence rejected the credentials (401)*: the token is wrong or expired, or on Cloud the email does not belong to the token.
 - *The Confluence account lacks permission (403)*: the account cannot add pages in that space. Ask the space administrator for **Add page** and **Add attachment** permission.
-- *A page with this title already exists*: Confluence titles are unique within a space. Choose another title.
+- *A page with this title already exists*: Confluence titles are unique within a space. Choose another title. If it names a level of a system's page path, a page with that title exists elsewhere in the space: rename that level in the system's **Confluence** tab.
 - *Confluence answered with something other than JSON*: the URL points at a login page or a proxy, not at Confluence itself. Check the context path, for example `/confluence`.
 - *The report service did not render the charts in time*: the `perfana-report` service is not running, or is busy. Perfana waits three minutes for the charts. Try again; ask your Perfana administrator if it keeps happening.
