@@ -93,17 +93,37 @@ describe('confluence client', () => {
   });
 
   /*
+   * Value: protects=the sole-match fallback never adopts a page outside the connection's parent page, so a
+   *   report cannot land under an unrelated page; fails_when=the within(root) check is dropped;
+   *   why_new=security review of the fallback; seam=none; no_claim=real Confluence (fake fetch; unit only)
+   */
+  it('adopts a sole match only below the connection\'s parent page', async () => {
+    const base = 'https://wiki.acme.io/confluence/rest/api/content';
+    const q = `GET ${base}?type=page&spaceKey=PERF&title=Perfana&expand=ancestors&limit=250`;
+    const below = fakeFetch({ [q]: { body: { results: [{ id: 41, ancestors: [{ id: 1 }, { id: 77 }, { id: 5 }] }] } } });
+    expect(await ensurePagePath(dc, 'PERF', '77', ['Perfana'], { fetchImpl: below.impl })).toBe('41');
+
+    const outside = fakeFetch({
+      [q]: { body: { results: [{ id: 41, ancestors: [{ id: 1 }, { id: 5 }] }] } },
+      [`POST ${base}`]: { body: { id: 42, _links: { webui: '/display/PERF/Perfana' } } },
+    });
+    expect(await ensurePagePath(dc, 'PERF', '77', ['Perfana'], { fetchImpl: outside.impl })).toBe('42');
+  });
+
+  /*
    * Value: protects=publishing a report whose title already names a page under the same parent updates that
    *   page instead of failing on the duplicate title, while one elsewhere is never overwritten;
    *   fails_when=the sibling lookup is removed or ignores the parent; why_new=production 400 on first publish
    *   of a title that existed; seam=none; no_claim=real Confluence (fake fetch; unit only)
    */
-  it('updates the page of the same title under the same parent instead of creating a duplicate', async () => {
+  it('updates a Perfana-published page of the same title under the same parent instead of creating a duplicate', async () => {
     const base = 'https://wiki.acme.io/confluence/rest/api/content';
     const q = `GET ${base}?type=page&spaceKey=PERF&title=T&expand=ancestors&limit=250`;
     const { impl, calls } = fakeFetch({
       [q]: { body: { results: [{ id: 300, ancestors: [{ id: 9 }] }] } },
-      [`GET ${base}/300?expand=version,space`]: { body: { version: { number: 2 }, space: { key: 'PERF' } } },
+      [`GET ${base}/300?expand=version,space,body.storage`]: {
+        body: { version: { number: 2 }, space: { key: 'PERF' }, body: { storage: { value: '<p>Published from Perfana on 2026-11-24</p>' } } },
+      },
       [`PUT ${base}/300`]: { body: { _links: { webui: '/display/PERF/T' } } },
     });
     expect((await upsertPage(dc, { spaceKey: 'PERF', parentPageId: '9', title: 'T', storage: '' }, { fetchImpl: impl })).id).toBe('300');
@@ -115,6 +135,15 @@ describe('confluence client', () => {
     });
     await upsertPage(dc, { spaceKey: 'PERF', parentPageId: '9', title: 'T', storage: '' }, { fetchImpl: elsewhere.impl });
     expect(elsewhere.calls.filter((c) => c.method === 'PUT')).toEqual([]);
+
+    // Under the same parent but not published by Perfana: left alone, and the create reports the clash.
+    const foreign = fakeFetch({
+      [q]: { body: { results: [{ id: 300, ancestors: [{ id: 9 }] }] } },
+      [`GET ${base}/300?expand=version,space,body.storage`]: { body: { version: { number: 2 }, space: { key: 'PERF' }, body: { storage: { value: '<p>Team notes</p>' } } } },
+      [`POST ${base}`]: { status: 400, body: { message: 'A page with this title already exists' } },
+    });
+    await expect(upsertPage(dc, { spaceKey: 'PERF', parentPageId: '9', title: 'T', storage: '' }, { fetchImpl: foreign.impl })).rejects.toThrow(/already exists/);
+    expect(foreign.calls.filter((c) => c.method === 'PUT')).toEqual([]);
   });
 
   it('creates a Cloud page through v2 under /wiki, resolving the space key to its id, with Basic auth', async () => {

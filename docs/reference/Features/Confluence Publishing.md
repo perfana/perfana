@@ -72,7 +72,10 @@ On publish `ensurePagePath` (`confluence.client.ts`) walks the titles down from 
 parent page, creating each missing level with a `children` macro body. Four things to know:
 
 1. **A page directly under the previous level wins; failing that, the space's ONLY page of that
-   title is used wherever it sits** (v0.2.97.99). Until then a level matched only a direct child,
+   title is used if it sits below the connection's parent page** (anywhere, when the connection has
+   none; v0.2.97.99). Nothing outside that parent is adopted, so a report cannot land under an
+   unrelated page. On Cloud the v2 search returns only a page's parent, so below a configured parent
+   only a direct child of it qualifies. Until then a level matched only a direct child,
    so on Data Center, where titles are unique per space and a page made in the UI sits under the
    space homepage rather than at the root, an existing `Perfana` was missed, re-created, and the
    publish failed with "A page with this title already exists". With two or more same-titled pages
@@ -84,7 +87,9 @@ parent page, creating each missing level with a `children` macro body. Four thin
    where it is when the path changes, and its republish neither creates container pages nor fails on a
    Data Center title clash in the new path. A first publish whose title already names a page
    directly under the resolved parent updates that page as a new version instead of failing on the
-   duplicate title (v0.2.97.99); a same-titled page anywhere else is never overwritten. Only new reports (or one whose page was deleted) land
+   duplicate title, but only when its body carries the publish banner (`PERFANA_PAGE_MARKER`, the
+   banner's opening words) — i.e. Perfana published it (v0.2.97.99). A page someone wrote by hand,
+   or one anywhere else, is never overwritten; the create then fails with Confluence's message. Only new reports (or one whose page was deleted) land
    under the new path. Two first publishes of one system at the same moment can create the same
    container twice on Cloud, which allows duplicate titles; Data Center refuses the second.
 4. **A map on the system, not a table.** It is edited and deleted with the system, travels in the
