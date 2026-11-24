@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.98] - 2026-11-24
+
+### Changed
+- **Graphs plots a grouped panel's individual pods, not its groups.** On a panel with a series grouping rule, the Graphs card's series picker now lists the raw series (each pod) by default, with **show groups** to pick a group such as `pod: emc (avg)` instead. Groups exist so runs with different pod names can be compared, which is what Compare, Trends and anomaly detection keep using; one run's chart shows what each pod did. "Open in Graphs" on a grouped series in anomaly detection adds that group's pods. Graph presets saved with a group name still draw the group.
+
 ## [0.2.97.97] - 2026-11-24
 
 ### Added

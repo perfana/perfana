@@ -187,6 +187,8 @@ export function GraphsExpandedContent({
         cascade={(close) => (
           <SeriesCascadePanel
             card="graphs"
+            // One run's chart: plot the raw series (pods). Groups are for comparing runs.
+            podsByDefault
             showToast={showToast}
             allDashboards={allDashboards}
             dashboardsLoading={dashboardsLoading}

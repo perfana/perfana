@@ -128,7 +128,10 @@ is checked by the same ReDoS guard the worker uses, and the dialog refuses an un
     stays enabled and is provisioned onto the new template's dashboards on the next matching run.
 - **The series picker** (Graphs, Trends, Compare). A grouped series carries an `N pods` badge whose
   tooltip lists the pods it combines in this run, and **show pods** switches the panel to the raw
-  per-pod series and back.
+  per-pod series and back. **Graphs starts on the pods** (v0.2.97.98), with **show groups** to switch:
+  it plots one run, where the raw series are the data, while groups exist so runs whose pod names
+  differ can be compared. Compare and Trends line runs up and keep starting on the groups. An
+  "Open in Graphs" link that names a group adds that group's pods.
 
 ## The dialog
 

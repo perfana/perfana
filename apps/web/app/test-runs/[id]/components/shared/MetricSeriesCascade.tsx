@@ -54,6 +54,7 @@ import {
   SeriesOption,
   SeriesPick,
   fetchPanelsForDashboards,
+  expandGroupsToPods,
   fetchSeriesForPanels,
   panelKey,
   seriesKey,
@@ -83,6 +84,12 @@ interface MetricSeriesCascadeProps {
   panelListOptions?: PanelListOptions;
   /** Which card this is: picks the `?card=…` URL link or the in-page CardLinkRequest it walks. */
   card: LinkableCard;
+  /**
+   * List a grouped panel's pods instead of its groups, with "show groups" to switch back.
+   * Graphs sets it: it plots one run, where the raw series are the data. Compare and Trends
+   * leave it off, because they line runs up and pod names change between deployments.
+   */
+  podsByDefault?: boolean;
   /** Only used to report a capped wildcard link; the cards own every other message. */
   showToast?: (message: string) => void;
   /** Closes the panel without adding. Omitted where the cascade is always on screen. */
@@ -143,6 +150,7 @@ function CascadeBody({
   showToast,
   onCancel,
   onRemoveSeries,
+  podsByDefault = false,
 }: MetricSeriesCascadeProps & { link: MetricSeriesRef | null; linkKey: string }) {
   const instant = Boolean(onRemoveSeries);
   // Read off the app theme, NOT taken as a prop. As a `mode = 'light'` prop, two of the
@@ -158,9 +166,10 @@ function CascadeBody({
   const [seriesOptions, setSeriesOptions] = useState<SeriesOption[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<SeriesOption[]>([]);
-  // Panels switched to the per-pod view ("show pods"), by `panelKey`. A grouped panel lists its
-  // group names by default; this asks for the raw series the groups combine.
+  // Panels switched away from the default view, by `panelKey`: to the per-pod view ("show
+  // pods") normally, or back to the groups ("show groups") when `podsByDefault` is set.
   const [memberPanels, setMemberPanels] = useState<string[]>([]);
+  const showsPods = (key: string) => podsByDefault !== memberPanels.includes(key);
 
   // One query per column. Deliberately NOT reset when the selection changes: narrowing
   // dashboards to "docker" and then stepping through their panels is the flow this is for.
@@ -209,10 +218,15 @@ function CascadeBody({
     }
     let cancelled = false;
     setSeriesLoading(true);
-    // Two arguments when nothing is in the per-pod view, so the common call is unchanged.
-    (memberPanels.length > 0
-      ? fetchSeriesForPanels(picked, testRun, new Set(memberPanels))
-      : fetchSeriesForPanels(picked, testRun))
+    // Pods by default: fetch the grouped answer and expand each group into its pods from the
+    // membership it carries, so the picker still knows which panels are grouped.
+    // Otherwise two arguments when nothing is in the per-pod view, so the common call is unchanged.
+    (podsByDefault
+      ? fetchSeriesForPanels(picked, testRun).then((lists) =>
+        lists.map((list, i) => (memberPanels.includes(panelKey(picked[i]!)) ? list : expandGroupsToPods(list))))
+      : memberPanels.length > 0
+        ? fetchSeriesForPanels(picked, testRun, new Set(memberPanels))
+        : fetchSeriesForPanels(picked, testRun))
       .then((lists) => { if (!cancelled) { seriesFor.current = panelsKey; setSeriesOptions(lists.flat()); } })
       .finally(() => { if (!cancelled) setSeriesLoading(false); });
     return () => { cancelled = true; };
@@ -327,9 +341,13 @@ function CascadeBody({
     // the effect can never fire a second time while armed. That is what lets it read
     // `isAdded` without listing it as a dependency — a second armed run would dedupe against
     // a stale snapshot. Anything that makes this re-enter has to revisit the deps.
-    const picks = want.metricName === undefined
+    const exact = want.metricName === undefined
       ? seriesOptions.filter((s) => !isAdded(s)).map(pickOf)
       : seriesOptions.filter((s) => s.metricName === want.metricName && !isAdded(s)).map(pickOf);
+    // A link naming a group (an anomaly row) on a pods-by-default picker adds that group's pods.
+    const picks = exact.length > 0 || want.metricName === undefined
+      ? exact
+      : seriesOptions.filter((s) => s.fromGroups?.includes(want.metricName!) && !isAdded(s)).map(pickOf);
     if (want.metricName === undefined && picks.length > LINK_WILDCARD_MAX_SERIES) {
       onAddSeries(picks.slice(0, LINK_WILDCARD_MAX_SERIES));
       showToast?.(
@@ -616,15 +634,16 @@ function CascadeBody({
         >
           {seriesGroups.map(([group, options]) => {
             const groupPanel = options[0]?.panel;
-            const showingPods = groupPanel ? memberPanels.includes(panelKey(groupPanel)) : false;
-            const grouped = options.some((o) => o.members?.length);
+            const showingPods = groupPanel ? showsPods(panelKey(groupPanel)) : false;
+            const grouped = options.some((o) => o.members?.length || o.fromGroups?.length);
             return (
               <CascadeGroup
                 key={group}
                 label={group}
                 color={theme.faint}
                 action={
-                  groupPanel && (grouped || showingPods) ? (
+                  // Pods by default lists every panel "showing pods"; only a grouped one has groups to show.
+                  groupPanel && (grouped || (showingPods && !podsByDefault)) ? (
                     <PodsToggle
                       theme={theme}
                       showingPods={showingPods}

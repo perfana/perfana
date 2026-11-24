@@ -80,6 +80,41 @@ export interface SeriesOption {
    * The picker badges it and lists them; the chart endpoints expand the name themselves.
    */
   members?: string[];
+  /**
+   * Set on a raw series (pod) that `expandGroupsToPods` put in place of the group(s) that
+   * combine it: the group names it stood behind, so a link naming a group can find its pods.
+   */
+  fromGroups?: string[];
+}
+
+/**
+ * The raw view of a panel's series: each group option replaced by its pods, once each, and
+ * every ungrouped series kept. A group emits one series per aggregation (`api (avg)`,
+ * `api (sum)`) over the same pods, so a pod is listed once with all of them in `fromGroups`.
+ * Built from the grouped answer's own membership, so it costs no request and the picker
+ * still knows which panels are grouped. Graphs plots one run, where the pods are the data;
+ * groups exist so runs with different pod names can be compared.
+ */
+export function expandGroupsToPods(options: SeriesOption[]): SeriesOption[] {
+  const out: SeriesOption[] = [];
+  const byKey = new Map<string, SeriesOption>();
+  for (const option of options) {
+    const names = option.members?.length ? option.members : [option.metricName];
+    for (const name of names) {
+      const key = `${panelKey(option.panel)} ${name}`;
+      const known = byKey.get(key);
+      if (known) {
+        if (option.members?.length) known.fromGroups = [...(known.fromGroups ?? []), option.metricName];
+        continue;
+      }
+      const raw: SeriesOption = option.members?.length
+        ? { metricName: name, panel: option.panel, fromGroups: [option.metricName] }
+        : option;
+      byKey.set(key, raw);
+      out.push(raw);
+    }
+  }
+  return out;
 }
 
 /** One `series_groups` entry, as `/ds-metrics/available` and `/ds-metrics/distinct-series` return it. */

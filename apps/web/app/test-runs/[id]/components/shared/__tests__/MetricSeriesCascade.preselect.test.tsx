@@ -452,3 +452,24 @@ it('lets the first in-page click win over the landing URL link, and keeps the pi
   expect(onAddSeries).toHaveBeenCalledTimes(2);
   expect(screen.getAllByText('2 available across 1 dashboard').length).toBeGreaterThan(0);
 });
+
+/*
+ * Value: protects=an "Open in Graphs" link naming a series group (an anomaly row) adds that group's
+ *   pods on a pods-by-default picker instead of adding nothing; fails_when=the preselect matches the
+ *   exact name only, so the group name finds no option and the link is disarmed with the chart empty;
+ *   why_new=Graphs started listing pods in place of groups; seam=none; no_claim=the real link URL (mocked params)
+ */
+it('adds the pods of a group a Graphs link names', async () => {
+  linkTo('graphs', jvm.dashboard_label, 5, 'api (avg)');
+  (fetchSeriesForPanels as jest.Mock).mockImplementation(async (panels: PanelOption[]) =>
+    panels.map((p) => [
+      { metricName: 'api (avg)', panel: p, members: ['api-1', 'api-2'] },
+      { metricName: 'other', panel: p },
+    ]));
+  const { onAddSeries } = setup({ card: 'graphs', podsByDefault: true });
+
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledWith([
+    { dashboard: jvm, panel: heapPanel, metricName: 'api-1' },
+    { dashboard: jvm, panel: heapPanel, metricName: 'api-2' },
+  ]));
+});
