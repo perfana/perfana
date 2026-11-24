@@ -40,7 +40,7 @@ Publishes a generated report as a Confluence page (v0.2.97.95, migration 1835). 
    summary's parts with " · ". Output is built by hand as XHTML (escaped, every tag closed).
 4. **Resolve the parent page.** The connection's `parent_page_id` (NULL = space root), or, when the
    report's system sets a page path for this connection in `systems_under_test.confluence_parent_pages`
-   (v0.2.97.99, migration 1836), that path below it — see "Per-system parent pages".
+   (v0.2.97.97, migration 1836), that path below it — see "Per-system parent pages".
 5. **Upsert the page.** Cloud uses REST v2 (`/wiki/api/v2/pages`; Atlassian is retiring v1 content
    endpoints there), Data Center v1 (`/rest/api/content`). A report republished to the same
    connection updates `confluence_page_id` as version n+1, but only while that page still sits in
@@ -53,7 +53,7 @@ Publishes a generated report as a Confluence page (v0.2.97.95, migration 1835). 
    because titles are unique per space.
 7. **Upload charts**, 10 files per request with `X-Atlassian-Token: no-check`, so republish is
    idempotent. Cloud: one v1 `PUT .../child/attachment` per batch (create-or-replace by filename).
-   Data Center has **no** PUT on that collection and answers 405 (fixed in v0.2.97.98; the local mock
+   Data Center has **no** PUT on that collection and answers 405 (fixed in v0.2.97.97; the local mock
    accepted it, which is how it shipped): the page's attachments are listed once, new files are
    POSTed to the collection, and a file already there is replaced through
    `POST .../child/attachment/{id}/data` (a second POST of the same name is refused).
