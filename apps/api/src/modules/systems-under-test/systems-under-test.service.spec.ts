@@ -553,6 +553,16 @@ describe('SystemsUnderTestService', () => {
       expect(repository.update).not.toHaveBeenCalled();
     });
 
+    // A JSON null for the map clears it rather than reaching Object.entries(null) (a 500 before /ship's review).
+    it('clears the Confluence parent pages when the map is sent as null', async () => {
+      repository.findOne.mockResolvedValue(mockSystemUnderTest);
+      repository.update.mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] });
+
+      await service.update('sys-123', { confluence_parent_pages: null as unknown as Record<string, string> }, testUserId, testIsAdmin);
+
+      expect(repository.update).toHaveBeenCalledWith('sys-123', expect.objectContaining({ confluence_parent_pages: {} }));
+    });
+
     it('should handle database errors during update', async () => {
       const error = new Error('Database update failed');
       repository.findOne.mockResolvedValue(mockSystemUnderTest);

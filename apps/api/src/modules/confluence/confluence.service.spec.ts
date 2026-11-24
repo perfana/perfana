@@ -90,6 +90,9 @@ function build(opts: { caps?: string[]; sutParentPages?: Record<string, string> 
   return { service, configRepo, reportRepo, sutRepo, authz, reports, renderer };
 }
 
+/** The parent upsertPage would create the page under (it calls the resolver only on create). */
+const resolvedParent = () => mockedUpsert.mock.calls[0]![1].resolveParentPageId!();
+
 beforeEach(() => {
   mockedUpsert.mockReset().mockResolvedValue({ id: '9001', url: 'https://example.atlassian.net/wiki/spaces/SPACE/pages/9001' });
   mockedUpload.mockReset().mockResolvedValue(undefined);
@@ -103,8 +106,10 @@ describe('ConfluenceService.publishReport', () => {
 
     await service.publishReport(REPORT, { configId: CFG }, 'u', [], 'https://perfana.example.com');
 
+    // The walk is deferred to upsertPage, which runs it only when it creates a page.
+    expect(mockedEnsurePath).not.toHaveBeenCalled();
+    expect(await resolvedParent()).toBe('5555');
     expect(mockedEnsurePath).toHaveBeenCalledWith(expect.anything(), 'SPACE', '77', ['Performance', 'MyApp'], expect.anything());
-    expect(mockedUpsert.mock.calls[0]![1].parentPageId).toBe('5555');
   });
 
   it("falls back to the connection's parent page when the system sets no path for this connection", async () => {
@@ -113,8 +118,8 @@ describe('ConfluenceService.publishReport', () => {
 
     await service.publishReport(REPORT, { configId: CFG }, 'u', [], 'https://perfana.example.com');
 
+    expect(await resolvedParent()).toBe('77');
     expect(mockedEnsurePath).not.toHaveBeenCalled();
-    expect(mockedUpsert.mock.calls[0]![1].parentPageId).toBe('77');
   });
 
   /*
@@ -131,9 +136,9 @@ describe('ConfluenceService.publishReport', () => {
 
     await service.publishReport(REPORT, { configId: CFG }, 'u', [], 'https://perfana.example.com');
 
+    expect(await resolvedParent()).toBe('77');
     expect(sutRepo.findOne).not.toHaveBeenCalled();
     expect(mockedEnsurePath).not.toHaveBeenCalled();
-    expect(mockedUpsert.mock.calls[0]![1].parentPageId).toBe('77');
   });
 
   it("refuses a connection that belongs to another organization than the report's run, before rendering or calling Confluence", async () => {
@@ -191,11 +196,16 @@ describe('ConfluenceService.publishReport', () => {
     const { service, configRepo, reportRepo } = build({ sutParentPages: { [CFG]: 'Performance / MyApp' } });
     configRepo.findOne.mockResolvedValue(storedConfig({ parentPageId: '77' }));
     mockedEnsurePath.mockRejectedValue(new ConfluenceError('The parent page does not exist', 404));
+    // As upsertPage does when it creates a page: resolve the parent first.
+    mockedUpsert.mockImplementation(async (_c, input) => {
+      await input.resolveParentPageId!();
+      return { id: '9001', url: 'u' };
+    });
 
     const publish = service.publishReport(REPORT, { configId: CFG }, 'u', [], 'https://perfana.example.com');
     await expect(publish).rejects.toBeInstanceOf(BadRequestException);
     await expect(publish).rejects.toThrow('The parent page does not exist');
-    expect(mockedUpsert).not.toHaveBeenCalled();
+    expect(mockedUpload).not.toHaveBeenCalled();
     expect(reportRepo.update).not.toHaveBeenCalled();
   });
 

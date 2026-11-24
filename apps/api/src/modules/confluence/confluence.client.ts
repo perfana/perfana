@@ -172,6 +172,11 @@ async function currentVersion(c: ConfluenceConnection, pageId: string, spaceKey:
 export interface UpsertPageInput {
   spaceKey: string;
   parentPageId?: string | null;
+  /**
+   * Resolves the parent instead of `parentPageId`, called only when a page is created: a republish
+   * that updates its page in place never walks (or creates) a page path it would not use.
+   */
+  resolveParentPageId?: () => Promise<string | null>;
   /** The page this report was published to before; updated in place when it still exists. */
   existingPageId?: string | null;
   title: string;
@@ -197,7 +202,8 @@ export async function upsertPage(c: ConfluenceConnection, input: UpsertPageInput
     return { id, url: pageUrl(c, page, id) };
   }
 
-  return createPage(c, input.spaceKey, input.parentPageId, input.title, input.storage, opts);
+  const parentPageId = input.resolveParentPageId ? await input.resolveParentPageId() : input.parentPageId;
+  return createPage(c, input.spaceKey, parentPageId, input.title, input.storage, opts);
 }
 
 async function createPage(c: ConfluenceConnection, spaceKey: string, parentPageId: string | null | undefined, title: string, storage: string, opts: ConfluenceRequestOptions): Promise<PublishedPage> {

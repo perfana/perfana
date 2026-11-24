@@ -95,6 +95,8 @@ export class SystemsUnderTestController {
       return await this.systemsUnderTestService.update(id, updateDto, ctx.userId, isAdmin);
     } catch (error) {
       this.logger.error(`Failed to update system ${id}:`, error);
+      // A deliberate HTTP error (a 400 from validation, a 403) keeps its status and reason.
+      if (error instanceof HttpException) throw error;
 
       // Use safe error handling pattern
       if (error && typeof error === 'object' && 'message' in error) {

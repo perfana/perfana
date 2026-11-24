@@ -105,6 +105,27 @@ describe('confluence client', () => {
     expect(calls[0]!.headers.Authorization).toBe('Bearer pat');
   });
 
+  /*
+   * Value: protects=a republish that updates its page in place never resolves (walks or creates) the parent
+   *   page path, while a page that is gone is recreated under it; fails_when=the parent is resolved before
+   *   the version lookup again, which on Data Center can fail a republish with "title already exists";
+   *   why_new=red-team finding in /ship review; seam=none; no_claim=real Confluence (fake fetch; unit only)
+   */
+  it('resolves the parent only when it creates a page, never for an in-place republish', async () => {
+    const resolveParentPageId = jest.fn().mockResolvedValue('9');
+    const { impl } = fakeFetch({
+      'GET https://wiki.acme.io/confluence/rest/api/content/123?expand=version,space': { body: { version: { number: 4 }, space: { key: 'PERF' } } },
+      'PUT https://wiki.acme.io/confluence/rest/api/content/123': { body: { _links: { webui: '/display/PERF/T' } } },
+    });
+    await upsertPage(dc, { spaceKey: 'PERF', existingPageId: '123', resolveParentPageId, title: 'T', storage: '' }, { fetchImpl: impl });
+    expect(resolveParentPageId).not.toHaveBeenCalled();
+
+    const gone = fakeFetch({ 'POST https://wiki.acme.io/confluence/rest/api/content': { body: { id: 556, _links: { webui: '/display/PERF/T' } } } });
+    await upsertPage(dc, { spaceKey: 'PERF', existingPageId: '123', resolveParentPageId, title: 'T', storage: '' }, { fetchImpl: gone.impl });
+    expect(resolveParentPageId).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(gone.calls.at(-1)!.body as string)).toMatchObject({ ancestors: [{ id: '9' }] });
+  });
+
   it('creates a fresh page when the previously published one is gone', async () => {
     const { impl, calls } = fakeFetch({
       'POST https://wiki.acme.io/confluence/rest/api/content': { body: { id: 555, _links: { webui: '/display/PERF/T' } } },

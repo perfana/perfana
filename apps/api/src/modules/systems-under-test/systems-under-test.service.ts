@@ -534,7 +534,7 @@ export class SystemsUnderTestService {
       }
 
       if (updateDto.confluence_parent_pages !== undefined) {
-        updateData.confluence_parent_pages = normalizeConfluenceParentPages(updateDto.confluence_parent_pages);
+        updateData.confluence_parent_pages = normalizeConfluenceParentPages(updateDto.confluence_parent_pages ?? {}); // null clears the map
       }
 
       // Always update the updated_by field

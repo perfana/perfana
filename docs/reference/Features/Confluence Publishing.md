@@ -65,7 +65,7 @@ Publishes a generated report as a Confluence page (v0.2.97.95, migration 1835). 
 `systems_under_test.confluence_parent_pages` (jsonb, default `{}`) maps a connection id to a page
 path such as `Performance / MyApp`, edited in the system's **Confluence** settings tab (shown only
 when a Confluence connection exists) and saved through `PATCH /api/systems-under-test/:id`, which
-replaces the whole map. `normalizeConfluenceParentPages` validates it: keys must be uuids, at most 10
+replaces the whole map. `normalizeConfluenceParentPages` validates it (a refusal is a 400 with the reason; `null` clears the map): keys must be uuids, at most 10
 levels of at most 255 characters, an empty path removes the entry, paths are stored as `A / B / C`.
 
 On publish `ensurePagePath` (`confluence.client.ts`) walks the titles down from the connection's
@@ -77,8 +77,12 @@ parent page, creating each missing level with a `children` macro body. Four thin
    "title already exists" message; rename the level.
 2. **At the space root on Cloud, a page under the space homepage counts as root-level**, because
    Cloud files top-level pages under the homepage (`homepageId` from `GET /api/v2/spaces`).
-3. **Republishing never moves a page.** A report published before keeps its page where it is when
-   the path changes; only new reports land under the new path.
+3. **Republishing never moves a page, and never walks the path.** `upsertPage` resolves the parent
+   (`resolveParentPageId`) only when it creates a page, so a report published before keeps its page
+   where it is when the path changes, and its republish neither creates container pages nor fails on a
+   Data Center title clash in the new path. Only new reports (or one whose page was deleted) land
+   under the new path. Two first publishes of one system at the same moment can create the same
+   container twice on Cloud, which allows duplicate titles; Data Center refuses the second.
 4. **A map on the system, not a table.** It is edited and deleted with the system, travels in the
    SUT export, and a key naming a connection that does not exist (deleted, or from another
    environment after an import) is ignored. `/` is the separator, so a title containing `/` cannot

@@ -204,10 +204,9 @@ export class ConfluenceService {
     const opts = await this.requestOptions(config.organizationId, config.useProxy);
     const charts = [...new Set(chartIndexes)].filter((i) => rendered.images[i]);
     try {
-      const parentPageId = await this.parentPageFor(conn, config, report.test_run?.systemUnderTestId, opts);
       const page = await upsertPage(conn, {
         spaceKey: config.spaceKey,
-        parentPageId,
+        resolveParentPageId: () => this.parentPageFor(conn, config, report.test_run?.systemUnderTestId, opts),
         existingPageId: report.confluence_config_id === config.id ? report.confluence_page_id : null,
         title,
         storage: banner + storage,
@@ -264,8 +263,8 @@ export class ConfluenceService {
 
   /**
    * The connection's parent page, or the system's page path below it when the system sets one for
-   * this connection; missing levels are created. A report published before keeps its page where it
-   * is: updating a page never moves it.
+   * this connection; missing levels are created. Only called when a page is created: a report
+   * published before keeps its page where it is, and its republish never walks the path.
    */
   private async parentPageFor(conn: ConfluenceConnection, config: ConfluenceConfig, sutId: string | undefined, opts: ConfluenceRequestOptions): Promise<string | null> {
     const sut = sutId ? await withRequestEm(this.sutRepo).findOne({ where: { id: sutId }, select: ['id', 'confluence_parent_pages'] }) : null;
