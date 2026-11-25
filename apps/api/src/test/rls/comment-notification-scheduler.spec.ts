@@ -105,6 +105,9 @@ describe('CommentNotificationScheduler against a real database', () => {
   beforeEach(async () => {
     send.mockReset();
     send.mockResolvedValue(undefined);
+    // sweep() also runs the story half over the whole database; this suite tests comments
+    // only, and must not claim the stories story-notification-scheduler.spec.ts is testing.
+    jest.spyOn(scheduler, 'announceStory').mockResolvedValue(false);
     await resetUnannounced();
   });
 
@@ -143,8 +146,9 @@ describe('CommentNotificationScheduler against a real database', () => {
     );
     expect(waits).toBe(true);
 
-    // Until the backoff elapses the sweep neither finds the run nor claims its comments.
-    const announce = jest.spyOn(scheduler, 'announceRun');
+    // Until the backoff elapses the sweep neither finds the run nor claims its comments. Mocked:
+    // the real announceRun would claim every other eligible run on the shared database.
+    const announce = jest.spyOn(scheduler, 'announceRun').mockResolvedValue(0);
     try {
       await scheduler.sweep();
       expect(announce.mock.calls.map((c) => c[0])).not.toContain(runUuid);

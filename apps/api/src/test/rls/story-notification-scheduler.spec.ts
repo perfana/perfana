@@ -113,6 +113,10 @@ describe('CommentNotificationScheduler stories against a real database', () => {
   beforeEach(async () => {
     send.mockReset();
     send.mockResolvedValue(undefined);
+    // sweep() also runs the comment half over the whole database, which would claim the
+    // comments of runs other suites are testing at the same moment (comment-notification-
+    // scheduler.spec.ts did fail on exactly that); this suite tests stories only.
+    jest.spyOn(scheduler, 'announceRun').mockResolvedValue(0);
     await reset();
   });
 
