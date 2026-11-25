@@ -100,6 +100,15 @@ export default function TracesDiffTab({
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Only the latest Compare Traces request may write its result: a mode, range or baseline change
+  // while one is out would otherwise show the old reply under the new choice.
+  const compareSeq = useRef(0);
+  const invalidateCompare = (): void => {
+    compareSeq.current++;
+    setAnalysisResult(null);
+    setAnalyzing(false);
+  };
+
   const report = useRef(onDiffStateChange);
   report.current = onDiffStateChange;
   useEffect(() => {
@@ -203,6 +212,7 @@ export default function TracesDiffTab({
       return;
     }
 
+    const seq = ++compareSeq.current;
     try {
       setAnalyzing(true);
       setError(null);
@@ -222,6 +232,7 @@ export default function TracesDiffTab({
       };
 
       const result = await compareTraces(params);
+      if (seq !== compareSeq.current) return;
       setAnalysisResult(result);
       const against = compareMode === 'within'
         ? `${formatRunOffset(runWindows.current[0])}–${formatRunOffset(runWindows.current[1])} vs ${formatRunOffset(runWindows.baseline[0])}–${formatRunOffset(runWindows.baseline[1])} of this run`
@@ -232,6 +243,7 @@ export default function TracesDiffTab({
         setError(result.error);
       }
     } catch (err) {
+      if (seq !== compareSeq.current) return;
       console.error('Trace comparison failed:', err);
       setError(
         err && typeof err === 'object' && 'message' in err
@@ -239,7 +251,7 @@ export default function TracesDiffTab({
           : 'Failed to compare traces'
       );
     } finally {
-      setAnalyzing(false);
+      if (seq === compareSeq.current) setAnalyzing(false);
     }
   };
 
@@ -297,14 +309,14 @@ export default function TracesDiffTab({
         mode={compareMode}
         onModeChange={(m) => {
           setCompareMode(m);
-          setAnalysisResult(null);
+          invalidateCompare();
         }}
         startTime={testRun.start_time}
         endTime={testRun.end_time}
         value={runWindows}
         onChange={(w) => {
           setRunWindows(w);
-          setAnalysisResult(null);
+          invalidateCompare();
         }}
       />
 
@@ -319,7 +331,7 @@ export default function TracesDiffTab({
             value={selectedBaseline}
             onChange={(_event, newValue) => {
               setSelectedBaseline(newValue);
-              setAnalysisResult(null);
+              invalidateCompare();
             }}
             loading={fetchingBaselines}
             renderInput={(params) => (

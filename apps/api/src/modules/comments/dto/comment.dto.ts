@@ -253,8 +253,8 @@ export class CreateCommentDto {
 
   @ApiPropertyOptional({
     description:
-      "The card's view when the comment was written (Graphs, Trends and Compare roots, and Configuration item roots; required with markerTime). " +
-      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto, CompareChartContextDto or ConfigChartContextDto. ' +
+      "The card's view when the comment was written (Graphs, Trends and Compare roots, Distributed tracing and Pyroscope roots written on the diff tab, and Configuration item roots; required with markerTime). " +
+      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto, CompareChartContextDto, DiffChartContextDto or ConfigChartContextDto. ' +
       'Validated by the service against that class, because one nested type here would have the whitelist strip the other cards\' fields.',
   })
   @IsOptional()

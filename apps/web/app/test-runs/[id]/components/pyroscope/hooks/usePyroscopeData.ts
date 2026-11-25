@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useTheme } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
 import {
@@ -315,12 +315,15 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
     }
   }, [pyroscopeInstance, selectedApplication, selectedProfiler, compareMode, selectedBaseline, comparisonWindows, theme.palette.mode]);
 
-  // Analyze flamegraphs
+  // Analyze flamegraphs. Each committed range change starts another analysis; only the latest may
+  // write, or a slow earlier reply would show the analysis of ranges no longer selected.
+  const analysisSeq = useRef(0);
   const analyzeFlamegraphs = useCallback(async (): Promise<void> => {
     if (!pyroscopeInstance || !comparisonWindows || !selectedApplication || !selectedProfiler) {
       return;
     }
 
+    const seq = ++analysisSeq.current;
     try {
       setAnalysingFlamegraph(true);
       setFlamegraphAnalysis(null);
@@ -353,9 +356,11 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
 
       if (response.ok) {
         const analysis = await response.json();
+        if (seq !== analysisSeq.current) return;
         setFlamegraphAnalysis(analysis);
       } else {
         const errorData = await response.json();
+        if (seq !== analysisSeq.current) return;
         console.error('Failed to analyze flamegraphs:', errorData);
         setFlamegraphAnalysis({
           summary: {
@@ -372,6 +377,7 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
         });
       }
     } catch (err) {
+      if (seq !== analysisSeq.current) return;
       console.error('Error analyzing flamegraphs:', err);
       setFlamegraphAnalysis({
         summary: {
@@ -390,7 +396,7 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
             : 'An error occurred while analyzing flamegraphs',
       });
     } finally {
-      setAnalysingFlamegraph(false);
+      if (seq === analysisSeq.current) setAnalysingFlamegraph(false);
     }
   }, [pyroscopeInstance, comparisonWindows, selectedApplication, selectedProfiler]);
 

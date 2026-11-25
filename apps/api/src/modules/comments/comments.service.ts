@@ -556,6 +556,16 @@ export function validateChartContext(card: string, parentId: string | undefined,
     if (Number.isNaN(from) || Number.isNaN(to)) throw new BadRequestException(`chartContext.${key} must be readable timestamps`);
     if (from! >= to!) throw new BadRequestException(`chartContext.${key} must run forwards`);
   }
+  // A diff view's two time ranges come as a pair and run forwards, like the windows above; a lone
+  // or reversed one would be stored and then described wrongly (or not at all).
+  const v = view as { baselineWindowSeconds?: [number, number]; currentWindowSeconds?: [number, number] };
+  if (!v.baselineWindowSeconds !== !v.currentWindowSeconds) {
+    throw new BadRequestException('chartContext.baselineWindowSeconds and currentWindowSeconds come as a pair');
+  }
+  for (const key of ['baselineWindowSeconds', 'currentWindowSeconds'] as const) {
+    const w = v[key];
+    if (w && w[0] >= w[1]) throw new BadRequestException(`chartContext.${key} must run forwards`);
+  }
   return { ...JSON.parse(JSON.stringify(view)), kind: card };
 }
 

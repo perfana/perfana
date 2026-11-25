@@ -292,10 +292,10 @@ function MarkerComposer({
   );
 }
 
-/** What view a root recorded, with its "Restore view". Nothing for a deleted root or one without a view. */
-/** A view that only records facts (a diff tab's baseline and result): read, never replayed. */
+/** A view that records facts about the comment (a Configuration comparison, a diff tab's baseline and result), shown under it. */
 const isFactView = (v: CommentView) => v.kind === 'config' || v.kind === 'distributed-tracing' || v.kind === 'pyroscope';
 
+/** What view a root recorded, with its "Restore view". Nothing for a deleted root or one without a view. */
 function ViewLine({ thread, onRestore }: { thread: RunCommentThread; onRestore: () => void }) {
   if (!thread.chartContext || thread.deleted) return null;
   // ponytail: the diff tabs cannot replay a baseline yet, so their view has no Restore button.

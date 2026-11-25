@@ -854,6 +854,51 @@ describe('usePyroscopeData', () => {
       expect(body).toContain(String((s + 60) * 1000));
     });
 
+    // Value: protects=only the analysis of the ranges now selected is shown; fails_when=the analysis
+    // sequence guard is removed, so a slow reply for the previous ranges overwrites the newer one;
+    // why_new=no case let two analyses overlap; seam=none; no_claim=the backend analysis itself (fetch mocked)
+    it('keeps the analysis of the latest ranges when an earlier one answers last', async () => {
+      const testRun = makeTestRun({
+        systems_under_test: {
+          name: 'my-system',
+          pyroscope_configurations: mockConfigurations,
+          pyroscopeInstance: mockStandalonePyroscopeInstance,
+        },
+      });
+      const pending: Array<(v: unknown) => void> = [];
+      mockedFetch.mockImplementation((url: unknown) =>
+        (url as string).includes('analyze-flamegraphs')
+          ? new Promise((r) => { pending.push(r); })
+          : Promise.resolve(makeResponse([]) as Response)
+      );
+      const analysisFor = (label: string) =>
+        makeResponse({ ...mockFlamegraphAnalysis, tableReport: label }) as Response;
+
+      const { result } = renderUsePyroscopeData(testRun, true);
+      act(() => {
+        result.current.setCompareMode('within');
+        result.current.setRunWindows({ baseline: [0, 600], current: [1200, 1800] });
+        result.current.handleViewModeTabChange({} as React.SyntheticEvent, 1);
+      });
+      await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(1));
+      const first = pending.length;
+
+      act(() => {
+        result.current.setRunWindows({ baseline: [0, 300], current: [1500, 1800] });
+      });
+      await waitFor(() => expect(pending.length).toBeGreaterThan(first));
+
+      await act(async () => {
+        pending[pending.length - 1]!(analysisFor('latest'));
+      });
+      await act(async () => {
+        pending[first - 1]!(analysisFor('stale'));
+      });
+
+      await waitFor(() => expect(result.current.flamegraphAnalysis?.tableReport).toBe('latest'));
+      expect(result.current.analysingFlamegraph).toBe(false);
+    });
+
     it('should set error when baseline has no timestamps', async () => {
       const runsWithoutTimestamps: RelatedTestRun[] = [
         {
