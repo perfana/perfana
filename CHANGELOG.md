@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **A comment on a diff tab says what it compared.** A new comment on the tracing card's Traces Diff tab or the Pyroscope Diff View records the baseline run, or the two time ranges of the run, and on the tracing card a short summary of the Compare Traces result on screen (trace counts, average duration against the baseline, likely root causes, new and missing spans, new errors) with the request it was computed for. It shows under the comment, in the report's Comments section and to agents reading the comment. Comments on the other tabs record nothing new.
 
 ### Fixed
+- **Opening the Pyroscope Diff View in Grafana shows the compared time ranges.** With the Grafana Pyroscope app (2.x), both panels used to open on Grafana's default range (the last 30 minutes), with the compared windows outside them, and once that was corrected the comparison panel showed the baseline's range. The link now sets the baseline panel's range (`from`/`to`) and the comparison panel's (`from-2`/`to-2`, `comparisonFrom`/`comparisonTo`) to the two compared windows, for a comparison against another run and for two ranges of one run alike. Verified against app 2.3.1.
 - **The Pyroscope Diff View reports a baseline run without timestamps again** instead of waiting silently; the time-range change had dropped that message.
 
 ## [0.2.97.99] - 2026-11-24

@@ -283,10 +283,18 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
           diffTo: new Date(baselineEndTimeMs).toISOString(),
           'diffFrom-2': new Date(currentStartTimeMs).toISOString(),
           'diffTo-2': new Date(currentEndTimeMs).toISOString(),
-          'from-2': new Date(baselineStartTimeMs).toISOString(),
-          'to-2': new Date(baselineEndTimeMs).toISOString(),
-          'from-3': new Date(currentStartTimeMs).toISOString(),
-          'to-3': new Date(currentEndTimeMs).toISOString(),
+          // The panels' own ranges, read by the Grafana Pyroscope app 2.x (verified on 2.3.1): the
+          // baseline panel shows the page range (from/to), the comparison panel its own scene time
+          // range, which syncs on the suffixed keys from-2/to-2 (comparisonFrom/comparisonTo is the
+          // same range under the panel's own key). Without them both panels open on Grafana's
+          // default range with the selections above outside it; from-2 set to the baseline window,
+          // as it used to be, made the comparison panel show the baseline's range.
+          from: new Date(baselineStartTimeMs).toISOString(),
+          to: new Date(baselineEndTimeMs).toISOString(),
+          'from-2': new Date(currentStartTimeMs).toISOString(),
+          'to-2': new Date(currentEndTimeMs).toISOString(),
+          comparisonFrom: new Date(currentStartTimeMs).toISOString(),
+          comparisonTo: new Date(currentEndTimeMs).toISOString(),
           theme: theme.palette.mode,
           kiosk: 'true',
         });

@@ -759,6 +759,20 @@ describe('usePyroscopeData', () => {
       expect(url).toContain('explorationType=diff-flame-graph');
       expect(url).toContain('var-serviceName=my-app');
       expect(url).toContain('kiosk=true');
+
+      // Regression: the Grafana Pyroscope app 2.x reads the baseline panel's range from from/to and
+      // the comparison panel's from from-2/to-2 (and comparisonFrom/comparisonTo). Without from/to
+      // both panels opened on Grafana's default range; with from-2 set to the baseline window the
+      // comparison panel showed the baseline's range.
+      const p = new URL(url).searchParams;
+      expect(p.get('diffFrom')).toBeTruthy();
+      expect(p.get('diffFrom-2')).not.toBe(p.get('diffFrom'));
+      expect(p.get('from')).toBe(p.get('diffFrom'));
+      expect(p.get('to')).toBe(p.get('diffTo'));
+      expect(p.get('from-2')).toBe(p.get('diffFrom-2'));
+      expect(p.get('to-2')).toBe(p.get('diffTo-2'));
+      expect(p.get('comparisonFrom')).toBe(p.get('diffFrom-2'));
+      expect(p.get('comparisonTo')).toBe(p.get('diffTo-2'));
     });
 
     it('should generate standalone comparison URL using diff path format', async () => {
@@ -792,6 +806,52 @@ describe('usePyroscopeData', () => {
       expect(url).toContain('leftFrom=');
       expect(url).toContain('rightFrom=');
       expect(url).toContain('query=');
+    });
+
+    // Value: protects=within-run mode compares two ranges of THIS run (no baseline run needed), with
+    // from/until spanning both ranges and analyze posting the same ms windows; fails_when=comparisonWindows
+    // ignores compareMode, offsets are not added to run start, or from/until reverts to baseline-start/current-end;
+    // why_new=existing cases cover run-vs-run only; seam=none; no_claim=Pyroscope accepts the URL (fetch mocked)
+    it('should compare two time ranges of this run in within mode', async () => {
+      const testRun = makeTestRun({
+        systems_under_test: {
+          name: 'my-system',
+          pyroscope_configurations: mockConfigurations,
+          pyroscopeInstance: mockStandalonePyroscopeInstance,
+        },
+      });
+      // no related runs: within mode must not need a baseline run
+      mockedFetch.mockImplementation((url: unknown) =>
+        Promise.resolve(makeResponse((url as string).includes('analyze-flamegraphs') ? mockFlamegraphAnalysis : []) as Response)
+      );
+
+      const { result } = renderUsePyroscopeData(testRun, true);
+      act(() => {
+        result.current.setCompareMode('within');
+        result.current.setRunWindows({ baseline: [1800, 3600], current: [60, 600] });
+      });
+      act(() => {
+        result.current.handleViewModeTabChange({} as React.SyntheticEvent, 1);
+      });
+
+      await waitFor(() => {
+        expect(result.current.compareViewUrl).not.toBeNull();
+      });
+      const s = 1705312800; // 2024-01-15T10:00:00Z
+      const url = result.current.compareViewUrl!;
+      expect(url).toContain(`from=${s + 60}&until=${s + 3600}`);
+      expect(url).toContain(`leftFrom=${s + 1800}&leftUntil=${s + 3600}`);
+      expect(url).toContain(`rightFrom=${s + 60}&rightUntil=${s + 600}`);
+      expect(result.current.selectedBaseline).toBeNull();
+      expect(result.current.hasComparison).toBe(true);
+
+      await waitFor(() => {
+        expect(mockedFetch.mock.calls.some((c) => (c[0] as string).includes('analyze-flamegraphs'))).toBe(true);
+      });
+      const call = mockedFetch.mock.calls.find((c) => (c[0] as string).includes('analyze-flamegraphs'))!;
+      const body = JSON.stringify(JSON.parse((call[1] as RequestInit).body as string));
+      expect(body).toContain(String((s + 1800) * 1000));
+      expect(body).toContain(String((s + 60) * 1000));
     });
 
     it('should set error when baseline has no timestamps', async () => {
