@@ -46,6 +46,15 @@ describe('validateChartContext', () => {
       .toMatchObject({ baselineWindowSeconds: [0, 600], currentWindowSeconds: [1200, 1800] });
   });
 
+  // Value: protects=a trace summary carrying a NUL or a lone surrogate is stored cleaned, not refused by jsonb
+  // with a 500 the drawer's view-less retry cannot catch; fails_when=the server stops cleaning resultSummary;
+  // why_new=adversarial review: the summary is trace text from the tracing backend; seam=none;
+  // no_claim=jsonb's own refusal (checked by hand against the dev database)
+  it('cleans a trace summary jsonb would refuse: NUL dropped, a lone surrogate replaced', () => {
+    const out = validateChartContext('distributed-tracing', undefined, { view: 'diff', baselineTestRunId: 'App-00007', resultSummary: 'span a\u0000b \ud83d end \u{1F525}' });
+    expect(out.resultSummary).toBe('span ab \uFFFD end \u{1F525}');
+  });
+
   it('strips keys outside the shape and ignores a kind the body claims', () => {
     const out = validateChartContext('trends', undefined, trends({ kind: 'graphs', extra: 'x' }));
     expect(out.kind).toBe('trends');

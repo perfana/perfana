@@ -107,6 +107,7 @@ export default function TracesDiffTab({
     compareSeq.current++;
     setAnalysisResult(null);
     setAnalyzing(false);
+    setError(null); // an error from the previous choice must not read as this one's
   };
 
   // The tab stays mounted while the service, scenario or transaction changes, so a result computed

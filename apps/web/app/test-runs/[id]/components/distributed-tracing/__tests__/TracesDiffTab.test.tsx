@@ -81,6 +81,20 @@ describe('TracesDiffTab within mode', () => {
     expect(screen.queryByTestId('trace-report')).toBeNull();
   });
 
+  // Value: protects=an error from one comparison choice does not stay on screen under the next; fails_when=
+  // invalidateCompare stops clearing the error; why_new=adversarial review; seam=none; no_claim=the wording
+  it('clears a comparison error when the mode changes', async () => {
+    mockedCompare.mockRejectedValue(new Error('Tempo unreachable'));
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Two time ranges in this run' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Compare Traces' }));
+    expect(await screen.findByText('Tempo unreachable')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Another test run' }));
+    await waitFor(() => expect(screen.queryByText('Tempo unreachable')).toBeNull());
+  });
+
   // Value: protects=the recorded result names its service and does not outlive a service switch;
   // fails_when=resultFor drops the service or the scope reset is removed; why_new=a comment could store
   // service A's result under service B; seam=none; no_claim=the card's own service tabs (props driven here)

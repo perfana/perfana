@@ -32,6 +32,7 @@ import {
   COMMENT_CARD_KEYS,
   COMMENT_ITEM_KEY_MAX_LENGTH,
   COMMENT_UNREAD_WINDOW_DAYS,
+  jsonbSafeText,
   type CommentAuthorKind,
 } from '@perfana/shared/constants/comment-cards';
 import { anchorCard, loadAnchorRun, parseAnchor, resolveAnchor } from './comment-anchor.resolver';
@@ -566,7 +567,11 @@ export function validateChartContext(card: string, parentId: string | undefined,
     const w = v[key];
     if (w && w[0] >= w[1]) throw new BadRequestException(`chartContext.${key} must run forwards`);
   }
-  return { ...JSON.parse(JSON.stringify(view)), kind: card };
+  const stored = { ...JSON.parse(JSON.stringify(view)), kind: card };
+  // The summary is trace text the client copied from the tracing backend; jsonb refuses a NUL or a
+  // lone surrogate with a 500 that names no field, so clean it here for every client, old ones too.
+  if (typeof stored.resultSummary === 'string') stored.resultSummary = jsonbSafeText(stored.resultSummary);
+  return stored;
 }
 
 export function toResponse(row: TestRunComment): CommentResponse {

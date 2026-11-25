@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { DIFF_VIEW_SUMMARY_MAX_LENGTH } from '@perfana/shared/constants/comment-cards';
+import { DIFF_VIEW_SUMMARY_MAX_LENGTH, jsonbSafeText } from '@perfana/shared/constants/comment-cards';
 import type { DiffView } from '@/lib/test-run-comments';
 import { useComments } from './CommentsContext';
 import type { RunWindows } from '../shared/WithinRunWindowsPicker';
@@ -38,7 +38,7 @@ export function useDiffCommentView(card: DiffView['kind'], read: () => DiffTabSt
               : {}),
           // Cut by code points, as the API's Length counts them: a UTF-16 cut can leave half an
           // emoji, which Postgres jsonb refuses (a 500 the drawer's view-less retry does not catch).
-          ...(s.resultSummary ? { resultSummary: Array.from(s.resultSummary).slice(0, DIFF_VIEW_SUMMARY_MAX_LENGTH).join('') } : {}),
+          ...(s.resultSummary ? { resultSummary: Array.from(jsonbSafeText(s.resultSummary)).slice(0, DIFF_VIEW_SUMMARY_MAX_LENGTH).join('') } : {}),
         };
       }),
     [register, card],

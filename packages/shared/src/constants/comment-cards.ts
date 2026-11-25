@@ -364,6 +364,15 @@ export interface DiffCommentView {
   resultSummary?: string;
 }
 
+/**
+ * Text Postgres jsonb will store: NUL removed and an unpaired surrogate replaced with U+FFFD. jsonb
+ * refuses both (22P05, "Unicode low surrogate must follow a high surrogate"), and a Compare Traces
+ * summary carries span, service and error text straight from the tracing backend.
+ */
+export function jsonbSafeText(text: string): string {
+  return text.replace(/\u0000/g, '').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+}
+
 /** `1:05:09`, or `5:09` under an hour: an offset from the run's start, as the range picker shows it. */
 export function formatRunOffset(seconds: number): string {
   const h = Math.floor(seconds / 3600);
