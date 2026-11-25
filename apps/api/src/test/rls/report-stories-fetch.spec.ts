@@ -18,6 +18,7 @@ import { TestRun } from '@perfana/shared';
 import { AppDataSource } from '../../data-source';
 import * as Entities from '../../entities';
 import { ReportDataFetcherService } from '../../modules/reports/services/report-data-fetcher.service';
+import { deleteSystemFixtures } from './delete-system-fixtures';
 
 const entityClasses = Object.values(Entities).filter(
   (v): v is new () => unknown => typeof v === 'function',
@@ -85,7 +86,7 @@ describe('ReportDataFetcherService.getPublishedStories against a real database',
   afterAll(async () => {
     await ds.query(`DELETE FROM ds_metric_collection_status WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE id = $1)`, [runUuid]);
     await ds.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid]);
-    await ds.query(`DELETE FROM systems_under_test WHERE id = $1`, [sut]);
+    await deleteSystemFixtures(ds, [sut]);
     await ds.query(`DELETE FROM organizations WHERE id = ANY($1::uuid[])`, [[org, otherOrg]]);
     await ds.destroy();
   });

@@ -18,6 +18,7 @@
  * helper functions) against the target database. `npm run preflight` runs it.
  */
 import { O1, O2, RlsTestHarness, TestUser } from './rls-test-harness';
+import { deleteSystemFixtures } from './delete-system-fixtures';
 
 const KEY_ID = '00000000-0000-0000-0000-0000000ab001';
 const RUN_ID = '00000000-0000-0000-0000-0000000ab002';
@@ -89,7 +90,7 @@ describe('RLS: API-key organization resolution', () => {
   afterAll(async () => {
     const ds = harness.rawDs;
     await ds.query('DELETE FROM test_runs WHERE id = ANY($1::uuid[])', [[RUN_ID, RUN_BY_OTHER_ID]]);
-    await ds.query('DELETE FROM systems_under_test WHERE id = $1', [SUT_ID]);
+    await deleteSystemFixtures(ds, [SUT_ID]);
     await ds.query('DELETE FROM api_keys WHERE id = $1', [KEY_ID]);
     await harness.destroy();
   });
