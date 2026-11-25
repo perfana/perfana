@@ -141,8 +141,13 @@ export function calculateMaxWidth(baseWidth: number, depth: number, depthMultipl
   return baseWidth - depth * depthMultiplier;
 }
 
-const ms = (v: number) => `${Number.isFinite(v) ? v.toFixed(1) : '-'} ms`;
-const pct = (v: number) => (Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` : '-');
+// The reply comes off the network typed but unvalidated, and a missing field must cost one line of
+// the summary, not the whole recorded view (the capture would throw and drop the baseline too).
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const ms = (v: unknown) => `${num(v)?.toFixed(1) ?? '-'} ms`;
+const pct = (v: unknown) => { const n = num(v); return n === null ? '-' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`; };
+const count = (v: unknown) => (num(v) === null ? '-' : String(v));
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 const list = (xs: string[], max = 5) => xs.slice(0, max).join(', ') + (xs.length > max ? ` (+${xs.length - max} more)` : '');
 
 /**
@@ -154,20 +159,25 @@ export function summarizeTraceAnalysis(a: TraceAnalysisResponse, comparedFor?: s
   // The result stays on screen when the filters change, so say which request it is for.
   const head = comparedFor ? `Compare Traces for ${comparedFor}` : 'Compare Traces';
   if (a.error) return `${head} failed: ${a.error}`;
-  const s = a.summary;
+  const s: Partial<TraceAnalysisResponse['summary']> = a.summary ?? {};
+  const avgSpans = (v: unknown) => num(v)?.toFixed(1) ?? '-';
   const lines = [
     `${head}:`,
-    `Traces: ${s.currentTraceCount} current / ${s.baselineTraceCount} baseline`,
+    `Traces: ${count(s.currentTraceCount)} current / ${count(s.baselineTraceCount)} baseline`,
     `Avg duration: ${ms(s.avgDurationCurrent)} vs ${ms(s.avgDurationBaseline)} baseline (${pct(s.avgDurationChangePercent)})`,
-    `Avg spans: ${s.avgSpanCountCurrent.toFixed(1)} vs ${s.avgSpanCountBaseline.toFixed(1)} baseline`,
+    `Avg spans: ${avgSpans(s.avgSpanCountCurrent)} vs ${avgSpans(s.avgSpanCountBaseline)} baseline`,
   ];
-  const causes = a.rootCauses.filter((r) => r.isLikelyRootCause).slice(0, 3);
+  const causes = (Array.isArray(a.rootCauses) ? a.rootCauses : []).filter((r) => r?.isLikelyRootCause).slice(0, 3);
   if (causes.length) {
     lines.push(`Likely root causes: ${causes.map((r) => `${r.spanName} (${r.serviceName}) ${pct(r.percentIncrease)}, ${r.confidence} confidence`).join('; ')}`);
   }
-  if (a.spanComposition.newSpans.length) lines.push(`New spans: ${list(a.spanComposition.newSpans)}`);
-  if (a.spanComposition.missingSpans.length) lines.push(`Missing spans: ${list(a.spanComposition.missingSpans)}`);
-  if (a.errorAnalysis.newErrors.length) lines.push(`New errors: ${list(a.errorAnalysis.newErrors)}`);
-  if (a.warnings?.length) lines.push(`Warnings: ${list(a.warnings, 3)}`);
+  const newSpans = strings(a.spanComposition?.newSpans);
+  const missingSpans = strings(a.spanComposition?.missingSpans);
+  const newErrors = strings(a.errorAnalysis?.newErrors);
+  const warnings = strings(a.warnings);
+  if (newSpans.length) lines.push(`New spans: ${list(newSpans)}`);
+  if (missingSpans.length) lines.push(`Missing spans: ${list(missingSpans)}`);
+  if (newErrors.length) lines.push(`New errors: ${list(newErrors)}`);
+  if (warnings.length) lines.push(`Warnings: ${list(warnings, 3)}`);
   return lines.join('\n');
 }

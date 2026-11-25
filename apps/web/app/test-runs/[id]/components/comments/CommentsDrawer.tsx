@@ -585,7 +585,10 @@ export default function CommentsDrawer() {
             }
             const where = anchor ? { itemKey: anchor.itemKey, itemLabel: anchor.itemLabel } : undefined;
             const c = await postComment(runId, card, body, undefined, where, view, tag).catch((e: unknown) => {
-              if (view && e instanceof Error && e.message.includes('chartContext')) return postComment(runId, card, body, undefined, where, undefined, tag);
+              // A view the server will not store never costs the comment: a shape it refuses names
+              // chartContext, and an API older than this client refuses a card's view outright
+              // ("... records a view"), which is how the diff-tab views meet an API deployed later.
+              if (view && e instanceof Error && /chartContext|records a view/.test(e.message)) return postComment(runId, card, body, undefined, where, undefined, tag);
               throw e;
             });
             upsert(c);

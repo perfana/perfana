@@ -109,6 +109,18 @@ export default function TracesDiffTab({
     setAnalyzing(false);
   };
 
+  // The tab stays mounted while the service, scenario or transaction changes, so a result computed
+  // for the previous one must not survive the switch (a comment would record it under this one).
+  // The sampler is left out: a drill-down changes it and then compares again on purpose.
+  const scopeKey = `${serviceName}\u0000${scenario}\u0000${transaction}`;
+  const lastScope = useRef(scopeKey);
+  useEffect(() => {
+    if (lastScope.current === scopeKey) return;
+    lastScope.current = scopeKey;
+    invalidateCompare();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey]);
+
   const report = useRef(onDiffStateChange);
   report.current = onDiffStateChange;
   useEffect(() => {
@@ -237,7 +249,7 @@ export default function TracesDiffTab({
       const against = compareMode === 'within'
         ? `${formatRunOffset(runWindows.current[0])}–${formatRunOffset(runWindows.current[1])} vs ${formatRunOffset(runWindows.baseline[0])}–${formatRunOffset(runWindows.baseline[1])} of this run`
         : `vs run ${windows.baselineTestRunId}`;
-      setResultFor(`${[scenario, transaction, effectiveSampler].filter(Boolean).join(' / ')} ${against}`);
+      setResultFor(`${serviceName}: ${[scenario, transaction, effectiveSampler].filter(Boolean).join(' / ')} ${against}`);
 
       if (result.error) {
         setError(result.error);

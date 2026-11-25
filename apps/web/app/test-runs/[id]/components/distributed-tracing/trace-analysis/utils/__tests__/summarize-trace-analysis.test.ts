@@ -26,6 +26,20 @@ describe('summarizeTraceAnalysis', () => {
     ]);
   });
 
+  // Value: protects=a partial reply still yields a summary instead of throwing (which would drop the whole
+  // recorded view); fails_when=a field is dereferenced unguarded again; why_new=only complete replies were
+  // summarised; seam=none; no_claim=what the backend sends for zero traces
+  it('summarises a partial reply with dashes instead of throwing', () => {
+    const partial = { summary: { currentTraceCount: 0, avgSpanCountCurrent: null } } as unknown as TraceAnalysisResponse;
+    expect(summarizeTraceAnalysis(partial).split('\n')).toEqual([
+      'Compare Traces:',
+      'Traces: 0 current / - baseline',
+      'Avg duration: - ms vs - ms baseline (-)',
+      'Avg spans: - vs - baseline',
+    ]);
+    expect(summarizeTraceAnalysis({} as TraceAnalysisResponse)).toContain('Traces: - current / - baseline');
+  });
+
   it('reports a failed comparison', () => {
     expect(summarizeTraceAnalysis({ ...result, error: 'no traces' })).toBe('Compare Traces failed: no traces');
   });

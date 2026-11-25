@@ -31,17 +31,18 @@ const testRun = {
   systems_under_test: { name: 'Shop' },
 };
 
-const renderTab = () =>
-  render(
-    <TracesDiffTab
-      testRun={testRun}
-      tracingInstanceId="tracing-1"
-      serviceName="orders"
-      scenario="Checkout"
-      transaction="Pay"
-      sampler={null}
-    />,
-  );
+const tab = (serviceName = 'orders', onDiffStateChange?: (s: unknown) => void) => (
+  <TracesDiffTab
+    testRun={testRun}
+    tracingInstanceId="tracing-1"
+    serviceName={serviceName}
+    scenario="Checkout"
+    transaction="Pay"
+    sampler={null}
+    onDiffStateChange={onDiffStateChange}
+  />
+);
+const renderTab = () => render(tab());
 
 const result = { summary: { currentTraceCount: 1 } } as never;
 
@@ -78,5 +79,23 @@ describe('TracesDiffTab within mode', () => {
     await act(async () => { resolve(result); });
 
     expect(screen.queryByTestId('trace-report')).toBeNull();
+  });
+
+  // Value: protects=the recorded result names its service and does not outlive a service switch;
+  // fails_when=resultFor drops the service or the scope reset is removed; why_new=a comment could store
+  // service A's result under service B; seam=none; no_claim=the card's own service tabs (props driven here)
+  it('names the service in the recorded result and clears it when the service changes', async () => {
+    mockedCompare.mockResolvedValue(result);
+    const reports: Array<{ result: unknown; resultFor: string | null } | null> = [];
+    const onState = (s: unknown) => reports.push(s as never);
+    const { rerender } = render(tab('orders', onState));
+    fireEvent.click(screen.getByRole('button', { name: 'Two time ranges in this run' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Compare Traces' }));
+    expect(await screen.findByTestId('trace-report')).toBeTruthy();
+    expect(reports[reports.length - 1]!.resultFor).toMatch(/^orders: Checkout \/ Pay /);
+
+    rerender(tab('payments', onState));
+    await waitFor(() => expect(screen.queryByTestId('trace-report')).toBeNull());
+    expect(reports[reports.length - 1]!.result).toBeNull();
   });
 });
