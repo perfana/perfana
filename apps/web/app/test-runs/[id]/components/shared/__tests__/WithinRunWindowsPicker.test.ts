@@ -17,6 +17,17 @@ describe('within-run window helpers', () => {
     });
   });
 
+  // Value: protects=a live run (no end_time) is measured up to now; fails_when=the Date.now() fallback is dropped or end is read as start; why_new=other rows always pass end; seam=none; no_claim=none beyond protects
+  it('measures a live run with no end time up to now', () => {
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-25T10:30:00.000Z'));
+    try {
+      expect(runDurationSeconds(start, null)).toBe(1800);
+      expect(runDurationSeconds(start)).toBe(1800);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('reads an unparseable run as zero length', () => {
     expect(runDurationSeconds('nope', end)).toBe(0);
   });
