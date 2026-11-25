@@ -38,6 +38,12 @@ describe('validateChartContext', () => {
     expect(validateChartContext('config', undefined, config({ status: 'same', comparedToTestRunId: undefined }))).toMatchObject({ kind: 'config', status: 'same' });
   });
 
+  it('keeps a Distributed tracing diff view with its baseline and result, and a Pyroscope one with its baseline', () => {
+    expect(validateChartContext('distributed-tracing', undefined, { view: 'diff', baselineTestRunId: 'App-00007', resultSummary: 'x'.repeat(2000) }))
+      .toMatchObject({ kind: 'distributed-tracing', view: 'diff', baselineTestRunId: 'App-00007' });
+    expect(validateChartContext('pyroscope', undefined, { view: 'diff', baselineTestRunId: 'App-00007' })).toMatchObject({ kind: 'pyroscope', view: 'diff' });
+  });
+
   it('strips keys outside the shape and ignores a kind the body claims', () => {
     const out = validateChartContext('trends', undefined, trends({ kind: 'graphs', extra: 'x' }));
     expect(out.kind).toBe('trends');
@@ -59,6 +65,8 @@ describe('validateChartContext', () => {
     ['a Configuration value over 2,000 characters', 'config', config({ previousValue: 'x'.repeat(2001) })],
     ['a Configuration view with an unknown status', 'config', config({ status: 'different' })],
     ['a Configuration view with no status', 'config', config({ status: undefined })],
+    ['a diff view naming another tab', 'pyroscope', { view: 'single' }],
+    ['a trace result over 2,000 characters', 'distributed-tracing', { view: 'diff', resultSummary: 'x'.repeat(2001) }],
     ['a view on a card that records none', 'slo', graphs()],
     ['a view on Dashboards, which records none', 'dashboards', config()],
   ])('refuses %s', (_label, card, raw) => {

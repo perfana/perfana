@@ -18,7 +18,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { COMMENT_BODY_MAX_LENGTH, describeConfigCommentView, type CommentCardKey, type CommentTag } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_BODY_MAX_LENGTH, describeConfigCommentView, describeDiffCommentView, type CommentCardKey, type CommentTag } from '@perfana/shared/constants/comment-cards';
 import { useAuth } from '@/contexts/auth-context';
 import {
   deleteComment,
@@ -57,6 +57,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 
 /** One line saying what view a comment recorded, shown beside its "Restore view". */
 export function describeView(view: CommentView, marker: boolean): string {
   if (view.kind === 'config') return describeConfigCommentView(view);
+  if (view.kind === 'distributed-tracing' || view.kind === 'pyroscope') return describeDiffCommentView(view);
   const n = `${view.series.length} series`;
   if (view.kind === 'trends') {
     const dates = view.customRange ? `${day(view.customRange[0])}–${day(view.customRange[1])}` : null;
@@ -292,16 +293,23 @@ function MarkerComposer({
 }
 
 /** What view a root recorded, with its "Restore view". Nothing for a deleted root or one without a view. */
+/** A view that only records facts (a diff tab's baseline and result): read, never replayed. */
+const isFactView = (v: CommentView) => v.kind === 'config' || v.kind === 'distributed-tracing' || v.kind === 'pyroscope';
+
 function ViewLine({ thread, onRestore }: { thread: RunCommentThread; onRestore: () => void }) {
   if (!thread.chartContext || thread.deleted) return null;
+  // ponytail: the diff tabs cannot replay a baseline yet, so their view has no Restore button.
+  const diff = thread.chartContext.kind === 'distributed-tracing' || thread.chartContext.kind === 'pyroscope';
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }} data-testid={`comment-view-${thread.id}`}>
-      <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+      <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', whiteSpace: diff ? 'pre-line' : undefined, display: '-webkit-box', WebkitLineClamp: diff ? 10 : 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
         {describeView(thread.chartContext, thread.markerSeq != null)}
       </Typography>
-      <Button size="small" onClick={onRestore} sx={{ flexShrink: 0 }}>
-        Restore view
-      </Button>
+      {!diff && (
+        <Button size="small" onClick={onRestore} sx={{ flexShrink: 0 }}>
+          Restore view
+        </Button>
+      )}
     </Box>
   );
 }
@@ -678,7 +686,7 @@ export default function CommentsDrawer() {
                 <Box sx={{ px: 1, pb: 1.5 }}>
                   {/* A chart view heads its comment; a Configuration comparison is a fact about
                       the comment, so it sits under it. */}
-                  {t.chartContext?.kind !== 'config' && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
+                  {t.chartContext && !isFactView(t.chartContext) && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
                   <CommentItem
                     comment={t}
                     isNew={isNew(t)}
@@ -690,7 +698,7 @@ export default function CommentsDrawer() {
                     onEdit={async (body, tag) => upsert(await editComment(t.id, body, tag !== t.tag ? tag : undefined))}
                     onDelete={() => remove(t)}
                   />
-                  {t.chartContext?.kind === 'config' && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
+                  {t.chartContext && isFactView(t.chartContext) && <ViewLine thread={t} onRestore={() => ctx.restoreView(t)} />}
                   <Box sx={{ pl: 2, borderLeft: 1, borderColor: 'divider', ml: 0.5 }}>
                     {t.replies.map((r) => (
                       <CommentItem

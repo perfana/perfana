@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -38,6 +38,13 @@ interface RelatedTestRun {
   annotations?: string[];
 }
 
+/** What the tab shows: the baseline picked, and the last result with the request and baseline it was computed for. */
+export interface DiffTabReport {
+  baselineTestRunId: string | null;
+  result: TraceAnalysisResponse | null;
+  resultFor: string | null;
+}
+
 interface TracesDiffTabProps {
   testRun: {
     id: string;
@@ -57,6 +64,8 @@ interface TracesDiffTabProps {
   transaction: string;
   sampler: string | null;
   onSamplerChange?: (sampler: string | null) => void;
+  /** Told the baseline and the result on screen, for a comment written on this tab; null on unmount. */
+  onDiffStateChange?: (state: DiffTabReport | null) => void;
 }
 
 /**
@@ -70,6 +79,7 @@ export default function TracesDiffTab({
   transaction,
   sampler,
   onSamplerChange,
+  onDiffStateChange,
 }: TracesDiffTabProps) {
   // State
   const [relatedTestRuns, setRelatedTestRuns] = useState<RelatedTestRun[]>([]);
@@ -83,8 +93,16 @@ export default function TracesDiffTab({
   const canCompare = compareMode === 'within' || !!selectedBaseline;
 
   const [analysisResult, setAnalysisResult] = useState<TraceAnalysisResponse | null>(null);
+  const [resultFor, setResultFor] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const report = useRef(onDiffStateChange);
+  report.current = onDiffStateChange;
+  useEffect(() => {
+    report.current?.({ baselineTestRunId: selectedBaseline?.test_run_id ?? null, result: analysisResult, resultFor });
+  }, [selectedBaseline, analysisResult, resultFor]);
+  useEffect(() => () => report.current?.(null), []);
 
   // Track if we should auto-compare after sampler change (drill-down)
   const [pendingDrillDown, setPendingDrillDown] = useState<string | null>(null);
@@ -197,6 +215,7 @@ export default function TracesDiffTab({
 
       const result = await compareTraces(params);
       setAnalysisResult(result);
+      setResultFor(`${[scenario, transaction, effectiveSampler].filter(Boolean).join(' / ')} vs run ${selectedBaseline.test_run_id}`);
 
       if (result.error) {
         setError(result.error);

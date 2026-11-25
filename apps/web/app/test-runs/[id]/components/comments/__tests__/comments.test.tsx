@@ -845,6 +845,8 @@ describe('comment views on Graphs, Trends and Compare', () => {
     expect(describeView({ ...trendsView, customRange: ['2026-11-13T00:00:00Z', '2026-11-20T00:00:00Z'] }, false)).toMatch(/^1 series · Last week \(.+–.+\) · p95$/);
     expect(describeView({ kind: 'compare', series: trendsView.series, baselineTestRunId: 'control-group' }, false)).toBe('1 series · vs control group');
     expect(describeView({ kind: 'compare', series: trendsView.series }, false)).toBe('1 series · no baseline');
+    expect(describeView({ kind: 'pyroscope', view: 'diff', baselineTestRunId: 'App-00004' }, false)).toBe('Diff view vs run App-00004');
+    expect(describeView({ kind: 'distributed-tracing', view: 'diff', resultSummary: 'Traces: 3 current / 4 baseline' }, false)).toBe('Diff view, no baseline selected\nTraces: 3 current / 4 baseline');
     expect(describeView({ series: [] }, true)).toBe('Placed on 0 series · whole run');
     expect(describeView({ kind: 'graphs', series: [] }, false)).toBe('Written on 0 series · whole run');
   });

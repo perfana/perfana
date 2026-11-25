@@ -344,6 +344,28 @@ export function describeConfigCommentView(view: Pick<ConfigCommentView, 'compare
   return `Compared with run ${view.comparedToTestRunId}: ${values} (${status})`;
 }
 
+/** Longest Compare Traces result summary a Distributed tracing comment keeps; mirrored by the API DTO. */
+export const DIFF_VIEW_SUMMARY_MAX_LENGTH = 2_000;
+
+/**
+ * What a root comment on the Distributed tracing or Pyroscope card records while its diff tab is
+ * open (`chart_context`, `kind` = the card): the baseline run, and on tracing the Compare Traces
+ * result on screen when the comment was written. Not recorded on the other tabs.
+ */
+export interface DiffCommentView {
+  kind?: 'distributed-tracing' | 'pyroscope';
+  view: 'diff';
+  baselineTestRunId?: string;
+  /** Plain-text summary of the Compare Traces result; absent until Compare Traces was clicked. */
+  resultSummary?: string;
+}
+
+/** `Diff view vs run 1234` plus the result summary on its own lines. Plain text; the caller escapes it. */
+export function describeDiffCommentView(view: Pick<DiffCommentView, 'baselineTestRunId' | 'resultSummary'>): string {
+  const head = view.baselineTestRunId ? `Diff view vs run ${view.baselineTestRunId}` : 'Diff view, no baseline selected';
+  return view.resultSummary ? `${head}\n${view.resultSummary}` : head;
+}
+
 /**
  * Analysis tags a root comment may carry (design: docs/designs/test-run-analysis-stories.md,
  * "Tags"). Stored in `test_run_comments.tag` and mirrored by that column's CHECK, so a stored

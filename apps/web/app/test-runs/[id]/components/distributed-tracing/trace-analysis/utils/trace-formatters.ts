@@ -3,7 +3,7 @@
  * Utility functions for formatting trace analysis data
  */
 
-import type { ConfidenceLevel } from '../types';
+import type { ConfidenceLevel, TraceAnalysisResponse } from '../types';
 
 /**
  * Format a numeric value based on the specified format type
@@ -139,4 +139,35 @@ export function formatPercentChange(percent: number): string {
  */
 export function calculateMaxWidth(baseWidth: number, depth: number, depthMultiplier: number = 16): number {
   return baseWidth - depth * depthMultiplier;
+}
+
+const ms = (v: number) => `${Number.isFinite(v) ? v.toFixed(1) : '-'} ms`;
+const pct = (v: number) => (Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` : '-');
+const list = (xs: string[], max = 5) => xs.slice(0, max).join(', ') + (xs.length > max ? ` (+${xs.length - max} more)` : '');
+
+/**
+ * The Compare Traces result as a few plain-text lines, for a comment written on the Traces Diff
+ * tab: what an agent or a report reader needs without the card open. Counts and the top root
+ * causes only; the per-span tables stay on the card.
+ */
+export function summarizeTraceAnalysis(a: TraceAnalysisResponse, comparedFor?: string | null): string {
+  // The result stays on screen when the filters change, so say which request it is for.
+  const head = comparedFor ? `Compare Traces for ${comparedFor}` : 'Compare Traces';
+  if (a.error) return `${head} failed: ${a.error}`;
+  const s = a.summary;
+  const lines = [
+    `${head}:`,
+    `Traces: ${s.currentTraceCount} current / ${s.baselineTraceCount} baseline`,
+    `Avg duration: ${ms(s.avgDurationCurrent)} vs ${ms(s.avgDurationBaseline)} baseline (${pct(s.avgDurationChangePercent)})`,
+    `Avg spans: ${s.avgSpanCountCurrent.toFixed(1)} vs ${s.avgSpanCountBaseline.toFixed(1)} baseline`,
+  ];
+  const causes = a.rootCauses.filter((r) => r.isLikelyRootCause).slice(0, 3);
+  if (causes.length) {
+    lines.push(`Likely root causes: ${causes.map((r) => `${r.spanName} (${r.serviceName}) ${pct(r.percentIncrease)}, ${r.confidence} confidence`).join('; ')}`);
+  }
+  if (a.spanComposition.newSpans.length) lines.push(`New spans: ${list(a.spanComposition.newSpans)}`);
+  if (a.spanComposition.missingSpans.length) lines.push(`Missing spans: ${list(a.spanComposition.missingSpans)}`);
+  if (a.errorAnalysis.newErrors.length) lines.push(`New errors: ${list(a.errorAnalysis.newErrors)}`);
+  if (a.warnings?.length) lines.push(`Warnings: ${list(a.warnings, 3)}`);
+  return lines.join('\n');
 }

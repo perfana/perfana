@@ -534,11 +534,12 @@ export class CommentsService {
 /**
  * Check a comment's recorded view against its card's shape and return what to store: the
  * validated, whitelisted fields plus `kind` (the card), stamped here rather than trusted from
- * the body. Only Graphs, Trends and Compare roots, and Configuration item roots, record a view.
+ * the body. Only Graphs, Trends, Compare, Distributed tracing and Pyroscope roots, and Configuration
+ * item roots, record a view.
  */
 export function validateChartContext(card: string, parentId: string | undefined, raw: Record<string, unknown>): Record<string, unknown> {
   const cls = (CHART_CONTEXT_DTO_BY_CARD as Record<string, new () => object>)[card];
-  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends, Compare or a Configuration item records a view');
+  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends, Compare, Distributed tracing, Pyroscope or a Configuration item records a view');
   if (Buffer.byteLength(JSON.stringify(raw)) > CHART_CONTEXT_MAX_BYTES) throw new BadRequestException('chartContext is too large');
   const view = plainToInstance(cls, raw);
   const errors = validateSync(view, { whitelist: true });

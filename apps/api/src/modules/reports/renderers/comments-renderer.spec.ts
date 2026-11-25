@@ -221,6 +221,21 @@ describe('CommentsRenderer', () => {
     expect(html).not.toContain('secret');
     expect(html).not.toContain('wrong-card');
   });
+
+  // Value: protects=a Distributed tracing / Pyroscope comment written on the diff tab prints its
+  // baseline and trace result, escaped, and only on its own card; fails_when=renderConfigView stops
+  // handling diff views or matches a view stored under another card.
+  it('prints a diff-tab comment’s baseline and Compare Traces result under it', async () => {
+    const { renderer } = setup([
+      row({ cardKey: 'distributed-tracing', body: 'slower db', chartContext: { kind: 'distributed-tracing', view: 'diff', baselineTestRunId: 'App-00005', resultSummary: 'Traces: 3 current / <4> baseline' } }),
+      row({ cardKey: 'pyroscope', body: 'more gc', chartContext: { kind: 'pyroscope', view: 'diff', baselineTestRunId: 'App-00004' } }),
+      row({ cardKey: 'performance', chartContext: { kind: 'pyroscope', view: 'diff', baselineTestRunId: 'wrong-card' } }),
+    ]);
+    const html = await renderer.renderCommentsSection(section(), testRun);
+    expect(html).toContain('Diff view vs run App-00005\nTraces: 3 current / &lt;4&gt; baseline');
+    expect(html).toContain('Diff view vs run App-00004');
+    expect(html).not.toContain('wrong-card');
+  });
 });
 
 // Value: protects=the Comments section's `stories` layout (analysis stories, PR5): published

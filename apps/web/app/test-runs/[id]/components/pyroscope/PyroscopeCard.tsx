@@ -33,6 +33,7 @@ import { WithinRunWindowsPicker } from '../shared/WithinRunWindowsPicker';
 
 import { useCommentItemCounts, useCommentItemFocus } from '../comments/CommentsContext';
 import ItemCommentHeader, { NO_EVENT, TabCommentMark } from '../comments/ItemCommentHeader';
+import { useDiffCommentView } from '../comments/useDiffCommentView';
 import { isComboKey, parsePyroscopeItemKey, pyroscopeItemKey, pyroscopeItemLabel } from './utils/pyroscope-comment-key';
 
 // Utils
@@ -66,6 +67,10 @@ export default function PyroscopeCard({
     return true;
   });
   const activeCombo = pyroscopeData.configurations[pyroscopeData.activeCombinationTab];
+  useDiffCommentView('pyroscope', () => ({
+    open: pyroscopeData.viewModeTab === 1,
+    baselineTestRunId: pyroscopeData.selectedBaseline?.test_run_id,
+  }));
 
   // Handle expand/collapse
   const handleExpand = (): void => {
