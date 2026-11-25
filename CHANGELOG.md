@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Compare two time ranges within one test run in the Distributed Tracing and Pyroscope cards.** The tracing card's Traces Diff tab and the Pyroscope card's Diff View gain a **Two time ranges in this run** option beside the baseline-run picker: two range sliders pick a baseline window and a compare window of the same run, which is how to see what changed as a run went on (a slow leak, a cache warming up, a degradation after a ramp). Both sides of the comparison are the current run, so no API change was needed.
+- **A comment on a diff tab says what it compared.** A new comment on the tracing card's Traces Diff tab or the Pyroscope Diff View records the baseline run, or the two time ranges of the run, and on the tracing card a short summary of the Compare Traces result on screen (trace counts, average duration against the baseline, likely root causes, new and missing spans, new errors) with the request it was computed for. It shows under the comment, in the report's Comments section and to agents reading the comment. Comments on the other tabs record nothing new.
+
+### Fixed
+- **The Pyroscope Diff View reports a baseline run without timestamps again** instead of waiting silently; the time-range change had dropped that message.
 
 ## [0.2.97.99] - 2026-11-24
 
