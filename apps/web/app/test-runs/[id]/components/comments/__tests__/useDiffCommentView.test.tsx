@@ -41,4 +41,16 @@ describe('useDiffCommentView', () => {
     expect(v.baselineWindowSeconds).toBeUndefined();
     expect(v.resultSummary).toHaveLength(DIFF_VIEW_SUMMARY_MAX_LENGTH);
   });
+
+  // Value: protects=the cap never splits a surrogate pair, which Postgres jsonb would refuse and lose the
+  // comment; fails_when=the cut goes back to UTF-16 units; why_new=the cap case used ASCII only; seam=none;
+  // no_claim=the database's own refusal (the lone surrogate is asserted, not inserted)
+  it('caps the summary by characters, never leaving half an emoji', () => {
+    const summary = 'x'.repeat(DIFF_VIEW_SUMMARY_MAX_LENGTH - 1) + '\u{1F525}tail';
+    const { capture } = setup({ open: true, baselineTestRunId: 'b', resultSummary: summary });
+    const v = capture() as { resultSummary: string };
+    expect(Array.from(v.resultSummary)).toHaveLength(DIFF_VIEW_SUMMARY_MAX_LENGTH);
+    expect(v.resultSummary.endsWith('\u{1F525}')).toBe(true);
+    expect(/[\uD800-\uDBFF]$/.test(v.resultSummary)).toBe(false);
+  });
 });

@@ -36,7 +36,9 @@ export function useDiffCommentView(card: DiffView['kind'], read: () => DiffTabSt
             : s.baselineTestRunId
               ? { baselineTestRunId: s.baselineTestRunId }
               : {}),
-          ...(s.resultSummary ? { resultSummary: s.resultSummary.slice(0, DIFF_VIEW_SUMMARY_MAX_LENGTH) } : {}),
+          // Cut by code points, as the API's Length counts them: a UTF-16 cut can leave half an
+          // emoji, which Postgres jsonb refuses (a 500 the drawer's view-less retry does not catch).
+          ...(s.resultSummary ? { resultSummary: Array.from(s.resultSummary).slice(0, DIFF_VIEW_SUMMARY_MAX_LENGTH).join('') } : {}),
         };
       }),
     [register, card],

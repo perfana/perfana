@@ -29,12 +29,10 @@ export async function deleteSystemFixtures(ds: DataSource, systemIds: string[]):
     const msIds: string[] = (
       await em.query(`SELECT id FROM metrics_sources WHERE system_under_test_id = ANY($1::uuid[])`, [systemIds])
     ).map((r: { id: string }) => r.id);
+    // The spec's own dashboards only: another system's dashboard pointing at one of these metrics
+    // sources must make the delete below fail loudly, not be deleted (with its cascades) here.
     const adIds: string[] = (
-      await em.query(
-        `SELECT id FROM application_dashboards
-          WHERE system_under_test_id = ANY($1::uuid[]) OR metrics_source_id = ANY($2::uuid[])`,
-        [systemIds, msIds],
-      )
+      await em.query(`SELECT id FROM application_dashboards WHERE system_under_test_id = ANY($1::uuid[])`, [systemIds])
     ).map((r: { id: string }) => r.id);
 
     // Every NO ACTION / RESTRICT reference into the three parents, as (table, column, parent).

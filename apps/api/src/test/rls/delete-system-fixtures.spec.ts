@@ -73,6 +73,30 @@ describe('deleteSystemFixtures against a real database', () => {
     expect(left[0]).toEqual({ systems: 0, sources: 0, dashboards: 0, configs: 0, statistics: 0 });
   });
 
+  // Value: protects=the helper never deletes another system's dashboard; fails_when=dashboards are again
+  // selected through the metrics source as well as the system; why_new=red-team review of the helper;
+  // seam=none; no_claim=none beyond protects
+  it("refuses, deleting nothing, when another system's dashboard points at the spec's metrics source", async () => {
+    const otherSut = randomUUID();
+    const otherAd = randomUUID();
+    const mine = randomUUID();
+    const myMs = randomUUID();
+    await ds.query(`INSERT INTO systems_under_test (id, organization_id, name, description) VALUES ($1, $2, $3, 'spec'), ($4, $2, $5, 'spec')`,
+      [mine, org, `fixtures-spec-sut-${mine.slice(0, 8)}`, otherSut, `fixtures-spec-sut-${otherSut.slice(0, 8)}`]);
+    await ds.query(`INSERT INTO metrics_sources (id, system_under_test_id, test_environment, source_type, display_name, organization_id)
+                    VALUES ($1, $2, 'acc', 'performance_test', 'p', $3)`, [myMs, mine, org]);
+    await ds.query(`INSERT INTO application_dashboards (id, system_under_test_id, test_environment, dashboard_name, dashboard_label, organization_id, metrics_source_id)
+                    VALUES ($1, $2, 'acc', 'other', 'other', $3, $4)`, [otherAd, otherSut, org, myMs]);
+    try {
+      await expect(deleteSystemFixtures(ds, [mine])).rejects.toThrow(/foreign key/);
+      const [{ n }] = await ds.query(`SELECT count(*)::int AS n FROM application_dashboards WHERE id = $1`, [otherAd]);
+      expect(n).toBe(1);
+    } finally {
+      await ds.query(`DELETE FROM application_dashboards WHERE id = $1`, [otherAd]);
+      await deleteSystemFixtures(ds, [mine, otherSut]);
+    }
+  });
+
   it('is a no-op for no systems', async () => {
     await expect(deleteSystemFixtures(ds, [])).resolves.toBeUndefined();
   });
