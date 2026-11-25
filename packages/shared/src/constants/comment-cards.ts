@@ -370,7 +370,7 @@ export interface DiffCommentView {
  * summary carries span, service and error text straight from the tracing backend.
  */
 export function jsonbSafeText(text: string): string {
-  return text.replace(/\u0000/g, '').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+  return text.split('\u0000').join('').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
 }
 
 /** `1:05:09`, or `5:09` under an hour: an offset from the run's start, as the range picker shows it. */
