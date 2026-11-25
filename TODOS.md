@@ -486,17 +486,21 @@ aggregations (and adjust the run summary's totals), or pin the span per workload
 
 ## Test suite
 
-### `test-run-stories.spec.ts` races the local worker and fails its cleanup (P0)
+### Diff-tab comment context follow-ups (from the v0.2.97.100 /ship review)
 
-`apps/api/src/test/rls/test-run-stories.spec.ts` creates a system and test runs in the shared dev
-database. A running worker (the dockerized local stack) picks those runs up on its minute tick and
-writes `metrics_sources` rows for the spec's system (`created_by = 'worker-pipeline'`, seen at
-15:15:00 and 15:38:00 on 2026-11-23). When that lands before `afterAll`, `DELETE FROM
-systems_under_test` fails on `FK_41fde009f014dff1c3f4f5396da` and the suite reports "Test suite failed
-to run" although all 24 tests passed: 2 failures in 5 runs while shipping v0.2.97.95, which did not
-touch the spec. Fix: delete the worker-written rows for the spec's system (`metrics_sources`, and any
-other `worker-pipeline` writes such as `ds_compare_config`) before the system delete in `afterAll`.
-Each failed run also leaves a `stories-spec-sut-*` system behind in the dev database.
+Deferred at the review cap; none blocks.
+- **`baselineTestRunId` is not jsonb-cleaned.** `validateChartContext` runs `jsonbSafeText` on
+  `resultSummary` only; an API or MCP caller sending a NUL or lone surrogate in `baselineTestRunId`
+  gets a 22P05 500 naming no field. Clean every string field of the stored view, or give the field a
+  test-run-id `@Matches`.
+- **A zero-width range drops the recorded view silently.** `WithinRunWindowsPicker` lets the thumbs
+  meet and `defaultRunWindows` gives `[0,0]`/`[d,d]` on a run under 3 s; the server refuses it and
+  the drawer re-posts without the view. Enforce a one-step minimum width, re-default when a live run
+  grows and the user has not moved the sliders.
+- **A stale pre-deploy web bundle throws on a diff-view comment** (`describeView` reads
+  `view.series.length` for any non-config view). Make the fallthrough return `''` for an unknown kind.
+- **Trace text reaches agents.** `resultSummary` carries SUT-controlled span and error strings into
+  `chartContext` for MCP readers; decide whether to label it as untrusted.
 
 ## Confluence integration
 
@@ -5424,6 +5428,11 @@ an import into an environment without that profile. Raised by the /ship data-mig
 **Effort:** XS **Priority:** P3 **Depends on:** a new migration.
 
 ## Completed
+
+- **`test-run-stories.spec.ts` races the local worker and fails its cleanup (P0)** — **Completed:** v0.2.97.100 (2026-11-25).
+  `deleteSystemFixtures` (`apps/api/src/test/rls/delete-system-fixtures.ts`) locks the spec's systems,
+  metrics sources and dashboards and deletes every NO ACTION child found in `pg_constraint` before
+  them, so a worker write mid-cleanup no longer fails `afterAll`. Nine RLS specs use it.
 
 - **The SUT import writes NULL for every column a bundle predates** — **Completed:** v0.2.97.91 (2026-11-20).
   The import now names only the catalog columns present in the bundle rows, so a column an older

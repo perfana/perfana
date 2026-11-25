@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   Box,
   Alert,
@@ -18,9 +18,11 @@ import { DistributedTracingCardProps, ServiceNameItem } from '../types';
 import { TracingService } from '@/lib/distributed-tracing';
 import { RequestFilteringSection } from './RequestFilteringSection';
 import { VisualiseTab } from './VisualiseTab';
-import TracesDiffTab from '../TracesDiffTab';
+import TracesDiffTab, { type DiffTabReport } from '../TracesDiffTab';
 import type { CommentItemCounts } from '@/lib/test-run-comments';
 import ItemCommentHeader, { TabCommentMark } from '../../comments/ItemCommentHeader';
+import { useDiffCommentView } from '../../comments/useDiffCommentView';
+import { summarizeTraceAnalysis } from '../trace-analysis/utils/trace-formatters';
 import {
   parseTracingItemKey,
   tracingItemKey,
@@ -108,6 +110,13 @@ export function DistributedTracingExpandedContent({
   onIframeError,
 }: DistributedTracingExpandedContentProps) {
   const filters: TracingFilters = { scenario: selectedScenario, transaction: selectedTransaction, sampler: selectedSampler };
+  const diffState = useRef<DiffTabReport | null>(null);
+  useDiffCommentView('distributed-tracing', () => ({
+    open: viewModeTab === 1,
+    baselineTestRunId: diffState.current?.baselineTestRunId,
+    windows: diffState.current?.windows,
+    resultSummary: diffState.current?.result ? summarizeTraceAnalysis(diffState.current.result, diffState.current.resultFor) : null,
+  }));
   return (
     <Box>
       {/* Service name tabs (if multiple service names) */}
@@ -220,6 +229,7 @@ export function DistributedTracingExpandedContent({
           transaction={selectedTransaction!}
           sampler={selectedSampler}
           onSamplerChange={onSamplerChange}
+          onDiffStateChange={(st) => { diffState.current = st; }}
         />
       )}
     </Box>

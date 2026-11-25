@@ -4,10 +4,12 @@ import {
   COMMENT_CARD_KEYS,
   COMMENT_CARD_LABELS,
   describeConfigCommentView,
+  describeDiffCommentView,
   commentsSectionLayout,
   COMMENT_TAG_LABELS,
   type CommentCardKey,
   type ConfigCommentView,
+  type DiffCommentView,
 } from '@perfana/shared/constants/comment-cards';
 import {
   ReportDataFetcherService,
@@ -288,14 +290,22 @@ export class CommentsRenderer {
   }
 
   /**
-   * The comparison a Configuration item comment was written against, so it stays readable once
-   * the card compares with another run. Escaped like everything else: the values are config
+   * The comparison a Configuration item comment, or a Distributed tracing / Pyroscope diff-tab
+   * comment, was written against, so it stays readable once the card compares with another run. Escaped like everything else: the values are config
    * values from the run, which anyone uploading configs controls.
    */
   private renderConfigView(root: ReportCommentRow): string {
     const ctx = root.chartContext;
-    if (root.deletedAt !== null || root.cardKey !== 'config' || ctx?.kind !== 'config' || typeof ctx.status !== 'string') return '';
-    const line = describeConfigCommentView(ctx as unknown as ConfigCommentView);
+    if (root.deletedAt !== null || !ctx) return '';
+    let line: string;
+    if (root.cardKey === 'config' && ctx.kind === 'config' && typeof ctx.status === 'string') {
+      line = describeConfigCommentView(ctx as unknown as ConfigCommentView);
+    } else if ((root.cardKey === 'distributed-tracing' || root.cardKey === 'pyroscope') && ctx.kind === root.cardKey && ctx.view === 'diff') {
+      // The diff tab's baseline and, on tracing, the Compare Traces result it was written against.
+      line = describeDiffCommentView(ctx as unknown as DiffCommentView);
+    } else {
+      return '';
+    }
     return `<div class="comment-config-view" style="font-size:9.5pt; color:${REPORT_COLORS.secondaryInk}; overflow-wrap:anywhere; white-space:pre-wrap; margin:0 0 4px;">${escapeHtml(line)}</div>`;
   }
 

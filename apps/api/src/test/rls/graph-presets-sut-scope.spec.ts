@@ -25,6 +25,7 @@ import * as Entities from '../../entities';
 import { GraphPreset } from '@perfana/shared/entities';
 import { TestRun as TestRunEntity } from '../../entities';
 import { GraphPresetsService } from '../../modules/graph-presets/graph-presets.service';
+import { deleteSystemFixtures } from './delete-system-fixtures';
 
 const entityClasses = Object.values(Entities).filter(
   (v): v is new () => unknown => typeof v === 'function',
@@ -121,7 +122,7 @@ describe('GraphPresetsService.findAll — SUT scoping against a real database', 
     await ds.query(`DELETE FROM graph_presets WHERE user_id = $1`, [USER]);
     await ds.query(`DELETE FROM test_runs WHERE test_run_id = ANY($1)`, [[runA, runB]]);
     await ds.query(`DELETE FROM application_dashboards WHERE id = ANY($1)`, [[dashA, dashB]]);
-    await ds.query(`DELETE FROM systems_under_test WHERE id = ANY($1)`, [[sutA, sutB]]);
+    await deleteSystemFixtures(ds, [sutA, sutB]);
     await ds.query(`DELETE FROM organizations WHERE id = ANY($1)`, [[orgA, orgB]]);
     await ds.destroy();
   });

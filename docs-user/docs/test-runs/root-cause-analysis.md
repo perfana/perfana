@@ -22,6 +22,8 @@ This lets you go from "a run regressed" to "here is where it went wrong" by digg
 4. Use the **Pyroscope** card to drill into CPU/profiling flame data.
    You can see which code paths consumed the most time. Appears only when Pyroscope is configured — see [Connect Pyroscope](../integrations/connect-pyroscope.md).
 
+   **Compare two time ranges within one run.** The tracing card's **Traces Diff** tab and the Pyroscope card's **Diff View** compare against another test run by default. Choose **Two time ranges in this run** to compare two windows of the same run instead, for example the first ten minutes against the last ten, to see what changed as the run went on. Drag the **Baseline range** and **Compare range** sliders; each shows its offset from the start of the run and the clock time. They start at the first and last third of the run.
+
 5. Use the **AWR Report** card for Oracle database analysis.
    You can review the Oracle AWR report for database-side bottlenecks.
 

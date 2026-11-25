@@ -666,6 +666,33 @@ describe('marker view replay', () => {
     expect(await screen.findByRole('button', { name: 'Restore view' })).toBeInTheDocument();
     expect(screen.getByTestId('view')).toHaveTextContent('none');
   });
+
+  // Value: protects=a diff-tab view (pyroscope) shows its description but no Restore view, which it cannot replay;
+  // fails_when=ViewLine's diff check is dropped or inverted; why_new=only Graphs views were rendered in the drawer;
+  // seam=none; no_claim=tracing kind and the line clamp (same branch, not rendered here)
+  it('shows a diff-tab view as text with no Restore view', async () => {
+    const diff = comment({
+      id: 'p1', cardKey: 'pyroscope',
+      chartContext: { kind: 'pyroscope', view: 'diff', baselineTestRunId: 'base-run', resultSummary: 'cpu +12%' } as never,
+    });
+    mocked.fetchCommentCounts.mockResolvedValue({ pyroscope: { total: 1, unread: 0 } });
+    mocked.fetchCommentThreads.mockResolvedValue({ threads: [{ ...diff, replies: [] }], lastSeenAt: '2999-01-01T00:00:00Z' });
+    function Open() {
+      const ctx = useComments();
+      return <button onClick={() => ctx?.openDrawer('pyroscope', 'p1', false)}>open diff</button>;
+    }
+    render(
+      <CommentsProvider runId="run" reveal={jest.fn()}>
+        <Open />
+        <CommentsDrawer />
+      </CommentsProvider>,
+    );
+    fireEvent.click(screen.getByText('open diff'));
+    const line = await screen.findByTestId('comment-view-p1');
+    expect(line).toHaveTextContent('Diff view vs run base-run');
+    expect(line).toHaveTextContent('cpu +12%');
+    expect(screen.queryByRole('button', { name: 'Restore view' })).not.toBeInTheDocument();
+  });
 });
 
 // Value: protects=the Graphs card's pins: only roots with a marker number AND a marker time become
@@ -835,6 +862,16 @@ describe('comment views on Graphs, Trends and Compare', () => {
     expect(mocked.postComment).toHaveBeenLastCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, undefined, null);
   });
 
+  // Value: protects=a diff-tab comment still posts against an API older than the web app; fails_when=the
+  // fallback matches only 'chartContext' again; why_new=the older API's card refusal names no field;
+  // seam=none; no_claim=the API's real wording beyond this message
+  it('posts the comment without its view when an older API refuses views on that card', async () => {
+    mocked.postComment.mockRejectedValueOnce(new Error('Posting comment failed (400): Only a root comment on Graphs, Trends, Compare or a Configuration item records a view'));
+    await post('trends', trendsView);
+    expect(mocked.postComment).toHaveBeenCalledTimes(2);
+    expect(mocked.postComment).toHaveBeenLastCalledWith('run', 'trends', 'p95 creeping up', undefined, undefined, undefined, null);
+  });
+
   it('posts no view when the card has nothing to record', async () => {
     await post('compare', null);
     expect(mocked.postComment).toHaveBeenCalledWith('run', 'compare', 'p95 creeping up', undefined, undefined, undefined, null);
@@ -845,6 +882,10 @@ describe('comment views on Graphs, Trends and Compare', () => {
     expect(describeView({ ...trendsView, customRange: ['2026-11-13T00:00:00Z', '2026-11-20T00:00:00Z'] }, false)).toMatch(/^1 series · Last week \(.+–.+\) · p95$/);
     expect(describeView({ kind: 'compare', series: trendsView.series, baselineTestRunId: 'control-group' }, false)).toBe('1 series · vs control group');
     expect(describeView({ kind: 'compare', series: trendsView.series }, false)).toBe('1 series · no baseline');
+    expect(describeView({ kind: 'pyroscope', view: 'diff', baselineTestRunId: 'App-00004' }, false)).toBe('Diff view vs run App-00004');
+    expect(describeView({ kind: 'pyroscope', view: 'diff', baselineWindowSeconds: [0, 1200], currentWindowSeconds: [2400, 3725] }, false))
+      .toBe("Diff view of this run: 0:00–20:00 (baseline) vs 40:00–1:02:05, from the run's start");
+    expect(describeView({ kind: 'distributed-tracing', view: 'diff', resultSummary: 'Traces: 3 current / 4 baseline' }, false)).toBe('Diff view, no baseline selected\nTraces: 3 current / 4 baseline');
     expect(describeView({ series: [] }, true)).toBe('Placed on 0 series · whole run');
     expect(describeView({ kind: 'graphs', series: [] }, false)).toBe('Written on 0 series · whole run');
   });

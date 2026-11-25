@@ -28,6 +28,7 @@ import * as Entities from '../../entities';
 import { TestRun as TestRunEntity } from '../../entities';
 import { TestRunsConfigService } from '../../modules/test-runs/services/test-runs-config.service';
 import { JtlImportService } from '../../modules/test-runs/services/jtl-import.service';
+import { deleteSystemFixtures } from './delete-system-fixtures';
 
 // AppDataSource is migration-only (`entities: []`). Build a sibling DataSource
 // that registers the imported entity classes so the services' `getRepository`
@@ -83,7 +84,7 @@ describe('Issue #398 — JTL import writes through the request transaction', () 
   });
 
   afterAll(async () => {
-    await ds.query(`DELETE FROM systems_under_test WHERE id = $1`, [sutId]);
+    await deleteSystemFixtures(ds, [sutId]);
     await ds.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await ds.destroy();
   });

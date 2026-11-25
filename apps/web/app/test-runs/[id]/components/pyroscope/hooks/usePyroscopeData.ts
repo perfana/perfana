@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useTheme } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
 import {
@@ -12,6 +12,12 @@ import {
   ViewMode,
 } from '../types';
 import { extractProfilerLabel, dateToMs, validateTimestamps } from '../utils/pyroscope-formatters';
+import {
+  CompareMode,
+  RunWindows,
+  defaultRunWindows,
+  runDurationSeconds,
+} from '../../shared/WithinRunWindowsPicker';
 
 export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
   const theme = useTheme();
@@ -36,6 +42,11 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
   const [compareViewUrl, setCompareViewUrl] = useState<string | null>(null);
   const [compareIframeLoading, setCompareIframeLoading] = useState(false);
   const [fetchingBaselines, setFetchingBaselines] = useState(false);
+  // 'within' compares two time ranges of this run instead of a baseline run
+  const [compareMode, setCompareMode] = useState<CompareMode>('run');
+  const [runWindows, setRunWindows] = useState<RunWindows>(() =>
+    defaultRunWindows(runDurationSeconds(testRun.start_time, testRun.end_time))
+  );
 
   // Flamegraph analysis state
   const [flamegraphAnalysis, setFlamegraphAnalysis] = useState<FlamegraphAnalysis | null>(null);
@@ -86,6 +97,26 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
       topFunctionChanges: flamegraphAnalysis.topFunctionChanges.filter(filterFn),
     };
   }, [flamegraphAnalysis, symbolFilter]);
+
+  // The two time windows being compared, in ms; null when nothing to compare yet
+  const comparisonWindows = useMemo(() => {
+    if (compareMode === 'within') {
+      const runStartMs = dateToMs(testRun.start_time);
+      return {
+        baselineStartTimeMs: runStartMs + runWindows.baseline[0] * 1000,
+        baselineEndTimeMs: runStartMs + runWindows.baseline[1] * 1000,
+        currentStartTimeMs: runStartMs + runWindows.current[0] * 1000,
+        currentEndTimeMs: runStartMs + runWindows.current[1] * 1000,
+      };
+    }
+    if (!selectedBaseline?.start_time || !selectedBaseline.end_time) return null;
+    return {
+      baselineStartTimeMs: dateToMs(selectedBaseline.start_time),
+      baselineEndTimeMs: dateToMs(selectedBaseline.end_time),
+      currentStartTimeMs: dateToMs(testRun.start_time),
+      currentEndTimeMs: dateToMs(testRun.end_time),
+    };
+  }, [compareMode, runWindows, selectedBaseline, testRun.start_time, testRun.end_time]);
 
   // Load related test runs for comparison
   const loadRelatedTestRuns = useCallback(async (): Promise<void> => {
@@ -194,11 +225,16 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
 
   // Generate comparison view URL (client-side, no API roundtrip needed)
   const generateComparisonUrl = useCallback((): void => {
+    // A baseline run picked without timestamps has no window to compare; say so rather than wait silently.
+    if (compareMode === 'run' && selectedBaseline && !comparisonWindows) {
+      setError('Selected baseline test run does not have valid timestamps for comparison');
+      return;
+    }
     if (
       !pyroscopeInstance ||
       !selectedApplication ||
       !selectedProfiler ||
-      !selectedBaseline
+      !comparisonWindows
     ) {
       return;
     }
@@ -208,22 +244,10 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
       setError(null);
       setCompareIframeLoading(true);
 
-      // Validate baseline has required timestamps
-      if (!selectedBaseline.start_time || !selectedBaseline.end_time) {
-        setError('Selected baseline test run does not have valid timestamps for comparison');
-        setLoading(false);
-        setCompareIframeLoading(false);
-        return;
-      }
-
       const pyroscopeUrl = pyroscopeInstance.pyroscope_url || pyroscopeInstance.pyroscopeUrl;
       const isStandalone = pyroscopeInstance.pyroscope_stand_alone ?? pyroscopeInstance.pyroscopeStandAlone;
 
-      // Convert ISO date strings to millisecond timestamps
-      const currentStartTimeMs = dateToMs(testRun.start_time);
-      const currentEndTimeMs = dateToMs(testRun.end_time);
-      const baselineStartTimeMs = dateToMs(selectedBaseline.start_time);
-      const baselineEndTimeMs = dateToMs(selectedBaseline.end_time);
+      const { currentStartTimeMs, currentEndTimeMs, baselineStartTimeMs, baselineEndTimeMs } = comparisonWindows;
 
       // Validate conversions were successful
       if (!validateTimestamps(baselineStartTimeMs, baselineEndTimeMs, currentStartTimeMs, currentEndTimeMs)) {
@@ -242,7 +266,7 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
         const baselineEndSec = Math.round(baselineEndTimeMs / 1000);
         const currentStartSec = Math.round(currentStartTimeMs / 1000);
         const currentEndSec = Math.round(currentEndTimeMs / 1000);
-        url = `${pyroscopeUrl}/diff?from=${baselineStartSec}&until=${currentEndSec}&leftFrom=${baselineStartSec}&leftUntil=${baselineEndSec}&rightFrom=${currentStartSec}&rightUntil=${currentEndSec}&query=${encodeURIComponent(query)}`;
+        url = `${pyroscopeUrl}/diff?from=${Math.min(baselineStartSec, currentStartSec)}&until=${Math.max(baselineEndSec, currentEndSec)}&leftFrom=${baselineStartSec}&leftUntil=${baselineEndSec}&rightFrom=${currentStartSec}&rightUntil=${currentEndSec}&query=${encodeURIComponent(query)}`;
       } else {
         const params = new URLSearchParams({
           searchText: '',
@@ -259,10 +283,18 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
           diffTo: new Date(baselineEndTimeMs).toISOString(),
           'diffFrom-2': new Date(currentStartTimeMs).toISOString(),
           'diffTo-2': new Date(currentEndTimeMs).toISOString(),
-          'from-2': new Date(baselineStartTimeMs).toISOString(),
-          'to-2': new Date(baselineEndTimeMs).toISOString(),
-          'from-3': new Date(currentStartTimeMs).toISOString(),
-          'to-3': new Date(currentEndTimeMs).toISOString(),
+          // The panels' own ranges, read by the Grafana Pyroscope app 2.x (verified on 2.3.1): the
+          // baseline panel shows the page range (from/to), the comparison panel its own scene time
+          // range, which syncs on the suffixed keys from-2/to-2 (comparisonFrom/comparisonTo is the
+          // same range under the panel's own key). Without them both panels open on Grafana's
+          // default range with the selections above outside it; from-2 set to the baseline window,
+          // as it used to be, made the comparison panel show the baseline's range.
+          from: new Date(baselineStartTimeMs).toISOString(),
+          to: new Date(baselineEndTimeMs).toISOString(),
+          'from-2': new Date(currentStartTimeMs).toISOString(),
+          'to-2': new Date(currentEndTimeMs).toISOString(),
+          comparisonFrom: new Date(currentStartTimeMs).toISOString(),
+          comparisonTo: new Date(currentEndTimeMs).toISOString(),
           theme: theme.palette.mode,
           kiosk: 'true',
         });
@@ -281,29 +313,22 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
     } finally {
       setLoading(false);
     }
-  }, [pyroscopeInstance, selectedApplication, selectedProfiler, selectedBaseline, testRun, theme.palette.mode]);
+  }, [pyroscopeInstance, selectedApplication, selectedProfiler, compareMode, selectedBaseline, comparisonWindows, theme.palette.mode]);
 
-  // Analyze flamegraphs
+  // Analyze flamegraphs. Each committed range change starts another analysis; only the latest may
+  // write, or a slow earlier reply would show the analysis of ranges no longer selected.
+  const analysisSeq = useRef(0);
   const analyzeFlamegraphs = useCallback(async (): Promise<void> => {
-    if (!pyroscopeInstance || !selectedBaseline || !selectedApplication || !selectedProfiler) {
+    if (!pyroscopeInstance || !comparisonWindows || !selectedApplication || !selectedProfiler) {
       return;
     }
 
+    const seq = ++analysisSeq.current;
     try {
       setAnalysingFlamegraph(true);
       setFlamegraphAnalysis(null);
 
-      // Validate baseline has required timestamps
-      if (!selectedBaseline.start_time || !selectedBaseline.end_time) {
-        console.error('Selected baseline does not have valid timestamps');
-        return;
-      }
-
-      // Convert ISO date strings to millisecond timestamps
-      const currentStartTimeMs = dateToMs(testRun.start_time);
-      const currentEndTimeMs = dateToMs(testRun.end_time);
-      const baselineStartTimeMs = dateToMs(selectedBaseline.start_time);
-      const baselineEndTimeMs = dateToMs(selectedBaseline.end_time);
+      const { currentStartTimeMs, currentEndTimeMs, baselineStartTimeMs, baselineEndTimeMs } = comparisonWindows;
 
       // Extract profiler label
       const profilerLabel = extractProfilerLabel(selectedProfiler);
@@ -331,9 +356,11 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
 
       if (response.ok) {
         const analysis = await response.json();
+        if (seq !== analysisSeq.current) return;
         setFlamegraphAnalysis(analysis);
       } else {
         const errorData = await response.json();
+        if (seq !== analysisSeq.current) return;
         console.error('Failed to analyze flamegraphs:', errorData);
         setFlamegraphAnalysis({
           summary: {
@@ -350,6 +377,7 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
         });
       }
     } catch (err) {
+      if (seq !== analysisSeq.current) return;
       console.error('Error analyzing flamegraphs:', err);
       setFlamegraphAnalysis({
         summary: {
@@ -368,9 +396,9 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
             : 'An error occurred while analyzing flamegraphs',
       });
     } finally {
-      setAnalysingFlamegraph(false);
+      if (seq === analysisSeq.current) setAnalysingFlamegraph(false);
     }
-  }, [pyroscopeInstance, selectedBaseline, selectedApplication, selectedProfiler, testRun]);
+  }, [pyroscopeInstance, comparisonWindows, selectedApplication, selectedProfiler]);
 
   // Fetch related test runs when diff view tab is active
   useEffect(() => {
@@ -392,12 +420,13 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
       viewModeTab === 1 &&
       selectedApplication &&
       selectedProfiler &&
-      selectedBaseline
+      // a baseline without timestamps still gets here, so generateComparisonUrl can report it
+      (comparisonWindows || selectedBaseline)
     ) {
       generateComparisonUrl();
       analyzeFlamegraphs();
     }
-  }, [expanded, viewModeTab, activeCombinationTab, selectedBaseline, generateComparisonUrl, analyzeFlamegraphs, selectedApplication, selectedProfiler]);
+  }, [expanded, viewModeTab, activeCombinationTab, comparisonWindows, selectedBaseline, generateComparisonUrl, analyzeFlamegraphs, selectedApplication, selectedProfiler]);
 
   // Add timeout for iframe loading to prevent infinite spinner
   useEffect(() => {
@@ -475,6 +504,9 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
     compareViewUrl,
     compareIframeLoading,
     fetchingBaselines,
+    compareMode,
+    runWindows,
+    hasComparison: comparisonWindows !== null,
     flamegraphAnalysis: filteredAnalysis,
     analysingFlamegraph,
     showAnalysis,
@@ -494,6 +526,8 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
 
     // State setters
     setSelectedBaseline,
+    setCompareMode,
+    setRunWindows,
     setShowAnalysis,
     setSymbolFilter,
     setShowAllRegressions,

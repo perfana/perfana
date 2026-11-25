@@ -1,5 +1,5 @@
 import { authenticatedFetch } from '@/lib/api';
-import { COMMENT_UNREAD_WINDOW_DAYS, type CommentAuthorKind, type CommentCardKey, type CommentTag, type ConfigCommentView } from '@perfana/shared/constants/comment-cards';
+import { COMMENT_UNREAD_WINDOW_DAYS, type CommentAuthorKind, type CommentCardKey, type CommentTag, type ConfigCommentView, type DiffCommentView } from '@perfana/shared/constants/comment-cards';
 import type { SeriesConfig as PresetSeries } from '@/lib/graph-presets';
 
 /**
@@ -53,8 +53,13 @@ export interface CompareView {
  */
 export type ConfigView = ConfigCommentView & { kind: 'config' };
 
-/** What a Graphs, Trends or Compare comment, or a Configuration item comment, records about its card's view. */
-export type CommentView = MarkerChartContext | TrendsView | CompareView | ConfigView;
+/** The diff tab a Distributed tracing or Pyroscope comment was written on: baseline, and trace result. */
+export type DiffView =
+  | (Omit<DiffCommentView, 'kind'> & { kind: 'distributed-tracing' })
+  | (Omit<DiffCommentView, 'kind'> & { kind: 'pyroscope' });
+
+/** What a Graphs, Trends or Compare comment, a diff-tab comment, or a Configuration item comment records about its card's view. */
+export type CommentView = MarkerChartContext | TrendsView | CompareView | ConfigView | DiffView;
 
 /** The comment's view if it was recorded on `card`; Graphs views from before `kind` existed count as Graphs. */
 export function viewOf<C extends 'graphs' | 'trends' | 'compare' | 'config'>(

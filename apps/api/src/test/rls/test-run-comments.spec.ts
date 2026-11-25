@@ -14,6 +14,7 @@ import { AppDataSource } from '../../data-source';
 import * as Entities from '../../entities';
 import { CommentsService, CommentCaller } from '../../modules/comments/comments.service';
 import { commentCountsByCard, commentCountsByRun } from '../../modules/comments/comment-unread.sql';
+import { deleteSystemFixtures } from './delete-system-fixtures';
 
 const entityClasses = Object.values(Entities).filter(
   (v): v is new () => unknown => typeof v === 'function',
@@ -76,7 +77,7 @@ describe('CommentsService against a real database', () => {
     // rows hold a NO ACTION foreign key and would block the run's delete.
     await ds.query(`DELETE FROM ds_metric_collection_status WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE id = $1)`, [runUuid]);
     await ds.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid]); // cascades comments and reads
-    await ds.query(`DELETE FROM systems_under_test WHERE id = $1`, [sutA]);
+    await deleteSystemFixtures(ds, [sutA]);
     await ds.query(`DELETE FROM teams WHERE id = $1`, [teamA]);
     await ds.query(`DELETE FROM organizations WHERE id = ANY($1)`, [[orgA, orgB]]);
     await ds.destroy();

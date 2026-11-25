@@ -13,6 +13,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -23,6 +24,7 @@ import {
   COMMENT_BODY_MAX_LENGTH,
   COMMENT_CARD_KEYS,
   CONFIG_VIEW_VALUE_MAX_LENGTH,
+  DIFF_VIEW_SUMMARY_MAX_LENGTH,
   COMMENT_TAGS,
   COMMENT_CLIENT_REF_MAX_LENGTH,
   type CommentAuthorKind,
@@ -162,12 +164,54 @@ export class ConfigChartContextDto {
   previousValue?: string | null;
 }
 
+/**
+ * What a Distributed tracing or Pyroscope comment was written on while the card's diff tab was
+ * open: the baseline run and, on tracing, a text summary of the Compare Traces result.
+ */
+export class DiffChartContextDto {
+  @ApiProperty({ enum: ['diff'] })
+  @IsIn(['diff'])
+  view!: 'diff';
+
+  @ApiPropertyOptional({ description: 'The baseline run compared with; absent = none picked', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  baselineTestRunId?: string;
+
+  @ApiPropertyOptional({ description: 'Two time ranges of this run compared: the baseline range, [from, to] seconds from the run start', type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  baselineWindowSeconds?: [number, number];
+
+  @ApiPropertyOptional({ description: 'The compared range, [from, to] seconds from the run start', type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  currentWindowSeconds?: [number, number];
+
+  @ApiPropertyOptional({ description: 'The Compare Traces result on screen, as plain text', maxLength: DIFF_VIEW_SUMMARY_MAX_LENGTH })
+  @IsOptional()
+  @IsString()
+  @Length(1, DIFF_VIEW_SUMMARY_MAX_LENGTH)
+  resultSummary?: string;
+}
+
 /** Which view shape a card's comments record. Other cards record none. */
 export const CHART_CONTEXT_DTO_BY_CARD = {
   graphs: ChartContextDto,
   trends: TrendsChartContextDto,
   compare: CompareChartContextDto,
   config: ConfigChartContextDto,
+  'distributed-tracing': DiffChartContextDto,
+  pyroscope: DiffChartContextDto,
 } as const;
 
 export class CreateCommentDto {
@@ -209,8 +253,8 @@ export class CreateCommentDto {
 
   @ApiPropertyOptional({
     description:
-      "The card's view when the comment was written (Graphs, Trends and Compare roots, and Configuration item roots; required with markerTime). " +
-      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto, CompareChartContextDto or ConfigChartContextDto. ' +
+      "The card's view when the comment was written (Graphs, Trends and Compare roots, Distributed tracing and Pyroscope roots written on the diff tab, and Configuration item roots; required with markerTime). " +
+      'Its shape depends on the card: ChartContextDto, TrendsChartContextDto, CompareChartContextDto, DiffChartContextDto or ConfigChartContextDto. ' +
       'Validated by the service against that class, because one nested type here would have the whitelist strip the other cards\' fields.',
   })
   @IsOptional()

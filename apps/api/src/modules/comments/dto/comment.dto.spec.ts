@@ -38,6 +38,31 @@ describe('validateChartContext', () => {
     expect(validateChartContext('config', undefined, config({ status: 'same', comparedToTestRunId: undefined }))).toMatchObject({ kind: 'config', status: 'same' });
   });
 
+  it('keeps a Distributed tracing diff view with its baseline and result, and a Pyroscope one with its baseline', () => {
+    expect(validateChartContext('distributed-tracing', undefined, { view: 'diff', baselineTestRunId: 'App-00007', resultSummary: 'x'.repeat(2000) }))
+      .toMatchObject({ kind: 'distributed-tracing', view: 'diff', baselineTestRunId: 'App-00007' });
+    expect(validateChartContext('pyroscope', undefined, { view: 'diff', baselineTestRunId: 'App-00007' })).toMatchObject({ kind: 'pyroscope', view: 'diff' });
+    expect(validateChartContext('pyroscope', undefined, { view: 'diff', baselineWindowSeconds: [0, 600], currentWindowSeconds: [1200, 1800] }))
+      .toMatchObject({ baselineWindowSeconds: [0, 600], currentWindowSeconds: [1200, 1800] });
+  });
+
+  // Value: protects=a trace summary carrying a NUL or a lone surrogate is stored cleaned, not refused by jsonb
+  // with a 500 the drawer's view-less retry cannot catch; fails_when=the server stops cleaning resultSummary;
+  // why_new=adversarial review: the summary is trace text from the tracing backend; seam=none;
+  // no_claim=jsonb's own refusal (checked by hand against the dev database)
+  it('cleans a trace summary jsonb would refuse: NUL dropped, a lone surrogate replaced', () => {
+    const out = validateChartContext('distributed-tracing', undefined, { view: 'diff', baselineTestRunId: 'App-00007', resultSummary: 'span a\u0000b \ud83d end \u{1F525}' });
+    expect(out.resultSummary).toBe('span ab \uFFFD end \u{1F525}');
+  });
+
+  // Value: protects=a lone LOW surrogate is replaced too, and a valid pair survives either side of it;
+  // fails_when=jsonbSafeText's second alternative (unpaired low) is dropped or the lookbehind breaks pairs;
+  // why_new=the case above has a lone high surrogate only; seam=none; no_claim=jsonb's own refusal
+  it('replaces a lone low surrogate and keeps the pairs around it', () => {
+    const out = validateChartContext('distributed-tracing', undefined, { view: 'diff', baselineTestRunId: 'App-00007', resultSummary: '\u{1F525}\udc00x\udc00\u{1F525}' });
+    expect(out.resultSummary).toBe('\u{1F525}\uFFFDx\uFFFD\u{1F525}');
+  });
+
   it('strips keys outside the shape and ignores a kind the body claims', () => {
     const out = validateChartContext('trends', undefined, trends({ kind: 'graphs', extra: 'x' }));
     expect(out.kind).toBe('trends');
@@ -59,6 +84,13 @@ describe('validateChartContext', () => {
     ['a Configuration value over 2,000 characters', 'config', config({ previousValue: 'x'.repeat(2001) })],
     ['a Configuration view with an unknown status', 'config', config({ status: 'different' })],
     ['a Configuration view with no status', 'config', config({ status: undefined })],
+    ['a diff view naming another tab', 'pyroscope', { view: 'single' }],
+    ['a one-sided time range', 'pyroscope', { view: 'diff', baselineWindowSeconds: [0] }],
+    ['a negative time range', 'distributed-tracing', { view: 'diff', baselineWindowSeconds: [0, 5], currentWindowSeconds: [-5, 10] }],
+    ['a backwards time range', 'pyroscope', { view: 'diff', baselineWindowSeconds: [600, 0], currentWindowSeconds: [700, 800] }],
+    ['a zero-width time range', 'pyroscope', { view: 'diff', baselineWindowSeconds: [0, 600], currentWindowSeconds: [700, 700] }],
+    ['one time range without its pair', 'pyroscope', { view: 'diff', baselineTestRunId: 'App-00004', baselineWindowSeconds: [0, 600] }],
+    ['a trace result over 2,000 characters', 'distributed-tracing', { view: 'diff', resultSummary: 'x'.repeat(2001) }],
     ['a view on a card that records none', 'slo', graphs()],
     ['a view on Dashboards, which records none', 'dashboards', config()],
   ])('refuses %s', (_label, card, raw) => {

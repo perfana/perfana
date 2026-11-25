@@ -32,6 +32,7 @@ import {
   COMMENT_CARD_KEYS,
   COMMENT_ITEM_KEY_MAX_LENGTH,
   COMMENT_UNREAD_WINDOW_DAYS,
+  jsonbSafeText,
   type CommentAuthorKind,
 } from '@perfana/shared/constants/comment-cards';
 import { anchorCard, loadAnchorRun, parseAnchor, resolveAnchor } from './comment-anchor.resolver';
@@ -534,11 +535,12 @@ export class CommentsService {
 /**
  * Check a comment's recorded view against its card's shape and return what to store: the
  * validated, whitelisted fields plus `kind` (the card), stamped here rather than trusted from
- * the body. Only Graphs, Trends and Compare roots, and Configuration item roots, record a view.
+ * the body. Only Graphs, Trends, Compare, Distributed tracing and Pyroscope roots, and Configuration
+ * item roots, record a view.
  */
 export function validateChartContext(card: string, parentId: string | undefined, raw: Record<string, unknown>): Record<string, unknown> {
   const cls = (CHART_CONTEXT_DTO_BY_CARD as Record<string, new () => object>)[card];
-  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends, Compare or a Configuration item records a view');
+  if (!cls || parentId) throw new BadRequestException('Only a root comment on Graphs, Trends, Compare, Distributed tracing, Pyroscope or a Configuration item records a view');
   if (Buffer.byteLength(JSON.stringify(raw)) > CHART_CONTEXT_MAX_BYTES) throw new BadRequestException('chartContext is too large');
   const view = plainToInstance(cls, raw);
   const errors = validateSync(view, { whitelist: true });
@@ -555,7 +557,21 @@ export function validateChartContext(card: string, parentId: string | undefined,
     if (Number.isNaN(from) || Number.isNaN(to)) throw new BadRequestException(`chartContext.${key} must be readable timestamps`);
     if (from! >= to!) throw new BadRequestException(`chartContext.${key} must run forwards`);
   }
-  return { ...JSON.parse(JSON.stringify(view)), kind: card };
+  // A diff view's two time ranges come as a pair and run forwards, like the windows above; a lone
+  // or reversed one would be stored and then described wrongly (or not at all).
+  const v = view as { baselineWindowSeconds?: [number, number]; currentWindowSeconds?: [number, number] };
+  if (!v.baselineWindowSeconds !== !v.currentWindowSeconds) {
+    throw new BadRequestException('chartContext.baselineWindowSeconds and currentWindowSeconds come as a pair');
+  }
+  for (const key of ['baselineWindowSeconds', 'currentWindowSeconds'] as const) {
+    const w = v[key];
+    if (w && w[0] >= w[1]) throw new BadRequestException(`chartContext.${key} must run forwards`);
+  }
+  const stored = { ...JSON.parse(JSON.stringify(view)), kind: card };
+  // The summary is trace text the client copied from the tracing backend; jsonb refuses a NUL or a
+  // lone surrogate with a 500 that names no field, so clean it here for every client, old ones too.
+  if (typeof stored.resultSummary === 'string') stored.resultSummary = jsonbSafeText(stored.resultSummary);
+  return stored;
 }
 
 export function toResponse(row: TestRunComment): CommentResponse {

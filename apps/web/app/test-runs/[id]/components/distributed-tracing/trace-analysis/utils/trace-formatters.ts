@@ -3,7 +3,7 @@
  * Utility functions for formatting trace analysis data
  */
 
-import type { ConfidenceLevel } from '../types';
+import type { ConfidenceLevel, TraceAnalysisResponse } from '../types';
 
 /**
  * Format a numeric value based on the specified format type
@@ -139,4 +139,45 @@ export function formatPercentChange(percent: number): string {
  */
 export function calculateMaxWidth(baseWidth: number, depth: number, depthMultiplier: number = 16): number {
   return baseWidth - depth * depthMultiplier;
+}
+
+// The reply comes off the network typed but unvalidated, and a missing field must cost one line of
+// the summary, not the whole recorded view (the capture would throw and drop the baseline too).
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const ms = (v: unknown) => `${num(v)?.toFixed(1) ?? '-'} ms`;
+const pct = (v: unknown) => { const n = num(v); return n === null ? '-' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`; };
+const count = (v: unknown) => (num(v) === null ? '-' : String(v));
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+const list = (xs: string[], max = 5) => xs.slice(0, max).join(', ') + (xs.length > max ? ` (+${xs.length - max} more)` : '');
+
+/**
+ * The Compare Traces result as a few plain-text lines, for a comment written on the Traces Diff
+ * tab: what an agent or a report reader needs without the card open. Counts and the top root
+ * causes only; the per-span tables stay on the card.
+ */
+export function summarizeTraceAnalysis(a: TraceAnalysisResponse, comparedFor?: string | null): string {
+  // The result stays on screen when the filters change, so say which request it is for.
+  const head = comparedFor ? `Compare Traces for ${comparedFor}` : 'Compare Traces';
+  if (a.error) return `${head} failed: ${a.error}`;
+  const s: Partial<TraceAnalysisResponse['summary']> = a.summary ?? {};
+  const avgSpans = (v: unknown) => num(v)?.toFixed(1) ?? '-';
+  const lines = [
+    `${head}:`,
+    `Traces: ${count(s.currentTraceCount)} current / ${count(s.baselineTraceCount)} baseline`,
+    `Avg duration: ${ms(s.avgDurationCurrent)} vs ${ms(s.avgDurationBaseline)} baseline (${pct(s.avgDurationChangePercent)})`,
+    `Avg spans: ${avgSpans(s.avgSpanCountCurrent)} vs ${avgSpans(s.avgSpanCountBaseline)} baseline`,
+  ];
+  const causes = (Array.isArray(a.rootCauses) ? a.rootCauses : []).filter((r) => r?.isLikelyRootCause).slice(0, 3);
+  if (causes.length) {
+    lines.push(`Likely root causes: ${causes.map((r) => `${r.spanName} (${r.serviceName}) ${pct(r.percentIncrease)}, ${r.confidence} confidence`).join('; ')}`);
+  }
+  const newSpans = strings(a.spanComposition?.newSpans);
+  const missingSpans = strings(a.spanComposition?.missingSpans);
+  const newErrors = strings(a.errorAnalysis?.newErrors);
+  const warnings = strings(a.warnings);
+  if (newSpans.length) lines.push(`New spans: ${list(newSpans)}`);
+  if (missingSpans.length) lines.push(`Missing spans: ${list(missingSpans)}`);
+  if (newErrors.length) lines.push(`New errors: ${list(newErrors)}`);
+  if (warnings.length) lines.push(`Warnings: ${list(warnings, 3)}`);
+  return lines.join('\n');
 }

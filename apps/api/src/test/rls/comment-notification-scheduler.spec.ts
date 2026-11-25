@@ -18,6 +18,7 @@ import { DataSource } from 'typeorm';
 import { AppDataSource } from '../../data-source';
 import * as Entities from '../../entities';
 import { CommentNotificationScheduler } from '../../modules/notifications/comment-notification-scheduler.service';
+import { deleteSystemFixtures } from './delete-system-fixtures';
 
 const entityClasses = Object.values(Entities).filter(
   (v): v is new () => unknown => typeof v === 'function',
@@ -97,7 +98,7 @@ describe('CommentNotificationScheduler against a real database', () => {
     await ds.query(`DELETE FROM ds_metric_collection_status WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE id = $1)`, [runUuid]);
     await ds.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid]); // cascades comments
     await ds.query(`DELETE FROM notification_channels WHERE system_under_test_id = $1`, [sut]);
-    await ds.query(`DELETE FROM systems_under_test WHERE id = $1`, [sut]);
+    await deleteSystemFixtures(ds, [sut]);
     await ds.query(`DELETE FROM organizations WHERE id = $1`, [org]);
     await ds.destroy();
   });
@@ -105,6 +106,9 @@ describe('CommentNotificationScheduler against a real database', () => {
   beforeEach(async () => {
     send.mockReset();
     send.mockResolvedValue(undefined);
+    // sweep() also runs the story half over the whole database; this suite tests comments
+    // only, and must not claim the stories story-notification-scheduler.spec.ts is testing.
+    jest.spyOn(scheduler, 'announceStory').mockResolvedValue(false);
     await resetUnannounced();
   });
 
@@ -143,8 +147,9 @@ describe('CommentNotificationScheduler against a real database', () => {
     );
     expect(waits).toBe(true);
 
-    // Until the backoff elapses the sweep neither finds the run nor claims its comments.
-    const announce = jest.spyOn(scheduler, 'announceRun');
+    // Until the backoff elapses the sweep neither finds the run nor claims its comments. Mocked:
+    // the real announceRun would claim every other eligible run on the shared database.
+    const announce = jest.spyOn(scheduler, 'announceRun').mockResolvedValue(0);
     try {
       await scheduler.sweep();
       expect(announce.mock.calls.map((c) => c[0])).not.toContain(runUuid);
