@@ -55,6 +55,14 @@ describe('validateChartContext', () => {
     expect(out.resultSummary).toBe('span ab \uFFFD end \u{1F525}');
   });
 
+  // Value: protects=a lone LOW surrogate is replaced too, and a valid pair survives either side of it;
+  // fails_when=jsonbSafeText's second alternative (unpaired low) is dropped or the lookbehind breaks pairs;
+  // why_new=the case above has a lone high surrogate only; seam=none; no_claim=jsonb's own refusal
+  it('replaces a lone low surrogate and keeps the pairs around it', () => {
+    const out = validateChartContext('distributed-tracing', undefined, { view: 'diff', baselineTestRunId: 'App-00007', resultSummary: '\u{1F525}\udc00x\udc00\u{1F525}' });
+    expect(out.resultSummary).toBe('\u{1F525}\uFFFDx\uFFFD\u{1F525}');
+  });
+
   it('strips keys outside the shape and ignores a kind the body claims', () => {
     const out = validateChartContext('trends', undefined, trends({ kind: 'graphs', extra: 'x' }));
     expect(out.kind).toBe('trends');
