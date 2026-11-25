@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.100] - 2026-11-25
+
+### Added
+- **Compare two time ranges within one test run in the Distributed Tracing and Pyroscope cards.** The tracing card's Traces Diff tab and the Pyroscope card's Diff View gain a **Two time ranges in this run** option beside the baseline-run picker: two range sliders pick a baseline window and a compare window of the same run, which is how to see what changed as a run went on (a slow leak, a cache warming up, a degradation after a ramp). Both sides of the comparison are the current run, so no API change was needed.
+
 ## [0.2.97.99] - 2026-11-24
 
 ### Fixed

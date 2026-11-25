@@ -29,6 +29,7 @@ import {
   PyroscopeHeader,
   PyroscopeBaselineSelector,
 } from './components';
+import { WithinRunWindowsPicker } from '../shared/WithinRunWindowsPicker';
 
 import { useCommentItemCounts, useCommentItemFocus } from '../comments/CommentsContext';
 import ItemCommentHeader, { NO_EVENT, TabCommentMark } from '../comments/ItemCommentHeader';
@@ -233,14 +234,26 @@ export default function PyroscopeCard({
                 {/* Diff View Tab Content */}
                 {pyroscopeData.viewModeTab === 1 && (
                   <Box>
-                    <PyroscopeBaselineSelector
-                      relatedTestRuns={pyroscopeData.relatedTestRuns}
-                      selectedBaseline={pyroscopeData.selectedBaseline}
-                      onBaselineChange={pyroscopeData.setSelectedBaseline}
-                      loading={pyroscopeData.fetchingBaselines}
-                    />
+                    <Box sx={{ mb: 3 }}>
+                      <WithinRunWindowsPicker
+                        mode={pyroscopeData.compareMode}
+                        onModeChange={pyroscopeData.setCompareMode}
+                        startTime={testRun.start_time}
+                        endTime={testRun.end_time}
+                        value={pyroscopeData.runWindows}
+                        onChange={pyroscopeData.setRunWindows}
+                      />
+                    </Box>
+                    {pyroscopeData.compareMode === 'run' && (
+                      <PyroscopeBaselineSelector
+                        relatedTestRuns={pyroscopeData.relatedTestRuns}
+                        selectedBaseline={pyroscopeData.selectedBaseline}
+                        onBaselineChange={pyroscopeData.setSelectedBaseline}
+                        loading={pyroscopeData.fetchingBaselines}
+                      />
+                    )}
 
-                    {pyroscopeData.selectedBaseline && (
+                    {pyroscopeData.hasComparison && (
                       <PyroscopeAnalysis
                         analysis={pyroscopeData.flamegraphAnalysis}
                         loading={pyroscopeData.analysingFlamegraph}
@@ -254,12 +267,12 @@ export default function PyroscopeCard({
                         onToggleAllImprovements={() => pyroscopeData.setShowAllImprovements(!pyroscopeData.showAllImprovements)}
                         compareViewUrl={pyroscopeData.compareViewUrl}
                         isLoading={pyroscopeData.loading}
-                        hasBaseline={!!pyroscopeData.selectedBaseline}
+                        hasBaseline={pyroscopeData.hasComparison}
                         onOpenExternal={pyroscopeData.handleOpenExternal}
                       />
                     )}
 
-                    {!pyroscopeData.selectedBaseline ? (
+                    {!pyroscopeData.hasComparison ? (
                       <Box textAlign="center" py={8}>
                         <Typography variant="body2" color="text.secondary">
                           Select a baseline test run to compare

@@ -19,6 +19,14 @@ import {
   type CompareTracesParams,
 } from '@/lib/trace-analysis-api';
 import TraceAnalysisReport from './TraceAnalysisReport';
+import {
+  WithinRunWindowsPicker,
+  CompareMode,
+  RunWindows,
+  defaultRunWindows,
+  runDurationSeconds,
+  windowToIso,
+} from '../shared/WithinRunWindowsPicker';
 
 interface RelatedTestRun {
   test_run_id: string;
@@ -67,6 +75,12 @@ export default function TracesDiffTab({
   const [relatedTestRuns, setRelatedTestRuns] = useState<RelatedTestRun[]>([]);
   const [selectedBaseline, setSelectedBaseline] = useState<RelatedTestRun | null>(null);
   const [fetchingBaselines, setFetchingBaselines] = useState(false);
+  // 'within' compares two time ranges of this run instead of a baseline run
+  const [compareMode, setCompareMode] = useState<CompareMode>('run');
+  const [runWindows, setRunWindows] = useState<RunWindows>(() =>
+    defaultRunWindows(runDurationSeconds(testRun.start_time, testRun.end_time))
+  );
+  const canCompare = compareMode === 'within' || !!selectedBaseline;
 
   const [analysisResult, setAnalysisResult] = useState<TraceAnalysisResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -77,13 +91,13 @@ export default function TracesDiffTab({
 
   // Auto-trigger comparison when drill-down completes (sampler prop updated)
   useEffect(() => {
-    if (pendingDrillDown && sampler === pendingDrillDown && selectedBaseline) {
+    if (pendingDrillDown && sampler === pendingDrillDown && canCompare) {
       setPendingDrillDown(null);
       // Trigger comparison with the new sampler
       triggerCompare(pendingDrillDown);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sampler, pendingDrillDown, selectedBaseline]);
+  }, [sampler, pendingDrillDown, canCompare]);
 
   // Load related test runs on mount
   useEffect(() => {
@@ -137,7 +151,28 @@ export default function TracesDiffTab({
 
   // Core comparison function that accepts sampler parameter
   const triggerCompare = async (samplerOverride?: string | null): Promise<void> => {
-    if (!selectedBaseline || !selectedBaseline.start_time || !selectedBaseline.end_time) {
+    // Both sides of a within-run comparison are this run, filtered to its two windows.
+    let windows: Pick<CompareTracesParams,
+      'baselineTestRunId' | 'baselineStartTime' | 'baselineEndTime' | 'currentStartTime' | 'currentEndTime'>;
+    if (compareMode === 'within') {
+      const baseline = windowToIso(testRun.start_time, runWindows.baseline);
+      const current = windowToIso(testRun.start_time, runWindows.current);
+      windows = {
+        baselineTestRunId: testRun.test_run_id,
+        baselineStartTime: baseline.start,
+        baselineEndTime: baseline.end,
+        currentStartTime: current.start,
+        currentEndTime: current.end,
+      };
+    } else if (selectedBaseline?.start_time && selectedBaseline.end_time) {
+      windows = {
+        baselineTestRunId: selectedBaseline.test_run_id,
+        baselineStartTime: selectedBaseline.start_time,
+        baselineEndTime: selectedBaseline.end_time,
+        currentStartTime: testRun.start_time,
+        currentEndTime: testRun.end_time,
+      };
+    } else {
       setError('Please select a baseline test run with valid timestamps');
       return;
     }
@@ -152,16 +187,12 @@ export default function TracesDiffTab({
 
       const params: CompareTracesParams = {
         currentTestRunId: testRun.test_run_id,
-        baselineTestRunId: selectedBaseline.test_run_id,
         tracingInstanceId,
         serviceName,
         scenario,
         transaction,
         sampler: effectiveSampler || undefined,
-        currentStartTime: testRun.start_time,
-        currentEndTime: testRun.end_time,
-        baselineStartTime: selectedBaseline.start_time,
-        baselineEndTime: selectedBaseline.end_time,
+        ...windows,
       };
 
       const result = await compareTraces(params);
@@ -232,58 +263,75 @@ export default function TracesDiffTab({
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <WithinRunWindowsPicker
+        mode={compareMode}
+        onModeChange={(m) => {
+          setCompareMode(m);
+          setAnalysisResult(null);
+        }}
+        startTime={testRun.start_time}
+        endTime={testRun.end_time}
+        value={runWindows}
+        onChange={(w) => {
+          setRunWindows(w);
+          setAnalysisResult(null);
+        }}
+      />
+
       {/* Baseline selector */}
-      <Box>
-        <Autocomplete
-          fullWidth
-          size="small"
-          options={relatedTestRuns}
-          getOptionLabel={getTestRunDisplayText}
-          value={selectedBaseline}
-          onChange={(_event, newValue) => {
-            setSelectedBaseline(newValue);
-            setAnalysisResult(null);
-          }}
-          loading={fetchingBaselines}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Baseline Test Run"
-              helperText={
-                relatedTestRuns.length === 0
-                  ? 'No related test runs with valid timestamps available'
-                  : selectedBaseline
-                  ? `Comparing with: ${selectedBaseline.test_run_id}`
-                  : `Select from ${relatedTestRuns.length} available test runs`
-              }
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {fetchingBaselines ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key, ...otherProps } = props;
-            return (
-              <Box component="li" key={key} {...otherProps}>
-                <Box>
-                  <Typography variant="body2">{getTestRunDisplayText(option)}</Typography>
-                  {getTestRunSecondaryInfo(option) && (
-                    <Typography variant="caption" color="text.secondary">
-                      {getTestRunSecondaryInfo(option)}
-                    </Typography>
-                  )}
+      {compareMode === 'run' && (
+        <Box>
+          <Autocomplete
+            fullWidth
+            size="small"
+            options={relatedTestRuns}
+            getOptionLabel={getTestRunDisplayText}
+            value={selectedBaseline}
+            onChange={(_event, newValue) => {
+              setSelectedBaseline(newValue);
+              setAnalysisResult(null);
+            }}
+            loading={fetchingBaselines}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Baseline Test Run"
+                helperText={
+                  relatedTestRuns.length === 0
+                    ? 'No related test runs with valid timestamps available'
+                    : selectedBaseline
+                    ? `Comparing with: ${selectedBaseline.test_run_id}`
+                    : `Select from ${relatedTestRuns.length} available test runs`
+                }
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {fetchingBaselines ? <CircularProgress size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+            renderOption={(props, option) => {
+              const { key, ...otherProps } = props;
+              return (
+                <Box component="li" key={key} {...otherProps}>
+                  <Box>
+                    <Typography variant="body2">{getTestRunDisplayText(option)}</Typography>
+                    {getTestRunSecondaryInfo(option) && (
+                      <Typography variant="caption" color="text.secondary">
+                        {getTestRunSecondaryInfo(option)}
+                      </Typography>
+                    )}
+                  </Box>
                 </Box>
-              </Box>
-            );
-          }}
-        />
-      </Box>
+              );
+            }}
+          />
+        </Box>
+      )}
 
       {/* Comparing info and button */}
       <Box
@@ -346,7 +394,7 @@ export default function TracesDiffTab({
           variant="contained"
           startIcon={analyzing ? <CircularProgress size={18} color="inherit" /> : <CompareArrows />}
           onClick={handleCompare}
-          disabled={!selectedBaseline || analyzing}
+          disabled={!canCompare || analyzing}
         >
           {analyzing ? 'Comparing...' : 'Compare Traces'}
         </Button>
@@ -394,7 +442,9 @@ export default function TracesDiffTab({
         >
           <CompareArrows sx={{ fontSize: 48, mb: 1, opacity: 0.5 }} />
           <Typography variant="body1" sx={{ mb: 0.5 }}>
-            Select a baseline test run and click &quot;Compare Traces&quot;
+            {compareMode === 'within'
+              ? 'Pick the two time ranges and click "Compare Traces"'
+              : 'Select a baseline test run and click "Compare Traces"'}
           </Typography>
           <Typography variant="body2">
             The analysis will compare traces for{' '}
