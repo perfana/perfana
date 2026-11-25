@@ -13,6 +13,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -177,6 +178,24 @@ export class DiffChartContextDto {
   @IsString()
   @Length(1, 255)
   baselineTestRunId?: string;
+
+  @ApiPropertyOptional({ description: 'Two time ranges of this run compared: the baseline range, [from, to] seconds from the run start', type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  baselineWindowSeconds?: [number, number];
+
+  @ApiPropertyOptional({ description: 'The compared range, [from, to] seconds from the run start', type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  currentWindowSeconds?: [number, number];
 
   @ApiPropertyOptional({ description: 'The Compare Traces result on screen, as plain text', maxLength: DIFF_VIEW_SUMMARY_MAX_LENGTH })
   @IsOptional()

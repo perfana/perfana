@@ -846,6 +846,8 @@ describe('comment views on Graphs, Trends and Compare', () => {
     expect(describeView({ kind: 'compare', series: trendsView.series, baselineTestRunId: 'control-group' }, false)).toBe('1 series · vs control group');
     expect(describeView({ kind: 'compare', series: trendsView.series }, false)).toBe('1 series · no baseline');
     expect(describeView({ kind: 'pyroscope', view: 'diff', baselineTestRunId: 'App-00004' }, false)).toBe('Diff view vs run App-00004');
+    expect(describeView({ kind: 'pyroscope', view: 'diff', baselineWindowSeconds: [0, 1200], currentWindowSeconds: [2400, 3725] }, false))
+      .toBe("Diff view of this run: 0:00–20:00 (baseline) vs 40:00–1:02:05, from the run's start");
     expect(describeView({ kind: 'distributed-tracing', view: 'diff', resultSummary: 'Traces: 3 current / 4 baseline' }, false)).toBe('Diff view, no baseline selected\nTraces: 3 current / 4 baseline');
     expect(describeView({ series: [] }, true)).toBe('Placed on 0 series · whole run');
     expect(describeView({ kind: 'graphs', series: [] }, false)).toBe('Written on 0 series · whole run');

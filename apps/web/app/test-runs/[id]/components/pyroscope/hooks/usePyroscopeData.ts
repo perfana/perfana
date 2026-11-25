@@ -225,6 +225,11 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
 
   // Generate comparison view URL (client-side, no API roundtrip needed)
   const generateComparisonUrl = useCallback((): void => {
+    // A baseline run picked without timestamps has no window to compare; say so rather than wait silently.
+    if (compareMode === 'run' && selectedBaseline && !comparisonWindows) {
+      setError('Selected baseline test run does not have valid timestamps for comparison');
+      return;
+    }
     if (
       !pyroscopeInstance ||
       !selectedApplication ||
@@ -300,7 +305,7 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
     } finally {
       setLoading(false);
     }
-  }, [pyroscopeInstance, selectedApplication, selectedProfiler, comparisonWindows, theme.palette.mode]);
+  }, [pyroscopeInstance, selectedApplication, selectedProfiler, compareMode, selectedBaseline, comparisonWindows, theme.palette.mode]);
 
   // Analyze flamegraphs
   const analyzeFlamegraphs = useCallback(async (): Promise<void> => {
@@ -401,12 +406,13 @@ export function usePyroscopeData({ testRun, expanded }: UsePyroscopeDataProps) {
       viewModeTab === 1 &&
       selectedApplication &&
       selectedProfiler &&
-      comparisonWindows
+      // a baseline without timestamps still gets here, so generateComparisonUrl can report it
+      (comparisonWindows || selectedBaseline)
     ) {
       generateComparisonUrl();
       analyzeFlamegraphs();
     }
-  }, [expanded, viewModeTab, activeCombinationTab, comparisonWindows, generateComparisonUrl, analyzeFlamegraphs, selectedApplication, selectedProfiler]);
+  }, [expanded, viewModeTab, activeCombinationTab, comparisonWindows, selectedBaseline, generateComparisonUrl, analyzeFlamegraphs, selectedApplication, selectedProfiler]);
 
   // Add timeout for iframe loading to prevent infinite spinner
   useEffect(() => {

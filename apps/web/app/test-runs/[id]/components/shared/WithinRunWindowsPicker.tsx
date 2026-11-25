@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Box, Slider, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { formatRunOffset as formatOffset } from '@perfana/shared/constants/comment-cards';
 
 /** Offsets in seconds from the run's start. */
 export type SecondRange = [number, number];
@@ -31,14 +32,6 @@ export function windowToIso(startTime: string, [from, to]: SecondRange): { start
   };
 }
 
-function formatOffset(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  const mm = String(m).padStart(2, '0');
-  const ss = String(s).padStart(2, '0');
-  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
-}
 
 function clock(startTime: string, offset: number): string {
   return new Date(Date.parse(startTime) + offset * 1000).toLocaleTimeString([], {

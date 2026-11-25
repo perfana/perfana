@@ -42,6 +42,8 @@ describe('validateChartContext', () => {
     expect(validateChartContext('distributed-tracing', undefined, { view: 'diff', baselineTestRunId: 'App-00007', resultSummary: 'x'.repeat(2000) }))
       .toMatchObject({ kind: 'distributed-tracing', view: 'diff', baselineTestRunId: 'App-00007' });
     expect(validateChartContext('pyroscope', undefined, { view: 'diff', baselineTestRunId: 'App-00007' })).toMatchObject({ kind: 'pyroscope', view: 'diff' });
+    expect(validateChartContext('pyroscope', undefined, { view: 'diff', baselineWindowSeconds: [0, 600], currentWindowSeconds: [1200, 1800] }))
+      .toMatchObject({ baselineWindowSeconds: [0, 600], currentWindowSeconds: [1200, 1800] });
   });
 
   it('strips keys outside the shape and ignores a kind the body claims', () => {
@@ -66,6 +68,8 @@ describe('validateChartContext', () => {
     ['a Configuration view with an unknown status', 'config', config({ status: 'different' })],
     ['a Configuration view with no status', 'config', config({ status: undefined })],
     ['a diff view naming another tab', 'pyroscope', { view: 'single' }],
+    ['a one-sided time range', 'pyroscope', { view: 'diff', baselineWindowSeconds: [0] }],
+    ['a negative time range', 'distributed-tracing', { view: 'diff', currentWindowSeconds: [-5, 10] }],
     ['a trace result over 2,000 characters', 'distributed-tracing', { view: 'diff', resultSummary: 'x'.repeat(2001) }],
     ['a view on a card that records none', 'slo', graphs()],
     ['a view on Dashboards, which records none', 'dashboards', config()],

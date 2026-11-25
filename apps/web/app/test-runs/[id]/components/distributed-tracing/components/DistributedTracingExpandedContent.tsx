@@ -114,6 +114,7 @@ export function DistributedTracingExpandedContent({
   useDiffCommentView('distributed-tracing', () => ({
     open: viewModeTab === 1,
     baselineTestRunId: diffState.current?.baselineTestRunId,
+    windows: diffState.current?.windows,
     resultSummary: diffState.current?.result ? summarizeTraceAnalysis(diffState.current.result, diffState.current.resultFor) : null,
   }));
   return (

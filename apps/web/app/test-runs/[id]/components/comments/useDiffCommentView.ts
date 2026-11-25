@@ -2,17 +2,21 @@ import { useEffect, useRef } from 'react';
 import { DIFF_VIEW_SUMMARY_MAX_LENGTH } from '@perfana/shared/constants/comment-cards';
 import type { DiffView } from '@/lib/test-run-comments';
 import { useComments } from './CommentsContext';
+import type { RunWindows } from '../shared/WithinRunWindowsPicker';
 
 export interface DiffTabState {
   /** The diff tab is the one on screen. */
   open: boolean;
   baselineTestRunId?: string | null;
+  /** Set when two time ranges of this run are compared instead of another run. */
+  windows?: RunWindows | null;
   resultSummary?: string | null;
 }
 
 /**
  * A new root comment on the Distributed tracing or Pyroscope card records the diff tab it was
- * written on: its baseline and, on tracing, the Compare Traces result. Nothing is recorded on the
+ * written on: its baseline run or the two time ranges of this run, and on tracing the Compare
+ * Traces result. Nothing is recorded on the
  * other tabs. `read` is called when the comment is posted, so it sees the latest state.
  */
 export function useDiffCommentView(card: DiffView['kind'], read: () => DiffTabState) {
@@ -27,7 +31,11 @@ export function useDiffCommentView(card: DiffView['kind'], read: () => DiffTabSt
         return {
           kind: card,
           view: 'diff',
-          ...(s.baselineTestRunId ? { baselineTestRunId: s.baselineTestRunId } : {}),
+          ...(s.windows
+            ? { baselineWindowSeconds: s.windows.baseline, currentWindowSeconds: s.windows.current }
+            : s.baselineTestRunId
+              ? { baselineTestRunId: s.baselineTestRunId }
+              : {}),
           ...(s.resultSummary ? { resultSummary: s.resultSummary.slice(0, DIFF_VIEW_SUMMARY_MAX_LENGTH) } : {}),
         };
       }),

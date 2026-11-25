@@ -355,14 +355,38 @@ export const DIFF_VIEW_SUMMARY_MAX_LENGTH = 2_000;
 export interface DiffCommentView {
   kind?: 'distributed-tracing' | 'pyroscope';
   view: 'diff';
+  /** Compared with another run. Absent when two time ranges of this run were compared. */
   baselineTestRunId?: string;
+  /** Two time ranges of this run compared, as [from, to] seconds from the run's start. */
+  baselineWindowSeconds?: [number, number];
+  currentWindowSeconds?: [number, number];
   /** Plain-text summary of the Compare Traces result; absent until Compare Traces was clicked. */
   resultSummary?: string;
 }
 
-/** `Diff view vs run 1234` plus the result summary on its own lines. Plain text; the caller escapes it. */
-export function describeDiffCommentView(view: Pick<DiffCommentView, 'baselineTestRunId' | 'resultSummary'>): string {
-  const head = view.baselineTestRunId ? `Diff view vs run ${view.baselineTestRunId}` : 'Diff view, no baseline selected';
+/** `1:05:09`, or `5:09` under an hour: an offset from the run's start, as the range picker shows it. */
+export function formatRunOffset(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const mm = String(Math.floor((seconds % 3600) / 60)).padStart(h > 0 ? 2 : 1, '0');
+  const ss = String(Math.floor(seconds % 60)).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+const range = ([from, to]: [number, number]) => `${formatRunOffset(from)}–${formatRunOffset(to)}`;
+
+/**
+ * `Diff view vs run 1234`, or `Diff view of this run: 0:00–20:00 (baseline) vs 40:00–1:00:00`,
+ * plus the result summary on its own lines. Plain text; the caller escapes it.
+ */
+export function describeDiffCommentView(
+  view: Pick<DiffCommentView, 'baselineTestRunId' | 'baselineWindowSeconds' | 'currentWindowSeconds' | 'resultSummary'>,
+): string {
+  const head =
+    view.baselineWindowSeconds && view.currentWindowSeconds
+      ? `Diff view of this run: ${range(view.baselineWindowSeconds)} (baseline) vs ${range(view.currentWindowSeconds)}, from the run's start`
+      : view.baselineTestRunId
+        ? `Diff view vs run ${view.baselineTestRunId}`
+        : 'Diff view, no baseline selected';
   return view.resultSummary ? `${head}\n${view.resultSummary}` : head;
 }
 

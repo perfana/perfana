@@ -19,6 +19,7 @@ import {
   type CompareTracesParams,
 } from '@/lib/trace-analysis-api';
 import TraceAnalysisReport from './TraceAnalysisReport';
+import { formatRunOffset } from '@perfana/shared/constants/comment-cards';
 import {
   WithinRunWindowsPicker,
   CompareMode,
@@ -41,6 +42,8 @@ interface RelatedTestRun {
 /** What the tab shows: the baseline picked, and the last result with the request and baseline it was computed for. */
 export interface DiffTabReport {
   baselineTestRunId: string | null;
+  /** Set when two time ranges of this run are compared instead of another run. */
+  windows: RunWindows | null;
   result: TraceAnalysisResponse | null;
   resultFor: string | null;
 }
@@ -100,8 +103,13 @@ export default function TracesDiffTab({
   const report = useRef(onDiffStateChange);
   report.current = onDiffStateChange;
   useEffect(() => {
-    report.current?.({ baselineTestRunId: selectedBaseline?.test_run_id ?? null, result: analysisResult, resultFor });
-  }, [selectedBaseline, analysisResult, resultFor]);
+    report.current?.({
+      baselineTestRunId: compareMode === 'run' ? (selectedBaseline?.test_run_id ?? null) : null,
+      windows: compareMode === 'within' ? runWindows : null,
+      result: analysisResult,
+      resultFor,
+    });
+  }, [compareMode, runWindows, selectedBaseline, analysisResult, resultFor]);
   useEffect(() => () => report.current?.(null), []);
 
   // Track if we should auto-compare after sampler change (drill-down)
@@ -215,7 +223,10 @@ export default function TracesDiffTab({
 
       const result = await compareTraces(params);
       setAnalysisResult(result);
-      setResultFor(`${[scenario, transaction, effectiveSampler].filter(Boolean).join(' / ')} vs run ${selectedBaseline.test_run_id}`);
+      const against = compareMode === 'within'
+        ? `${formatRunOffset(runWindows.current[0])}–${formatRunOffset(runWindows.current[1])} vs ${formatRunOffset(runWindows.baseline[0])}–${formatRunOffset(runWindows.baseline[1])} of this run`
+        : `vs run ${windows.baselineTestRunId}`;
+      setResultFor(`${[scenario, transaction, effectiveSampler].filter(Boolean).join(' / ')} ${against}`);
 
       if (result.error) {
         setError(result.error);

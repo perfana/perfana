@@ -69,7 +69,8 @@ export default function PyroscopeCard({
   const activeCombo = pyroscopeData.configurations[pyroscopeData.activeCombinationTab];
   useDiffCommentView('pyroscope', () => ({
     open: pyroscopeData.viewModeTab === 1,
-    baselineTestRunId: pyroscopeData.selectedBaseline?.test_run_id,
+    baselineTestRunId: pyroscopeData.compareMode === 'run' ? pyroscopeData.selectedBaseline?.test_run_id : null,
+    windows: pyroscopeData.compareMode === 'within' ? pyroscopeData.runWindows : null,
   }));
 
   // Handle expand/collapse
