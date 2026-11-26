@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.102] - 2026-11-26
+
+### Added
+- **One test run can monitor more systems than the one it is named after.** List extra system-under-test and test-environment pairs in `perfana.yaml` under `test.additionalSutMonitoring` (perfana-cli), for example a shared database or a message broker the test also loads. Perfana adds their profile dashboards, SLOs and series grouping rules to the run's own system and environment, labelled `<dashboard> - <system> <environment>`. No system or environment is created for them.
+- **Each entry can name the profile to apply.** Without `profile`, an entry gets the same profiles as the run (the ones its tags match). With `profile`, it gets that profile only, which need not share a tag with the run but must belong to its organization. To add the dashboards without the SLOs, point the entry at a profile that holds only dashboards.
+- The names follow the same rule as the run's own: letters, digits, `.`, `_` and `-`, at most 100 characters each. The API rejects a test-run call with an entry that breaks it.
+- Removing an entry leaves the dashboards it added, and they keep being collected for later runs of that system and environment until deleted under the system's dashboard settings.
+- **Deploy note:** migration 1837 adds `test_runs.additional_sut_monitoring`; run it before deploying the new API and grafana-sync, which fail every test-run read until it has run.
+
 ## [0.2.97.101] - 2026-11-26
 
 ### Added
