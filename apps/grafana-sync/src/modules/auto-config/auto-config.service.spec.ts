@@ -646,6 +646,35 @@ describe('AutoConfigService', () => {
       );
     });
 
+    // Value: protects=one extra combination failing (its SLO provisioning throws) does not stop the next combination being provisioned; fails_when=the per-entry try/catch in processAdditionalSutMonitoring is removed or moved outside the entries loop; why_new=existing error test covers only per-dashboard errors, which processAutoConfigDashboardsForTestRun catches itself; seam=none; no_claim=error logging content
+    it('keeps processing the next entry when one entry fails', async () => {
+      benchmarkProcessorService.processProfileBenchmarks.mockImplementation(
+        async (
+          _run: unknown,
+          _names: unknown,
+          _b: unknown,
+          target?: { systemUnderTest: string },
+        ) => {
+          if (target?.systemUnderTest === 'payment-db') throw new Error('boom');
+        },
+      );
+      await runWith([
+        { systemUnderTest: 'payment-db', testEnvironment: 'acc' },
+        { systemUnderTest: 'cache', testEnvironment: 'acc' },
+      ]);
+
+      const runs = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls.map(
+        (c) => c[0].systemUnderTest?.name,
+      );
+      expect(runs).toEqual(['my-app', 'payment-db', 'cache']);
+      expect(benchmarkProcessorService.processProfileBenchmarks).toHaveBeenLastCalledWith(
+        expect.anything(),
+        ['Production Profile'],
+        expect.any(Array),
+        { systemUnderTest: 'cache', testEnvironment: 'acc' },
+      );
+    });
+
     it('skips an entry naming a profile of another organization', async () => {
       await runWith(
         [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', profile: 'k8s' }],

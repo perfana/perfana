@@ -9,6 +9,7 @@
  * run has `ds_metrics` for, or a profile SLO lands on scenarios of earlier runs.
  */
 import { DashboardFinderService } from './dashboard-finder.service';
+import { asMonitoringRun } from './additional-monitoring';
 
 function buildQueryBuilder(rows: unknown[] = []) {
   const qb: any = {
@@ -288,5 +289,29 @@ describe('DashboardFinderService.findSplunkPanelsByUidPattern', () => {
       await service.findSplunkPanelsByUidPattern('^splunk-', 'x', 'SHOP', 'acc', 'load', undefined),
     ).toEqual([]);
     expect(applicationDashboardRepo.createQueryBuilder).not.toHaveBeenCalled();
+  });
+});
+
+// Value: protects=a monitoring run looks up application dashboards under the OWNER sut/env with the suffixed label; fails_when=finder reverts to testRun.systemUnderTest/testEnvironment or drops ownerLabel (duplicate inserts, collisions with the owner copy); why_new=no finder spec covered findApplicationDashboardsForSystemUnderTest; seam=none; no_claim=SQL execution
+describe('DashboardFinderService.findApplicationDashboardsForSystemUnderTest for a monitoring run', () => {
+  it('filters on the owner system/environment and the combination-suffixed label', async () => {
+    const { service, qb } = build([]);
+    const run = asMonitoringRun(
+      {
+        testRunId: 'r',
+        systemUnderTest: { name: 'shop' },
+        testEnvironment: 'acc',
+        organizationId: 'org-1',
+      } as any,
+      { systemUnderTest: 'payment-db', testEnvironment: 'prod' },
+    );
+    await service.findApplicationDashboardsForSystemUnderTest(run, 'G', 'uid-1', 'K8s');
+    expect(qb.where).toHaveBeenCalledWith('sut.name = :sutName', { sutName: 'shop' });
+    expect(qb.andWhere).toHaveBeenCalledWith('ad.testEnvironment = :testEnvironment', {
+      testEnvironment: 'acc',
+    });
+    expect(qb.andWhere).toHaveBeenCalledWith('ad.dashboardLabel = :dashboardLabel', {
+      dashboardLabel: 'K8s - payment-db prod',
+    });
   });
 });
