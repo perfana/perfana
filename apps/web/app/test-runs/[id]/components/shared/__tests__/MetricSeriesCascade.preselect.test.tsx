@@ -473,3 +473,66 @@ it('adds the pods of a group a Graphs link names', async () => {
     { dashboard: jvm, panel: heapPanel, metricName: 'api-2' },
   ]));
 });
+
+const groupedAnswer = async (panels: PanelOption[]) =>
+  panels.map((p) => [
+    { metricName: 'api (avg)', panel: p, members: ['api-1', 'api-2'] },
+    { metricName: 'other', panel: p },
+  ]);
+
+/*
+ * Value: protects=a whole-dashboard Graphs link adds the raw series (pods and ungrouped) and not the
+ *   group series listed beside them; fails_when=the wildcard arm stops skipping `members` options, so
+ *   the chart gets every pod AND its group (double-plotted); why_new=Graphs started listing groups next
+ *   to pods; seam=none; no_claim=the real link URL (mocked params)
+ */
+it('adds the raw series, not the groups, for a dashboard-only Graphs link', async () => {
+  (useSearchParams as jest.Mock).mockReturnValue(new URLSearchParams({ card: 'graphs', dashboard: jvm.dashboard_label }));
+  (fetchSeriesForPanels as jest.Mock).mockImplementation(groupedAnswer);
+  const { onAddSeries } = setup({ card: 'graphs', podsByDefault: true });
+
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalled());
+  const names = (onAddSeries.mock.calls[0]![0] as Array<{ metricName: string }>).map((p) => p.metricName);
+  expect(names.sort()).toEqual(['api-1', 'api-2', 'other']);
+});
+
+/*
+ * Value: protects=a Graphs link naming an ungrouped series adds it by its exact name; fails_when=the
+ *   pods-by-default arm stops falling back to the exact match when no pod stands behind the name, so the
+ *   link adds nothing; why_new=only the group-name arm was covered on a pods-by-default picker;
+ *   seam=none; no_claim=the real link URL (mocked params)
+ */
+it('adds an ungrouped series a Graphs link names by its exact name', async () => {
+  linkTo('graphs', jvm.dashboard_label, 5, 'other');
+  (fetchSeriesForPanels as jest.Mock).mockImplementation(groupedAnswer);
+  const { onAddSeries } = setup({ card: 'graphs', podsByDefault: true });
+
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledWith([
+    { dashboard: jvm, panel: heapPanel, metricName: 'other' },
+  ]));
+});
+
+/*
+ * Value: protects=a Graphs link naming a group whose pods are all on the chart adds nothing; fails_when=
+ *   the pod lookup runs after the added ones are dropped, so the link falls through to the group's own
+ *   series and a second click adds the aggregate; why_new=groups are now listed beside pods in Graphs;
+ *   seam=none; no_claim=the real link URL (mocked params)
+ */
+it('adds nothing, not the group, when a Graphs link names a group whose pods are already added', async () => {
+  linkTo('graphs', jvm.dashboard_label, 5, 'api (avg)');
+  (fetchSeriesForPanels as jest.Mock).mockImplementation(groupedAnswer);
+  const { onAddSeries } = setup({
+    card: 'graphs',
+    podsByDefault: true,
+    // Its own run: the earlier group-link test consumed this exact link key.
+    testRun: { test_run_id: 'run-pods-added' } as never,
+    addedSeries: [
+      { dashboardId: jvm.id, panelId: 5, metricName: 'api-1' },
+      { dashboardId: jvm.id, panelId: 5, metricName: 'api-2' },
+    ],
+  });
+
+  await waitFor(() => expect(fetchSeriesForPanels).toHaveBeenCalled());
+  await act(async () => { await Promise.resolve(); });
+  expect(onAddSeries).not.toHaveBeenCalled();
+});

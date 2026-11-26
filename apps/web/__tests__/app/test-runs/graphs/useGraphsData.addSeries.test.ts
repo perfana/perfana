@@ -95,6 +95,86 @@ it('adds series from several panels across several dashboards and loads only the
   await waitFor(() => expect(result.current.chartName).not.toBe(''));
 });
 
+/*
+ * Value: protects=a pod picked on a grouped panel draws its own points; fails_when=the panel is
+ *   read only grouped (no members=true fallback), so the pod gets no rows and the chart shows only
+ *   groups; why_new=v0.2.97.98 made the Graphs picker list pods but the chart still read groups;
+ *   seam=authenticatedFetch; no_claim=the API's grouping SQL
+ */
+it('reads a pod from the raw panel answer when the grouped one has only its group', async () => {
+  (authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => {
+    if (url.includes('/application-dashboards')) return { ok: true, json: async () => [] };
+    const raw = url.includes('members=true');
+    return { ok: true, json: async () => (raw ? [point('api-1', 7), point('api-2', 9)] : [point('api (avg)', 8)]) };
+  });
+  const { result, showToast } = setup();
+  const cpu = panelOf(jvmDashboard, 5, 'CPU');
+
+  await act(async () => {
+    await result.current.handleAddSeries([
+      { dashboard: jvmDashboard, panel: cpu, metricName: 'api-1' },
+      { dashboard: jvmDashboard, panel: cpu, metricName: 'api (avg)' },
+    ], showToast);
+  });
+
+  const [pod, group] = result.current.addedSeries;
+  expect(result.current.seriesData.get(pod!.id)).toEqual([point('api-1', 7)]);
+  expect(result.current.seriesData.get(group!.id)).toEqual([point('api (avg)', 8)]);
+});
+
+/*
+ * Value: protects=a panel that answered nothing is not read a second time with members=true;
+ *   fails_when=the raw fallback fires on an empty first answer, doubling the requests for a series with
+ *   no data in the window (or after every attempt failed); why_new=the all-found case is pinned by
+ *   useGraphsData.zoom.test.ts, the empty case was not; seam=authenticatedFetch; no_claim=the API's grouping SQL
+ */
+it('does not re-read a panel with members=true when it answered nothing', async () => {
+  routeFetch({ '5': [] });
+  const { result, showToast } = setup();
+
+  await act(async () => {
+    await result.current.handleAddSeries([
+      { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'CPU'), metricName: 'api-1' },
+    ], showToast);
+  });
+
+  const panelCalls = (authenticatedFetch as jest.Mock).mock.calls.map(([u]) => u as string).filter((u) => u.includes('/ds-metrics/'));
+  expect(panelCalls).toHaveLength(1);
+  expect(panelCalls[0]).not.toContain('members=true');
+  expect(result.current.seriesData.get(result.current.addedSeries[0]!.id)).toEqual([]);
+});
+
+/*
+ * Value: protects=a failed raw (members=true) read is retried as a raw read; fails_when=the retry in
+ *   fetchPanelRows stops threading `members` (attempt lands in its slot or it defaults to false), so the
+ *   retry re-reads the grouped answer and the pod draws nothing; why_new=retry was only exercised on the
+ *   grouped read; seam=authenticatedFetch; no_claim=retry count beyond PANEL_FETCH_ATTEMPTS
+ */
+it('retries a failed raw read with members=true, so the pod still gets its points', async () => {
+  let rawCalls = 0;
+  (authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => {
+    if (url.includes('/application-dashboards')) return { ok: true, json: async () => [] };
+    if (!url.includes('members=true')) return { ok: true, json: async () => [point('api (avg)', 8)] };
+    rawCalls += 1;
+    return rawCalls === 1
+      ? { ok: false, statusText: 'Bad Gateway', json: async () => [] }
+      : { ok: true, json: async () => [point('api-1', 7)] };
+  });
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  const { result, showToast } = setup();
+
+  await act(async () => {
+    await result.current.handleAddSeries([
+      { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'CPU'), metricName: 'api-1' },
+    ], showToast);
+  });
+
+  expect(rawCalls).toBe(2);
+  const [pod] = result.current.addedSeries;
+  expect(result.current.seriesData.get(pod!.id)).toEqual([point('api-1', 7)]);
+  warn.mockRestore();
+});
+
 it('tells the user when every pick was already on the chart, and adds nothing', async () => {
   const { result, showToast } = setup();
   const pick = { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap'), metricName: 'used' };

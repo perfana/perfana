@@ -157,32 +157,41 @@ it('adds a group under its group name', async () => {
 });
 
 /*
- * Value: protects=Graphs (podsByDefault) lists a grouped panel's raw pods, from the grouped answer's own
- *   membership, with "show groups" to switch back, and keeps the switch off an ungrouped panel;
- *   fails_when=the Graphs picker lists group names again (groups are for comparing runs) or the switch
- *   appears on every panel; why_new=only the groups-by-default mode was covered; seam=none;
- *   no_claim=the chart's raw read of a pod name (fetches mocked; unit only)
+ * Value: protects=Graphs (podsByDefault) lists a grouped panel's raw pods AND its groups, both
+ *   pickable, with no switch; fails_when=the Graphs picker hides the pods behind the groups or the
+ *   groups behind the pods; why_new=Graphs plots one run's raw series, groups optional;
+ *   seam=none; no_claim=the chart's raw read of a pod name (fetches mocked; unit only)
  */
 describe('with podsByDefault (Graphs)', () => {
-  it('lists the pods of a grouped panel, not its groups, and switches to the groups and back', async () => {
-    const user = userEvent.setup();
+  it('lists the pods of a grouped panel next to its groups, with no switch', async () => {
     setup({ podsByDefault: true });
     await pickEverything();
 
     await waitFor(() => expect(screen.getByText(POD_A)).toBeInTheDocument());
     expect(screen.getByText(POD_C)).toBeInTheDocument();
-    expect(screen.queryByTestId('series-members-badge')).not.toBeInTheDocument();
+    expect(screen.getByText('api')).toBeInTheDocument();
+    expect(screen.getByTestId('series-members-badge')).toBeInTheDocument();
     // The grouped answer is expanded locally: no per-pod request.
     expect((fetchSeriesForPanels as jest.Mock).mock.calls.every((call) => call.length === 2)).toBe(true);
-    // Only the grouped panel offers the switch; the JVM panel has nothing to group.
-    expect(screen.getAllByRole('button', { name: 'Show groups' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /Show groups|Show individual pods/ })).not.toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole('button', { name: 'Show groups' }));
-    await waitFor(() => expect(screen.getByTestId('series-members-badge')).toBeInTheDocument());
-    expect(screen.queryByText(POD_A)).not.toBeInTheDocument();
+  /*
+   * Value: protects=a group the rule did not rename (same name as its one pod) is listed once;
+   *   fails_when=the Graphs list appends every group option after the pods, giving two rows with one
+   *   key (a React key clash, and one tick toggling both); why_new=pods and groups are listed together
+   *   only since this change; seam=none; no_claim=which names the API emits for an unrenamed group
+   */
+  it('lists a group that keeps the name of its one pod once', async () => {
+    (fetchSeriesForPanels as jest.Mock).mockImplementation(async (panels: PanelOption[]) =>
+      panels.map((p) => (p.id === heap.id
+        ? [{ metricName: 'used', panel: p }]
+        : [{ metricName: 'solo', panel: p, members: ['solo'] }])));
+    setup({ podsByDefault: true });
+    await pickEverything();
 
-    await user.click(screen.getByRole('button', { name: 'Show individual pods' }));
-    await waitFor(() => expect(screen.getByText(POD_A)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('solo')).toBeInTheDocument());
+    expect(screen.getAllByText('solo')).toHaveLength(1);
   });
 
   it('adds a pod under its own name', async () => {
