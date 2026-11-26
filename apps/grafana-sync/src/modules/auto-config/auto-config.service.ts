@@ -74,15 +74,21 @@ export class AutoConfigService {
     const lastSyncTimestamp = new Date(Date.now() - 5 * 60 * 1000);
     const recentTestRuns = await this.testRunFinderService.findRecentTestRuns(lastSyncTimestamp);
 
+    // An untagged run still has work when an additional-monitoring entry carries its own tags.
+    const hasWork = (tr: TestRun) =>
+      (tr.tags || []).length > 0 || readAdditionalSutMonitoring(tr).some((e) => e.tags);
+
     recentTestRuns
-      .filter((tr) => !(tr.tags || []).length)
-      .forEach((tr) =>
+      .filter((tr) => !hasWork(tr))
+      .forEach((tr) => {
         this.logger.log(
           `No AutoConfig process for test run because there are no tags: ${tr.testRunId}`,
-        ),
-      );
+        );
+        // Still surface entries skipped for a retired profile or a bad name on such a run.
+        readAdditionalSutMonitoring(tr, (m) => this.logger.warn(m));
+      });
 
-    const testRuns = recentTestRuns.filter((tr) => (tr.tags || []).length > 0);
+    const testRuns = recentTestRuns.filter(hasWork);
 
     if (testRuns.length === 0) {
       this.logger.log('No recent test runs with tags found. AutoConfig processing skipped.');
@@ -169,7 +175,12 @@ export class AutoConfigService {
         await this.processAdditionalSutMonitoring(
           testRun,
           target,
-          target.profile ? this.namedProfile(testRun, target.profile, profiles) : profileNames,
+          target.tags
+            ? matchProfilesForRun(
+                { tags: target.tags, organizationId: testRun.organizationId },
+                profiles,
+              ).map((p) => p.name)
+            : profileNames,
           autoConfigDashboards,
           profileBenchmarks,
           groupingRules,
@@ -178,23 +189,6 @@ export class AutoConfigService {
     } catch (error) {
       this.logger.error(`Error processing test run: ${testRun.testRunId}`, error);
     }
-  }
-
-  /**
-   * An entry's named profile, by the same organization rule as tag matching (fails closed on a
-   * missing organization); tags are not consulted, naming it is the opt-in.
-   */
-  private namedProfile(testRun: TestRun, name: string, profiles: any[]): string[] {
-    const found = profiles.some(
-      (p) =>
-        p.name === name && !!testRun.organizationId && p.organizationId === testRun.organizationId,
-    );
-    if (!found) {
-      this.logger.warn(
-        `Additional SUT monitoring for test run ${testRun.testRunId}: no profile '${name}' in its organization, entry skipped`,
-      );
-    }
-    return found ? [name] : [];
   }
 
   /**
@@ -210,7 +204,15 @@ export class AutoConfigService {
     profileBenchmarks: ProfileBenchmark[],
     groupingRules: ProfileGroupingRuleRow[],
   ): Promise<void> {
-    if (profileNames.length === 0) return;
+    if (profileNames.length === 0) {
+      // log, not warn: auto-config re-reads a recent run every pass.
+      this.logger.log(
+        `Additional SUT monitoring for test run ${testRun.testRunId}: no profile matches ` +
+          `${target.systemUnderTest} / ${target.testEnvironment}` +
+          `${target.tags ? ` (tags ${target.tags.join(', ')})` : ''}, entry skipped`,
+      );
+      return;
+    }
     this.logger.log(
       `Additional SUT monitoring for test run ${testRun.testRunId}: ` +
         `${target.systemUnderTest} / ${target.testEnvironment} with profiles ${profileNames.join(', ')}`,

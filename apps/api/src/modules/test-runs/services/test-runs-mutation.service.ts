@@ -397,10 +397,11 @@ export class TestRunsMutationService {
       abort: d.abort || false,
       variables: d.variables || [],
       // Omitted keeps the stored list on an update (TypeORM skips undefined), like tags.
-      additionalSutMonitoring: d.additionalSutMonitoring?.map(({ systemUnderTest, testEnvironment, profile }) => ({
+      additionalSutMonitoring: d.additionalSutMonitoring?.map(({ systemUnderTest, testEnvironment, tags, profile }) => ({
         systemUnderTest,
         testEnvironment,
-        ...(profile ? { profile } : {}),
+        // A retired `profile` is kept only without tags, so grafana-sync can skip that entry.
+        ...(tags?.length ? { tags } : profile ? { profile } : {}),
       })),
       // Ownership tracking (use API key's organization)
       organizationId: existingTestRun?.organization_id || organizationId,

@@ -483,8 +483,10 @@ describe('TestRuns DTOs', () => {
     const check = (list: unknown) => validate(plainToClass(UpdateRunningTestDto, { ...base, additionalSutMonitoring: list }));
     const entry = { systemUnderTest: 'payment-db', testEnvironment: 'acc' };
 
-    it('accepts entries with and without a profile', async () => {
-      expect(await check([entry, { ...entry, profile: 'k8s' }])).toHaveLength(0);
+    it('accepts entries with and without tags', async () => {
+      expect(await check([entry, { ...entry, tags: ['kafka'] }])).toHaveLength(0);
+      // The retired profile is still accepted, so a perfana-cli v0.9.0 run does not fail to start.
+      expect(await check([{ ...entry, profile: 'k8s' }])).toHaveLength(0);
     });
 
     it('rejects more than 20 entries', async () => {
@@ -498,7 +500,14 @@ describe('TestRuns DTOs', () => {
       // The run's own name rule: these names reach datasource variable queries unescaped.
       ['a quote and brace in the system', { ...entry, systemUnderTest: 'db"}' }],
       ['a space in the environment', { ...entry, testEnvironment: 'b c' }],
-      ['an empty profile', { ...entry, profile: '' }],
+      ['an empty tag', { ...entry, tags: [''] }],
+      ['tags that are not a list', { ...entry, tags: 'kafka' }],
+      // Value: protects=entry tags capped at 50 and 100 chars each; fails_when=ArrayMaxSize or the each-Length bound is dropped; why_new=only empty/non-list tags were covered; seam=none; no_claim=controller wiring
+      ['more than 50 tags', { ...entry, tags: Array.from({ length: 51 }, (_, i) => `t${i}`) }],
+      ['an overlong tag', { ...entry, tags: ['x'.repeat(101)] }],
+      ['a blank tag', { ...entry, tags: ['  '] }],
+      ['an empty tags list', { ...entry, tags: [] }],
+      ['an empty retired profile', { ...entry, profile: '' }],
     ])('rejects %s', async (_l, bad) => {
       const errors = await check([bad]);
       expect(errors.map((e) => e.property)).toContain('additionalSutMonitoring');

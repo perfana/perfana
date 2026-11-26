@@ -586,7 +586,7 @@ describe('AutoConfigService', () => {
     });
   });
   describe('additional SUT monitoring', () => {
-    const k8sProfile = { ...mockProfile, id: 'p-k8s', name: 'k8s', tags: ['unrelated'] };
+    const k8sProfile = { ...mockProfile, id: 'p-k8s', name: 'k8s', tags: ['kafka'] };
     const k8sDashboard = { ...mockAutoConfigDashboard, profile: 'k8s', dashboardUid: 'k8s-uid' };
 
     const runWith = async (
@@ -606,7 +606,7 @@ describe('AutoConfigService', () => {
       await service.processAutoConfigDashboards();
     };
 
-    it("applies the run's matched profiles to an entry without a profile, owned by the run", async () => {
+    it("applies the run's matched profiles to an entry without tags, owned by the run", async () => {
       await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc' }]);
 
       const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
@@ -633,8 +633,8 @@ describe('AutoConfigService', () => {
       );
     });
 
-    it("applies a named profile instead of the run's, without needing its tags", async () => {
-      await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc', profile: 'k8s' }]);
+    it("applies the profiles an entry's tags match instead of the run's", async () => {
+      await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] }]);
 
       const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
       expect(calls.map((c) => c[1])).toEqual([mockAutoConfigDashboard, k8sDashboard]);
@@ -642,7 +642,7 @@ describe('AutoConfigService', () => {
         expect.anything(),
         ['k8s'],
         expect.any(Array),
-        expect.objectContaining({ profile: 'k8s' }),
+        expect.objectContaining({ tags: ['kafka'] }),
       );
     });
 
@@ -675,9 +675,54 @@ describe('AutoConfigService', () => {
       );
     });
 
-    it('skips an entry naming a profile of another organization', async () => {
+    // Value: protects=an untagged run whose entry carries tags is still processed for that entry; fails_when=loadAutoConfigContext filters runs on their own tags only; why_new=entry tags made untagged runs meaningful; seam=none; no_claim=live grafana-sync run
+    it('processes an untagged run for an entry that carries its own tags', async () => {
+      testRunFinderService.findRecentTestRuns.mockResolvedValue([
+        {
+          ...mockTestRun,
+          tags: [],
+          additionalSutMonitoring: [
+            { systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] },
+          ],
+        },
+      ]);
+      testRunFinderService.findProfiles.mockResolvedValue([mockProfile, k8sProfile]);
+      testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
+      groupingRuleProcessorService.findProfileGroupingRules.mockResolvedValue([]);
+      dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+        mockAutoConfigDashboard,
+        k8sDashboard,
+      ]);
+      await service.processAutoConfigDashboards();
+
+      const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
+      expect(calls).toHaveLength(1);
+      expect(calls[0]![0].systemUnderTest?.name).toBe('payment-db');
+      expect(calls[0]![1]).toBe(k8sDashboard);
+    });
+
+    // Value: protects=an untagged run whose only entry names the retired profile still logs why it is skipped; fails_when=runs without work are dropped without reading their entries; why_new=hasWork filters such runs before processTestRun; seam=none; no_claim=log wording
+    it('warns about a retired-profile entry on a run that has no other work', async () => {
+      const warnSpy = jest.spyOn((service as any).logger, 'warn');
+      testRunFinderService.findRecentTestRuns.mockResolvedValue([
+        {
+          ...mockTestRun,
+          testRunId: 'untagged-legacy',
+          tags: [],
+          additionalSutMonitoring: [
+            { systemUnderTest: 'kafka', testEnvironment: 'acc', profile: 'k8s' },
+          ],
+        },
+      ]);
+      await service.processAutoConfigDashboards();
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no longer read'));
+      expect(dashboardConfiguratorService.processAutoConfigDashboard).not.toHaveBeenCalled();
+    });
+
+    it("skips an entry whose tags match only another organization's profile", async () => {
       await runWith(
-        [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', profile: 'k8s' }],
+        [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] }],
         [mockProfile, { ...k8sProfile, organizationId: 'other-org' }],
       );
 

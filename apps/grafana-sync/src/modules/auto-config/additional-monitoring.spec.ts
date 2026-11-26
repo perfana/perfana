@@ -26,21 +26,46 @@ describe('additional SUT monitoring', () => {
         run([
           { systemUnderTest: ' foo ', testEnvironment: 'bar' },
           { systemUnderTest: 'foo', testEnvironment: 'bar' },
-          { systemUnderTest: 'foo', testEnvironment: 'bar', profile: 'k8s' },
+          { systemUnderTest: 'foo', testEnvironment: 'bar', tags: [' k8s', 'jvm', 'k8s', 7] },
+          { systemUnderTest: 'foo', testEnvironment: 'bar', tags: ['jvm', 'k8s'] },
           { systemUnderTest: 'shop', testEnvironment: 'acc' },
           { systemUnderTest: '', testEnvironment: 'x' },
           { systemUnderTest: 'acme', testEnvironment: 7 },
           null,
-          { systemUnderTest: 'acme', testEnvironment: 'test', profile: '  ' },
+          { systemUnderTest: 'acme', testEnvironment: 'test', tags: ['  '] },
         ]),
       ),
     ).toEqual([
       { systemUnderTest: 'foo', testEnvironment: 'bar' },
-      { systemUnderTest: 'foo', testEnvironment: 'bar', profile: 'k8s' },
+      { systemUnderTest: 'foo', testEnvironment: 'bar', tags: ['jvm', 'k8s'] },
       { systemUnderTest: 'acme', testEnvironment: 'test' },
     ]);
     expect(readAdditionalSutMonitoring(run(null))).toEqual([]);
     expect(readAdditionalSutMonitoring(run({ systemUnderTest: 'foo' }))).toEqual([]);
+  });
+
+  // Value: protects=an entry with the retired profile and no tags is skipped, not widened to the run's profiles; fails_when=the profile check is removed or no longer skips; why_new=profile was replaced by tags in this change; seam=none; no_claim=API-side stripping (whitelist pipe)
+  it('skips, warning once, an entry that names the retired profile without tags', () => {
+    const warn = jest.fn();
+    const legacy = run([
+      { systemUnderTest: 'kafka', testEnvironment: 'acc', profile: 'k8s' },
+      { systemUnderTest: 'db', testEnvironment: 'acc', profile: 'k8s', tags: ['pg'] },
+    ]);
+    expect(readAdditionalSutMonitoring(legacy, warn)).toEqual([
+      { systemUnderTest: 'db', testEnvironment: 'acc', tags: ['pg'] },
+    ]);
+    readAdditionalSutMonitoring(legacy, warn);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  // Value: protects=a read without a warn callback (auto-config's hasWork pre-check) does not swallow the later warning; fails_when=the warned set is marked without a callback; why_new=hasWork reads entries before processTestRun; seam=none; no_claim=logger wiring
+  it('still warns after an earlier read that had no warn callback', () => {
+    const silent = run([{ systemUnderTest: 'kafka2', testEnvironment: 'acc', profile: 'k8s' }]);
+    readAdditionalSutMonitoring(silent);
+    const warn = jest.fn();
+    readAdditionalSutMonitoring(silent, warn);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no longer read'));
   });
 
   it('monitors the target while the run keeps owning the result', () => {

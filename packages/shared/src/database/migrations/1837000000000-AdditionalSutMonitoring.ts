@@ -3,7 +3,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 /**
  * `test_runs.additional_sut_monitoring`: extra system-under-test / test-environment combinations
  * grafana-sync's auto-config adds dashboards, profile SLOs and series grouping rules for, stored
- * under the run's own system and environment (`[{systemUnderTest, testEnvironment, profile?}]`,
+ * under the run's own system and environment (`[{systemUnderTest, testEnvironment, tags?}]`; v0.2.97.102 wrote `profile?`, now only read to skip the entry,
  * sent by perfana-cli from perfana.yaml). NULL on every existing run, which means "none".
  *
  * **Numbered above 1791** (root CLAUDE.md #64): no SAVEPOINT, safe to repeat, and the ACCESS

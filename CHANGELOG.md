@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.103] - 2026-11-26
+
+### Changed
+- **An extra monitored system now picks its profiles by tags, not by profile name.** Each `additionalSutMonitoring` entry in `perfana.yaml` takes an optional `tags` list in place of `profile`. With `tags`, the entry gets the profiles those tags match in the run's organization, the same way a run's own tags work. Without them it keeps the run's profiles. To add dashboards without SLOs, tag a profile that holds only dashboards and use that tag. Needs perfana-cli with `tags` support (perfana-cli#4).
+- **A run with no tags of its own still gets its tagged entries.** Before, a run without tags was skipped entirely, extra systems included.
+- **The older `profile` key is skipped, not widened.** An entry that still sends `profile` without `tags` (perfana-cli v0.9.0) is accepted, so the test run still starts, but it is skipped with a warning in the grafana-sync log rather than given all of the run's profiles. Replace `profile` with that profile's tag.
+- The API rejects a blank tag, an empty `tags` list and an empty `profile`. Each entry takes at most 50 tags of 1 to 100 characters.
+
 ## [0.2.97.102] - 2026-11-26
 
 ### Added
