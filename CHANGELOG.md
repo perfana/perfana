@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.107] - 2026-11-26
+
+### Fixed
+- **A Loki metric query split by a label is stored as one series per label value.** A query such as `sum by (detected_level) (rate({...}[$__interval]))` was stored as a single series. Grafana returns Loki metric results with every value field named `Value` and the series identity only in its labels, and gives it a display name only when the panel has a `legendFormat`; the worker named the series after the field, so every level merged into one. A series with labels and no display name is now named after its labels, e.g. `{detected_level="info"}`. Panels with a `legendFormat` keep their names. A run that already finished needs a **force-refetch** re-evaluate, while Loki still holds its window, to store the split series.
+
 ## [0.2.97.106] - 2026-11-26
 
 ### Fixed

@@ -241,8 +241,7 @@ function createDataFrameFromFrames(frame: unknown): Record<string, unknown>[] {
     // named "time"; without this, Flux "_time" is treated as a metric, real values
     // inherit the current timestamp, and dedup collapses the series to one stale point.
     if (field.type === 'time') return 'time';
-    // Python: field["config"]["displayNameFromDS"] if "config" in field.keys() and "displayNameFromDS" in field["config"] else field["name"]
-    return (field.config && field.config.displayNameFromDS) ? field.config.displayNameFromDS : field.name;
+    return fieldColumnName(field);
   });
 
   // Get the length of data (should be same for all columns)
@@ -266,6 +265,25 @@ function createDataFrameFromFrames(frame: unknown): Record<string, unknown>[] {
   }
 
   return rows;
+}
+
+/**
+ * Column name for a frame field: `displayNameFromDS` when the datasource set one, else the
+ * field's labels Prometheus-style, else its name. The labels arm matters for dataplane
+ * frames (Loki metric queries since Grafana 11): one frame per series, every value field
+ * named `Value`, the series identity only in `labels`, and `displayNameFromDS` set only when
+ * the panel has a `legendFormat`. Falling back to the name merged every series into one.
+ */
+export function fieldColumnName(field: unknown): string {
+  const f = (field ?? {}) as Record<string, unknown>;
+  const config = f.config as Record<string, unknown> | undefined;
+  if (config && config.displayNameFromDS) return String(config.displayNameFromDS);
+  const labels = f.labels as Record<string, unknown> | undefined;
+  if (labels && typeof labels === 'object' && Object.keys(labels).length > 0) {
+    const inner = Object.keys(labels).sort().map(k => `${k}="${String(labels[k])}"`).join(', ');
+    return `{${inner}}`;
+  }
+  return String(f.name);
 }
 
 /**
@@ -302,11 +320,7 @@ function removeStringColumns(dataFrame: Record<string, unknown>[], frame: unknow
   }
 
   // Get column names using same logic as createDataFrameFromFrames
-  const columnNames = schema.fields.map((field: unknown) => {
-    const fieldObj = field as Record<string, unknown>;
-    const config = fieldObj.config as Record<string, unknown> | undefined;
-    return (config && config.displayNameFromDS) ? String(config.displayNameFromDS) : String(fieldObj.name);
-  });
+  const columnNames = schema.fields.map(fieldColumnName);
 
   // Get string column names based on indices
   const stringColumns = stringColumnIndices.map(i => columnNames[i]);

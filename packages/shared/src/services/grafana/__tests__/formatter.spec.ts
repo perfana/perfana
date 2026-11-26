@@ -64,3 +64,32 @@ describe('transformGrafanaResponseToMetrics - Flux _time column', () => {
     expect(recordMs).toEqual(times);
   });
 });
+
+/**
+ * Regression: Loki metric queries (dataplane frames) return one frame per series, every
+ * value field named "Value", the series identity only in `labels`, and no
+ * displayNameFromDS without a legendFormat. Naming by `field.name` merged every
+ * `sum by (detected_level)` series into one.
+ */
+describe('transformGrafanaResponseToMetrics - dataplane frames named by labels', () => {
+  const frame = (level: string, v: number) => ({
+    schema: {
+      fields: [
+        { name: 'Time', type: 'time' },
+        { name: 'Value', type: 'number', labels: { detected_level: level } },
+      ],
+    },
+    data: { values: [[1784016945000], [v]] },
+  });
+
+  it('emits one series per label set', async () => {
+    const [doc] = await transformGrafanaResponseToMetrics([
+      {
+        panel: { test_run_id: 'tr-1', panel_id: 1 } as unknown as ProcessedPanelResult['panel'],
+        data: { results: { A: { frames: [frame('info', 3), frame('error', 1)] } } },
+      } as unknown as ProcessedPanelResult,
+    ]);
+    const byName = Object.fromEntries(doc!.data.map((r) => [r.metric_name, r.value]));
+    expect(byName).toEqual({ '{detected_level="info"}': 3, '{detected_level="error"}': 1 });
+  });
+});
