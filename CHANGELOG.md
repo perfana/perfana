@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.105] - 2026-11-26
+
+### Fixed
+- **Grafana panels on a Loki datasource now collect.** The worker sent every Grafana query with a numeric `step`, which Grafana's Loki plugin cannot read, so every Loki query failed with HTTP 500 and the panel stayed empty with nothing in the worker log. The field is no longer sent; Prometheus and InfluxDB queries are unaffected because they never used it. A run that already finished needs a **force-refetch** re-evaluate, while Loki still holds its window, to collect the missing data.
+
 ## [0.2.97.104] - 2026-11-26
 
 ### Fixed

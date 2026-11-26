@@ -984,11 +984,8 @@ function substituteVariablesInTarget(
 ): Record<string, unknown> {
   const substitutedTarget = structuredClone(target) as Record<string, unknown>;
 
-  // For Prometheus queries, ensure proper interval/step settings
-  // Remove the huge default step that causes no data to be returned
-
-  // Set parameters to match exact legacy structure
-  substitutedTarget.step = 2400;
+  // No `step`: Prometheus and InfluxDB ignore it, and Loki types it as a string, so the
+  // numeric 2400 this used to set failed every Loki query with HTTP 500.
   // substitutedTarget.format = "time_series";
   substitutedTarget.instant = false;
   substitutedTarget.intervalFactor = 1;
