@@ -709,7 +709,9 @@ describe('AutoConfigService', () => {
           ...mockTestRun,
           testRunId: 'untagged-legacy',
           tags: [],
-          additionalSutMonitoring: [{ systemUnderTest: 'kafka', testEnvironment: 'acc', profile: 'k8s' }],
+          additionalSutMonitoring: [
+            { systemUnderTest: 'kafka', testEnvironment: 'acc', profile: 'k8s' },
+          ],
         },
       ]);
       await service.processAutoConfigDashboards();
