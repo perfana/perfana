@@ -256,3 +256,62 @@ describe('a row the system switched off', () => {
     expect(updates.insertBenchmarkBasedOnProfileBenchmark).not.toHaveBeenCalled();
   });
 });
+
+// Value: protects=each additional-monitoring pass gets only its combination's dashboards, the run's own pass none of them, and run-owned sources are never re-processed per combination; fails_when=dashboardsForCombination or the source skip is dropped from processSingleBenchmark; why_new=additional-monitoring.spec tests the helper alone, auto-config.service.spec mocks this processor; seam=none; no_claim=Dynatrace/Splunk finders
+describe('additional SUT monitoring target', () => {
+  const owned = { id: 'ad-own', dashboardLabel: 'K8s' };
+  const extra = {
+    id: 'ad-db',
+    dashboardLabel: 'K8s - payment-db acc',
+    variables: [
+      { name: 'system_under_test', values: ['payment-db'] },
+      { name: 'test_environment', values: ['acc'] },
+    ],
+  };
+  const run = {
+    ...testRun,
+    additionalSutMonitoring: [{ systemUnderTest: 'payment-db', testEnvironment: 'acc' }],
+  };
+  const grafanaPb: any = {
+    id: 'pb-g',
+    profile: { name: 'k8s' },
+    source: 'grafana',
+    workload_pattern: '.*',
+    dashboard_uid: 'k8s-tmpl',
+  };
+
+  it('keeps a grafana benchmark to the target combination, and the master pass to the run own dashboards', async () => {
+    const { service, finder, updates } = build();
+    finder.findApplicationDashboardsByTemplateDashboardUid.mockResolvedValue([owned, extra]);
+
+    await service.processProfileBenchmarks(run, ['k8s'], [grafanaPb], {
+      systemUnderTest: 'payment-db',
+      testEnvironment: 'acc',
+    });
+    expect(
+      updates.insertBenchmarkBasedOnProfileBenchmark.mock.calls.map((c: any[]) => c[2].id),
+    ).toEqual(['ad-db']);
+
+    updates.insertBenchmarkBasedOnProfileBenchmark.mockClear();
+    await service.processProfileBenchmarks(run, ['k8s'], [grafanaPb]);
+    expect(
+      updates.insertBenchmarkBasedOnProfileBenchmark.mock.calls.map((c: any[]) => c[2].id),
+    ).toEqual(['ad-own']);
+  });
+
+  it('skips a perf-test benchmark for a target before any lookup', async () => {
+    const { service, finder, updates } = build();
+    const pb: any = {
+      id: 'pb-p',
+      profile: { name: 'k8s' },
+      source: 'performance-metrics',
+      workload_pattern: '.*',
+    };
+    await service.processProfileBenchmarks(run, ['k8s'], [pb], {
+      systemUnderTest: 'payment-db',
+      testEnvironment: 'acc',
+    });
+    expect(finder.findApplicationDashboardsByUidPattern).not.toHaveBeenCalled();
+    expect(updates.insertBenchmarkBasedOnProfileBenchmark).not.toHaveBeenCalled();
+  });
+});

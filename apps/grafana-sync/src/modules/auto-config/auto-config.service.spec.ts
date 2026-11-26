@@ -585,4 +585,104 @@ describe('AutoConfigService', () => {
       });
     });
   });
+  describe('additional SUT monitoring', () => {
+    const k8sProfile = { ...mockProfile, id: 'p-k8s', name: 'k8s', tags: ['unrelated'] };
+    const k8sDashboard = { ...mockAutoConfigDashboard, profile: 'k8s', dashboardUid: 'k8s-uid' };
+
+    const runWith = async (
+      additionalSutMonitoring: unknown,
+      profiles = [mockProfile, k8sProfile],
+    ) => {
+      testRunFinderService.findRecentTestRuns.mockResolvedValue([
+        { ...mockTestRun, additionalSutMonitoring },
+      ]);
+      testRunFinderService.findProfiles.mockResolvedValue(profiles);
+      testRunFinderService.findProfileBenchmarks.mockResolvedValue([{ id: 'b1' }] as any);
+      groupingRuleProcessorService.findProfileGroupingRules.mockResolvedValue([{ id: 'g1' }]);
+      dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+        mockAutoConfigDashboard,
+        k8sDashboard,
+      ]);
+      await service.processAutoConfigDashboards();
+    };
+
+    it("applies the run's matched profiles to an entry without a profile, owned by the run", async () => {
+      await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc' }]);
+
+      const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[0]![0].systemUnderTest?.name).toBe('my-app');
+      const [monitoringRun, dashboard] = calls[1]!;
+      expect(monitoringRun.systemUnderTest?.name).toBe('payment-db');
+      expect(monitoringRun.testEnvironment).toBe('acc');
+      expect(dashboard).toBe(mockAutoConfigDashboard);
+
+      // SLOs and rules get the run itself plus the combination they are scoped to.
+      const target = { systemUnderTest: 'payment-db', testEnvironment: 'acc' };
+      expect(benchmarkProcessorService.processProfileBenchmarks).toHaveBeenLastCalledWith(
+        expect.objectContaining({ testRunId: 'test-run-1', testEnvironment: 'production' }),
+        ['Production Profile'],
+        expect.any(Array),
+        target,
+      );
+      expect(groupingRuleProcessorService.processProfileGroupingRules).toHaveBeenLastCalledWith(
+        expect.objectContaining({ testEnvironment: 'production' }),
+        ['Production Profile'],
+        expect.any(Array),
+        target,
+      );
+    });
+
+    it("applies a named profile instead of the run's, without needing its tags", async () => {
+      await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc', profile: 'k8s' }]);
+
+      const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
+      expect(calls.map((c) => c[1])).toEqual([mockAutoConfigDashboard, k8sDashboard]);
+      expect(benchmarkProcessorService.processProfileBenchmarks).toHaveBeenLastCalledWith(
+        expect.anything(),
+        ['k8s'],
+        expect.any(Array),
+        expect.objectContaining({ profile: 'k8s' }),
+      );
+    });
+
+    // Value: protects=one extra combination failing (its SLO provisioning throws) does not stop the next combination being provisioned; fails_when=the per-entry try/catch in processAdditionalSutMonitoring is removed or moved outside the entries loop; why_new=existing error test covers only per-dashboard errors, which processAutoConfigDashboardsForTestRun catches itself; seam=none; no_claim=error logging content
+    it('keeps processing the next entry when one entry fails', async () => {
+      benchmarkProcessorService.processProfileBenchmarks.mockImplementation(
+        async (
+          _run: unknown,
+          _names: unknown,
+          _b: unknown,
+          target?: { systemUnderTest: string },
+        ) => {
+          if (target?.systemUnderTest === 'payment-db') throw new Error('boom');
+        },
+      );
+      await runWith([
+        { systemUnderTest: 'payment-db', testEnvironment: 'acc' },
+        { systemUnderTest: 'cache', testEnvironment: 'acc' },
+      ]);
+
+      const runs = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls.map(
+        (c) => c[0].systemUnderTest?.name,
+      );
+      expect(runs).toEqual(['my-app', 'payment-db', 'cache']);
+      expect(benchmarkProcessorService.processProfileBenchmarks).toHaveBeenLastCalledWith(
+        expect.anything(),
+        ['Production Profile'],
+        expect.any(Array),
+        { systemUnderTest: 'cache', testEnvironment: 'acc' },
+      );
+    });
+
+    it('skips an entry naming a profile of another organization', async () => {
+      await runWith(
+        [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', profile: 'k8s' }],
+        [mockProfile, { ...k8sProfile, organizationId: 'other-org' }],
+      );
+
+      expect(dashboardConfiguratorService.processAutoConfigDashboard).toHaveBeenCalledTimes(1);
+      expect(benchmarkProcessorService.processProfileBenchmarks).toHaveBeenCalledTimes(1);
+    });
+  });
 });

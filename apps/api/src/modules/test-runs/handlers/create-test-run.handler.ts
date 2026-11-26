@@ -81,6 +81,7 @@ export class CreateTestRunHandler implements ICommandHandler<CreateTestRunComman
         tags: data.tags || [],
         abort: data.abort || false,
         variables: data.variables || [],
+        additionalSutMonitoring: data.additionalSutMonitoring ?? null,
         adaptConfig: {
           mode: adaptMode,
           differencesAccepted: adaptMode === 'BASELINE' ? 'ACCEPTED' : 'TBD',

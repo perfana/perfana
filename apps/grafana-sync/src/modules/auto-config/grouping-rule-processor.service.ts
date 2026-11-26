@@ -8,7 +8,9 @@ import { DataSource } from 'typeorm';
 import { ApplicationDashboard, TestRun } from '@perfana/shared/entities';
 import { compileSeriesGroupingRule } from '@perfana/shared/utils';
 import type { SeriesGroupingAggregation, SeriesGroupingPreset } from '@perfana/shared/utils';
+import type { AdditionalSutMonitoring } from '@perfana/shared/types';
 import { DashboardFinderService } from './dashboard-finder.service';
+import { dashboardsForCombination } from './additional-monitoring';
 
 /** A profile rule joined to its profile dashboard. */
 export interface ProfileGroupingRuleRow {
@@ -85,6 +87,8 @@ export class GroupingRuleProcessorService {
     testRun: TestRun,
     profileNames: string[],
     rules: ProfileGroupingRuleRow[],
+    /** An additional monitored combination (additional-monitoring.ts); omitted, the run's own. */
+    target?: AdditionalSutMonitoring,
   ): Promise<void> {
     const matching = rules.filter((r) => profileNames.includes(r.profile));
     if (matching.length === 0) return;
@@ -111,12 +115,14 @@ export class GroupingRuleProcessorService {
       }
       let lookup = dashboardsByUid.get(rule.dashboard_uid);
       if (!lookup) {
-        lookup = this.dashboardFinderService.findApplicationDashboardsByTemplateDashboardUid(
-          rule.dashboard_uid,
-          systemUnderTestName,
-          testRun.testEnvironment,
-          testRun.organizationId,
-        );
+        lookup = this.dashboardFinderService
+          .findApplicationDashboardsByTemplateDashboardUid(
+            rule.dashboard_uid,
+            systemUnderTestName,
+            testRun.testEnvironment,
+            testRun.organizationId,
+          )
+          .then((found) => dashboardsForCombination(found, testRun, target));
         dashboardsByUid.set(rule.dashboard_uid, lookup);
       }
       let dashboards: ApplicationDashboard[];

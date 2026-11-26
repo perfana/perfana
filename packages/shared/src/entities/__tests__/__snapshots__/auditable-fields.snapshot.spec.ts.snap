@@ -376,6 +376,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "duration",
     "plannedDuration",
     "variables",
+    "additionalSutMonitoring",
     "expires",
     "expired",
   ],

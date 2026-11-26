@@ -19,6 +19,7 @@ import {
 } from '../auto-config-updates.service';
 import { DashboardVariable } from '../types';
 import { createDashboardUid } from '../dashboard-uid.util';
+import { ownerLabel, ownerSutName, ownerTestEnvironment } from '../additional-monitoring';
 import { PERFANA_TEMPLATE_TAG } from '../../../config/constants';
 
 @Injectable()
@@ -254,8 +255,7 @@ export class DashboardProcessorService {
     );
 
     // Update template's usedBySut
-    const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
-    await this.updatesService.updateUsedBySut(templateDashboard, systemUnderTestName);
+    await this.updatesService.updateUsedBySut(templateDashboard, ownerSutName(testRun));
 
     // Use the template dashboard as the stored dashboard
     return await this.dashboardFinderService.findGrafanaDashboard(grafanaInstance.label, [
@@ -291,10 +291,11 @@ export class DashboardProcessorService {
     );
 
     // Create or find folder for system under test
+    // The title names the MONITORED system; the folder and usedBySUT the Perfana system that owns it.
     const sutName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
     const folder = await this.grafanaApiService.createOrFindFolder(
       grafanaInstanceEntity.id,
-      sutName,
+      ownerSutName(testRun),
     );
 
     // Generate UID for new dashboard
@@ -342,7 +343,7 @@ export class DashboardProcessorService {
       title: newDashboardJson.dashboard.title,
       id: createdDashboardDetails.dashboard.id,
       grafanaJson: createdDashboardDetails,
-      usedBySUT: [sutName],
+      usedBySUT: [ownerSutName(testRun)],
       panels: [],
     });
 
@@ -540,12 +541,12 @@ export class DashboardProcessorService {
     ];
 
     const applicationDashboard: ApplicationDashboardInsertData = {
-      application: sutName,
-      testEnvironment: testRun.testEnvironment,
+      application: ownerSutName(testRun),
+      testEnvironment: ownerTestEnvironment(testRun),
       grafana: grafanaDashboard.grafanaInstance?.label || '',
       grafanaDashboardId: grafanaDashboard.id,
       dashboardName: autoConfigDashboard.dashboardName,
-      dashboardLabel: autoConfigDashboard.dashboardName,
+      dashboardLabel: ownerLabel(testRun, autoConfigDashboard.dashboardName),
       dashboardId: grafanaDashboard.grafanaId,
       dashboardUid: grafanaDashboard.uid,
       templateDashboardUid: templateDashboardUid,
@@ -555,7 +556,7 @@ export class DashboardProcessorService {
     };
 
     this.logger.log(
-      `Creating application dashboard: ${applicationDashboard.dashboardLabel} for ${sutName} / ${testRun.testEnvironment}`,
+      `Creating application dashboard: ${applicationDashboard.dashboardLabel} for ${applicationDashboard.application} / ${applicationDashboard.testEnvironment}`,
     );
 
     await this.updatesService.insertApplicationDashboard(applicationDashboard);
@@ -669,7 +670,6 @@ export class DashboardProcessorService {
 
     // Check if this specific dashboard already exists by label (since all share the same template UID)
     const grafanaLabel = grafanaDashboard.grafanaInstance?.label || '';
-    const sutName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
     const existingApplicationDashboards =
       await this.dashboardFinderService.findApplicationDashboardsForSystemUnderTest(
         testRun,
@@ -681,12 +681,14 @@ export class DashboardProcessorService {
     if (existingApplicationDashboards.length === 0) {
       // Create new application dashboard using the updatesService
       const applicationDashboardData: ApplicationDashboardInsertData = {
-        application: sutName,
-        testEnvironment: testRun.testEnvironment,
+        application: ownerSutName(testRun),
+        testEnvironment: ownerTestEnvironment(testRun),
         grafana: grafanaLabel || 'UNKNOWN',
         dashboardName: grafanaDashboard.name || 'UNKNOWN',
-        dashboardLabel:
+        dashboardLabel: ownerLabel(
+          testRun,
           autoConfigDashboard.dashboardName + ' ' + createSeparateDashboardForVariableValue,
+        ),
         dashboardId: grafanaDashboard.grafanaId,
         dashboardUid: dashboardUidToUse,
         templateDashboardUid: templateDashboardUid,

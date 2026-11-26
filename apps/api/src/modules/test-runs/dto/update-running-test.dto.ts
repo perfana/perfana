@@ -31,6 +31,34 @@ export class VariableDto {
   value!: string;
 }
 
+export class AdditionalSutMonitoringDto {
+  // Same character rule as the run's own systemUnderTest/testEnvironment: grafana-sync substitutes
+  // these names unescaped into datasource variable queries. 100, not 255, so the ` - <sut> <env>`
+  // suffix leaves room in application_dashboards.dashboard_label (varchar(255)); grafana-sync's
+  // ownerLabel shortens the dashboard-name part when a long one would still overflow.
+  @ApiProperty({ description: 'System under test to monitor (need not exist in Perfana)', example: 'payment-db' })
+  @IsString()
+  @Length(1, 100)
+  @Matches(/^[a-zA-Z0-9._-]+$/, {
+    message: 'System under test name must contain only alphanumeric characters, dots, hyphens, and underscores',
+  })
+  systemUnderTest!: string;
+
+  @ApiProperty({ description: 'Test environment to monitor', example: 'acceptance' })
+  @IsString()
+  @Length(1, 100)
+  @Matches(/^[a-zA-Z0-9._-]+$/, {
+    message: 'Test environment must contain only alphanumeric characters, dots, hyphens, and underscores',
+  })
+  testEnvironment!: string;
+
+  @ApiPropertyOptional({ description: 'Profile to apply; omitted, the profiles the run\'s tags match apply', example: 'k8s-monitoring' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  profile?: string;
+}
+
 export class DeepLinkDto {
   @ApiProperty({ description: 'Link name', example: 'Grafana Dashboard' })
   @IsString()
@@ -260,6 +288,21 @@ export class UpdateRunningTestDto {
   @ValidateNested({ each: true })
   @Type(() => DeepLinkDto)
   deepLinks?: DeepLinkDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Extra system-under-test / test-environment combinations whose profile dashboards, SLOs and series grouping ' +
+      'rules auto-config adds to this run\'s system and environment (max 20). No system or environment is created ' +
+      'for them. Omitted on an update keeps the stored list; [] clears it. Dashboards already added stay, and are ' +
+      'collected for later runs, until deleted by hand.',
+    type: [AdditionalSutMonitoringDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20, { message: 'Maximum 20 additional SUT monitoring entries allowed' })
+  @ValidateNested({ each: true })
+  @Type(() => AdditionalSutMonitoringDto)
+  additionalSutMonitoring?: AdditionalSutMonitoringDto[];
 
   @ApiPropertyOptional({
     description: 'ADAPT mode: DEFAULT (regression testing) or BASELINE (always accepted into control group)',

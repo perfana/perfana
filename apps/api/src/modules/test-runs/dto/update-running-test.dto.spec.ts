@@ -476,4 +476,32 @@ describe('TestRuns DTOs', () => {
       });
     });
   });
+
+  // Value: protects=additionalSutMonitoring accepts valid entries and rejects >20 entries and empty/overlong names; fails_when=ArrayMaxSize, ValidateNested/@Type or @Length is dropped from the DTO; why_new=no DTO case covered the new field; seam=none; no_claim=controller wiring
+  describe('additionalSutMonitoring', () => {
+    const base = { systemUnderTest: 'ecommerce-api', workload: 'load-test', testEnvironment: 'production', testRunId: 'r-1', completed: false };
+    const check = (list: unknown) => validate(plainToClass(UpdateRunningTestDto, { ...base, additionalSutMonitoring: list }));
+    const entry = { systemUnderTest: 'payment-db', testEnvironment: 'acc' };
+
+    it('accepts entries with and without a profile', async () => {
+      expect(await check([entry, { ...entry, profile: 'k8s' }])).toHaveLength(0);
+    });
+
+    it('rejects more than 20 entries', async () => {
+      const errors = await check(Array.from({ length: 21 }, () => entry));
+      expect(errors.map((e) => e.property)).toContain('additionalSutMonitoring');
+    });
+
+    it.each([
+      ['an empty system', { ...entry, systemUnderTest: '' }],
+      ['an overlong environment', { ...entry, testEnvironment: 'x'.repeat(101) }],
+      // The run's own name rule: these names reach datasource variable queries unescaped.
+      ['a quote and brace in the system', { ...entry, systemUnderTest: 'db"}' }],
+      ['a space in the environment', { ...entry, testEnvironment: 'b c' }],
+      ['an empty profile', { ...entry, profile: '' }],
+    ])('rejects %s', async (_l, bad) => {
+      const errors = await check([bad]);
+      expect(errors.map((e) => e.property)).toContain('additionalSutMonitoring');
+    });
+  });
 });

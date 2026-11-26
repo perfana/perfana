@@ -7,6 +7,7 @@
 
 import { ICommand, MutationCommandType, MutationOptions } from './types';
 import { TestRunVariables } from '../../../types';
+import type { AdditionalSutMonitoring } from '@perfana/shared/types';
 
 /**
  * Data payload for updating a test run
@@ -42,6 +43,8 @@ export interface UpdateTestRunData {
   abort?: boolean;
   /** Test variables */
   variables?: TestRunVariables;
+  /** Extra SUT/env combinations auto-config monitors under this run's own (undefined keeps the stored list on update) */
+  additionalSutMonitoring?: AdditionalSutMonitoring[];
   /** Test end time */
   endTime?: Date;
   /** User ID who last updated the test run */
@@ -83,6 +86,7 @@ export class UpdateTestRunCommand implements ICommand {
     tags?: string[];
     abort?: boolean;
     variables?: TestRunVariables;
+    additionalSutMonitoring?: AdditionalSutMonitoring[];
     endTime?: Date;
     updatedBy?: string;
   }, options?: MutationOptions): UpdateTestRunCommand {
@@ -103,6 +107,7 @@ export class UpdateTestRunCommand implements ICommand {
         tags: params.tags,
         abort: params.abort,
         variables: params.variables,
+        additionalSutMonitoring: params.additionalSutMonitoring,
         endTime: params.endTime,
         updatedBy: params.updatedBy,
       },

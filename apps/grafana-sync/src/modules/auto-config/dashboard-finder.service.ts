@@ -12,6 +12,7 @@ import { RUN_WINDOW_PAD_MS } from '@perfana/shared/database/run-window';
 import { DashboardUid } from './dashboard-uid.util';
 import { DashboardVariable } from './types';
 import { resolveGrafanaInstanceByLabel } from './grafana-instance-resolver';
+import { ownerLabel, ownerSutName, ownerTestEnvironment } from './additional-monitoring';
 
 @Injectable()
 export class DashboardFinderService {
@@ -124,9 +125,13 @@ export class DashboardFinderService {
     dashboardLabel: string | null = null,
   ): Promise<ApplicationDashboard[]> {
     try {
-      const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
+      // The OWNER's SUT/env: a monitoring run (additional-monitoring.ts) stores its dashboards
+      // under the run's own system and environment, labelled for the monitored combination.
+      const systemUnderTestName = ownerSutName(testRun);
+      const testEnvironment = ownerTestEnvironment(testRun);
+      if (dashboardLabel) dashboardLabel = ownerLabel(testRun, dashboardLabel);
       this.logger.log(
-        `Querying application_dashboards: sut=${systemUnderTestName}, env=${testRun.testEnvironment}, grafana=${grafana}, uid=${dashboardUid}, label=${dashboardLabel}, org=${testRun.organizationId}`,
+        `Querying application_dashboards: sut=${systemUnderTestName}, env=${testEnvironment}, grafana=${grafana}, uid=${dashboardUid}, label=${dashboardLabel}, org=${testRun.organizationId}`,
       );
 
       let query = this.applicationDashboardRepo
@@ -134,9 +139,7 @@ export class DashboardFinderService {
         .innerJoin('ad.systemUnderTest', 'sut')
         .innerJoin('ad.grafanaInstance', 'gi')
         .where('sut.name = :sutName', { sutName: systemUnderTestName })
-        .andWhere('ad.testEnvironment = :testEnvironment', {
-          testEnvironment: testRun.testEnvironment,
-        })
+        .andWhere('ad.testEnvironment = :testEnvironment', { testEnvironment })
         .andWhere('gi.label = :grafanaLabel', { grafanaLabel: grafana })
         .andWhere('ad.dashboardUid = :dashboardUid', { dashboardUid });
 

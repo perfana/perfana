@@ -133,6 +133,18 @@ export interface TestRunVariable {
 export type TestRunVariables = TestRunVariable[];
 
 /**
+ * An extra system-under-test / test-environment combination whose dashboards, profile SLOs and
+ * series grouping rules grafana-sync's auto-config adds to the run's own system and environment.
+ * No system or environment is created for it. `profile` names the profile to apply; omitted, the
+ * profiles the run's tags match apply.
+ */
+export interface AdditionalSutMonitoring {
+  systemUnderTest: string;
+  testEnvironment: string;
+  profile?: string;
+}
+
+/**
  * Deep link information (data structure)
  * Provides quick access links to related resources (Grafana, CI/CD, etc.)
  * Note: This is different from the DeepLink entity (database representation)

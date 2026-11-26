@@ -346,6 +346,47 @@ describe('TestRunsMutationService', () => {
       expect(updateTestRunHandler.execute.mock.calls[0][0].data.tags).toBeUndefined();
     });
 
+    // Value: protects=an update that omits additionalSutMonitoring keeps the stored list (undefined reaches the handler); fails_when=mapping defaults to [] (`?? []` / `|| []`), wiping every extra monitored combination on a completion call; why_new=no service-level test covered the new field; seam=none; no_claim=handler persistence
+    it('passes an omitted additionalSutMonitoring to the update handler as omitted', async () => {
+      const updateDto = { ...createMockUpdateDto(), completed: true };
+      lookupService.findOrCreateSystemUnderTest.mockResolvedValue({ id: 'sys-123', name: 'PaymentService' });
+      lookupService.findOrCreateTestEnvironment.mockResolvedValue({ id: 'env-123', name: 'production' });
+      lookupService.findOrCreateWorkload.mockResolvedValue({ id: 'work-123', name: 'loadTest' });
+      testRunRepo.findOne.mockResolvedValue(createMockTestRunEntity({ completed: false }));
+      updateTestRunHandler.execute.mockResolvedValue({ success: true, data: createMockTestRun(createMockTestRunEntity({ completed: true })) });
+      bullmqClientService.analyzeTest.mockResolvedValue({ jobId: 'job-123' });
+
+      await service.updateRunningTest(updateDto, mockUserId, mockRoles, mockOrganizationId);
+
+      expect(updateTestRunHandler.execute.mock.calls[0][0].data.additionalSutMonitoring).toBeUndefined();
+    });
+
+    // Value: protects=entries reach the create command as {systemUnderTest,testEnvironment[,profile]} with a blank/absent profile dropped; fails_when=profile '' is stored (grafana-sync then looks up a profile named '') or extra DTO keys leak into the jsonb; why_new=no service-level test covered the mapping; seam=none; no_claim=DTO validation (covered in dto spec)
+    it('maps additionalSutMonitoring entries, dropping a blank or absent profile', async () => {
+      const updateDto = {
+        ...createMockUpdateDto(),
+        additionalSutMonitoring: [
+          { systemUnderTest: 'payment-db', testEnvironment: 'prod', profile: '' },
+          { systemUnderTest: 'cache', testEnvironment: 'prod' },
+          { systemUnderTest: 'queue', testEnvironment: 'acc', profile: 'k8s' },
+        ],
+      } as any;
+      lookupService.findOrCreateSystemUnderTest.mockResolvedValue({ id: 'sys-123', name: 'PaymentService' });
+      lookupService.findOrCreateTestEnvironment.mockResolvedValue({ id: 'env-123', name: 'production' });
+      lookupService.findOrCreateWorkload.mockResolvedValue({ id: 'work-123', name: 'loadTest' });
+      testRunRepo.findOne.mockResolvedValue(null);
+      const mockNewTestRun = createMockTestRun(createMockTestRunEntity({ completed: false }));
+      createTestRunHandler.execute.mockResolvedValue({ success: true, data: mockNewTestRun, testRunId: mockNewTestRun.test_run_id, isNew: true });
+
+      await service.updateRunningTest(updateDto, mockUserId, mockRoles, mockOrganizationId);
+
+      expect(createTestRunHandler.execute.mock.calls[0][0].data.additionalSutMonitoring).toEqual([
+        { systemUnderTest: 'payment-db', testEnvironment: 'prod' },
+        { systemUnderTest: 'cache', testEnvironment: 'prod' },
+        { systemUnderTest: 'queue', testEnvironment: 'acc', profile: 'k8s' },
+      ]);
+    });
+
     it("hands the completing run's tags to the golden-path applier, which picks profile templates by them", async () => {
       const updateDto = { ...createMockUpdateDto(), completed: true };
       const mockNewTestRun = createMockTestRun(createMockTestRunEntity({ completed: true }));

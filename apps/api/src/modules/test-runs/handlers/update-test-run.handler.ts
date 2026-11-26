@@ -70,6 +70,8 @@ export class UpdateTestRunHandler implements ICommandHandler<UpdateTestRunComman
         // Omitted keeps the stored tags (see TestRunsMutationService); an explicit [] clears them.
         tags: data.tags ?? before?.tags ?? [],
         variables: data.variables,
+        // Omitted (undefined) is skipped by TypeORM's update, so the stored list is kept.
+        additionalSutMonitoring: data.additionalSutMonitoring,
         endTime: data.endTime || new Date(),
         updatedBy: data.updatedBy,
       };
