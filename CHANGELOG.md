@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.101] - 2026-11-26
+
+### Added
+- **The MCP server publishes an "analyse a test run" skill.** `@perfana/mcp` serves `skill://perfana/analyze-test-run/SKILL.md` through the MCP Skills extension: a playbook that takes an agent from the verdict (SLO checks, Adapt) through the baseline, config diff and errors to root cause (metrics, traces, profiles, Dynatrace), and on to recording the findings as comments and an investigation. A client that supports skills loads it on its own; others see the tools as before.
+- **Every MCP tool carries annotations.** The 25 read tools are marked read-only, so a client can approve them without asking; the five comment and investigation tools are marked as writes that are idempotent and never destructive.
+
+### Changed
+- **The MCP server runs on v2 of the MCP TypeScript SDK** (`@modelcontextprotocol/server` 2.4.0 with zod 4, replacing `@modelcontextprotocol/sdk` 1.x), which speaks the 2026-07-28 protocol. It also reports its real package version instead of a hard-coded `0.1.0`.
+
+### Fixed
+- **A hung Perfana API call no longer hangs the MCP tool.** Each call gives up after 30 s (`PERFANA_TIMEOUT_MS`) and the tool answers with an error saying which path timed out.
+
 ## [0.2.97.100] - 2026-11-25
 
 ### Added
