@@ -62,9 +62,10 @@ export function readAdditionalSutMonitoring(
     if (!MONITORING_NAME.test(sut) || !MONITORING_NAME.test(env)) {
       // Once per entry: auto-config re-reads a recent run on every 2-minute pass.
       const warnKey = `${run.testRunId}\u0000${sut}\u0000${env}`;
-      if (!warnedInvalid.has(warnKey)) {
+      // Only a call that can log marks the entry warned; a check without `warn` must not eat it.
+      if (warn && !warnedInvalid.has(warnKey)) {
         warnedInvalid.add(warnKey);
-        warn?.(
+        warn(
           `Additional SUT monitoring for test run ${run.testRunId}: entry skipped, names may hold only ` +
             `letters, digits, '.', '_' and '-' (at most 100): ${JSON.stringify([sut, env])}`,
         );
@@ -82,9 +83,10 @@ export function readAdditionalSutMonitoring(
     // dashboards and SLOs it never named on this system (and they stay), so skip it instead.
     if (e.profile !== undefined && !tags.length) {
       const warnKey = `${run.testRunId}\u0000${sut}\u0000${env}\u0000profile`;
-      if (!warnedInvalid.has(warnKey)) {
+      // Only a call that can log marks the entry warned; a check without `warn` must not eat it.
+      if (warn && !warnedInvalid.has(warnKey)) {
         warnedInvalid.add(warnKey);
-        warn?.(
+        warn(
           `Additional SUT monitoring for test run ${run.testRunId}: entry ${sut} / ${env} skipped, ` +
             `it names a profile, which is no longer read; give it tags to choose its profiles`,
         );

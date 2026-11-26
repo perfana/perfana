@@ -55,6 +55,15 @@ describe('additional SUT monitoring', () => {
     ]);
     readAdditionalSutMonitoring(legacy, warn);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  // Value: protects=a read without a warn callback (auto-config's hasWork pre-check) does not swallow the later warning; fails_when=the warned set is marked without a callback; why_new=hasWork reads entries before processTestRun; seam=none; no_claim=logger wiring
+  it('still warns after an earlier read that had no warn callback', () => {
+    const silent = run([{ systemUnderTest: 'kafka2', testEnvironment: 'acc', profile: 'k8s' }]);
+    readAdditionalSutMonitoring(silent);
+    const warn = jest.fn();
+    readAdditionalSutMonitoring(silent, warn);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no longer read'));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('no longer read'));
     expect(readAdditionalSutMonitoring(run({ systemUnderTest: 'foo' }))).toEqual([]);
   });
