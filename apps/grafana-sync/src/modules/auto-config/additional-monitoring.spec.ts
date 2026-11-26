@@ -98,6 +98,43 @@ describe('additional SUT monitoring', () => {
     });
   });
 
+  // Value: protects=a monitored row's label fits dashboard_label varchar(255) with its suffix whole; fails_when=ownerLabel stops clamping, or clamps the suffix (monitoredCombinationOf then no longer recognises the row); why_new=review finding adversarial-native#1; seam=none; no_claim=Postgres character counting (asserted in code points here)
+  it('shortens a long dashboard name so the label fits 255 characters with the suffix whole', () => {
+    const sut = 'a'.repeat(100);
+    const env = 'b'.repeat(100);
+    const monitoring = asMonitoringRun(run([]), { systemUnderTest: sut, testEnvironment: env });
+    const suffix = ` - ${sut} ${env}`;
+    const label = ownerLabel(monitoring, '\u{1F4CA}'.repeat(200));
+    expect(Array.from(label)).toHaveLength(255);
+    expect(label.endsWith(suffix)).toBe(true);
+    expect(
+      monitoredCombinationOf(
+        {
+          dashboardLabel: label,
+          variables: [
+            { name: 'system_under_test', values: [sut] },
+            { name: 'test_environment', values: [env] },
+          ],
+        },
+        run(null),
+      ),
+    ).toEqual({ systemUnderTest: sut, testEnvironment: env });
+    // A short name is left alone.
+    expect(ownerLabel(monitoring, 'Pods')).toBe(`Pods${suffix}`);
+  });
+
+  // Value: protects=an invalid stored entry is warned about once, not on every 2-minute auto-config pass; fails_when=the warned-entry set is removed; why_new=review finding adversarial-native#3; seam=none; no_claim=process restarts (the set is per process)
+  it('warns about an invalid entry once, however often the run is re-read', () => {
+    const warn = jest.fn();
+    const bad = {
+      ...run([{ systemUnderTest: 'db"}', testEnvironment: 'acc' }]),
+      testRunId: 'r-warn-once',
+    } as unknown as TestRun;
+    expect(readAdditionalSutMonitoring(bad, warn)).toEqual([]);
+    expect(readAdditionalSutMonitoring(bad, warn)).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   // Value: protects=entries whose names break the API's character rule are dropped with a warning before they reach datasource queries; fails_when=MONITORING_NAME check removed or loosened; why_new=the jsonb can arrive by SUT import or SQL, bypassing the DTO; seam=none; no_claim=DTO validation (update-running-test.dto.spec)
   it('drops entries whose names break the character rule, with a warning', () => {
     const warn = jest.fn();

@@ -37,6 +37,13 @@ const sutNameOf = (run: TestRun): string => run.systemUnderTest?.name || run.sys
  */
 const MONITORING_NAME = /^[a-zA-Z0-9._-]{1,100}$/;
 
+/** `application_dashboards.dashboard_label` is varchar(255): Postgres counts characters, i.e. code points. */
+const DASHBOARD_LABEL_MAX = 255;
+
+// ponytail: process-lifetime set, one key per bad (run, entry); auto-config passes a run only for
+// minutes after it ends, so it stays tiny. Clear it per pass if that ever changes.
+const warnedInvalid = new Set<string>();
+
 /** The run's entries, validated (jsonb is untrusted), trimmed, de-duplicated, minus the run's own pair. */
 export function readAdditionalSutMonitoring(
   run: TestRun,
@@ -53,10 +60,15 @@ export function readAdditionalSutMonitoring(
     const env = typeof e.testEnvironment === 'string' ? e.testEnvironment.trim() : '';
     if (!sut || !env) continue;
     if (!MONITORING_NAME.test(sut) || !MONITORING_NAME.test(env)) {
-      warn?.(
-        `Additional SUT monitoring for test run ${run.testRunId}: entry skipped, names may hold only ` +
-          `letters, digits, '.', '_' and '-' (at most 100): ${JSON.stringify([sut, env])}`,
-      );
+      // Once per entry: auto-config re-reads a recent run on every 2-minute pass.
+      const warnKey = `${run.testRunId}\u0000${sut}\u0000${env}`;
+      if (!warnedInvalid.has(warnKey)) {
+        warnedInvalid.add(warnKey);
+        warn?.(
+          `Additional SUT monitoring for test run ${run.testRunId}: entry skipped, names may hold only ` +
+            `letters, digits, '.', '_' and '-' (at most 100): ${JSON.stringify([sut, env])}`,
+        );
+      }
       continue;
     }
     // The run's own pair is already monitored, and its dashboards would collide with these.
@@ -96,7 +108,12 @@ const labelSuffix = (sut: string, env: string): string => ` - ${sut} ${env}`;
 /** The application-dashboard label: unchanged for the run itself, suffixed for a monitored combination. */
 export function ownerLabel(run: TestRun, label: string): string {
   if (!(run as MonitoringRun).monitoringOwner) return label;
-  return `${label}${labelSuffix(sutNameOf(run), run.testEnvironment)}`;
+  // The suffix stays whole (monitoredCombinationOf reads it; its names are ASCII by MONITORING_NAME),
+  // so a long dashboard name is shortened instead and the row still fits the column.
+  const suffix = labelSuffix(sutNameOf(run), run.testEnvironment);
+  const room = DASHBOARD_LABEL_MAX - suffix.length;
+  const name = Array.from(label);
+  return `${name.length > room ? name.slice(0, room).join('') : label}${suffix}`;
 }
 
 type DashboardRow = { dashboardLabel?: string | null; variables?: unknown };

@@ -33,8 +33,9 @@ export class VariableDto {
 
 export class AdditionalSutMonitoringDto {
   // Same character rule as the run's own systemUnderTest/testEnvironment: grafana-sync substitutes
-  // these names unescaped into datasource variable queries. 100, not 255, so the dashboard label
-  // `<dashboard> - <sut> <env>` fits application_dashboards.dashboard_label (varchar(255)).
+  // these names unescaped into datasource variable queries. 100, not 255, so the ` - <sut> <env>`
+  // suffix leaves room in application_dashboards.dashboard_label (varchar(255)); grafana-sync's
+  // ownerLabel shortens the dashboard-name part when a long one would still overflow.
   @ApiProperty({ description: 'System under test to monitor (need not exist in Perfana)', example: 'payment-db' })
   @IsString()
   @Length(1, 100)
