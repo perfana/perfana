@@ -73,6 +73,18 @@ export function readAdditionalSutMonitoring(
     }
     // The run's own pair is already monitored, and its dashboards would collide with these.
     if (sut === sutNameOf(run) && env === run.testEnvironment) continue;
+    // v0.2.97.102 took `profile`; it is no longer read, so say so instead of silently using the
+    // run's profiles. The API strips the key on new writes; this catches stored rows.
+    if (e.profile !== undefined) {
+      const warnKey = `${run.testRunId}\u0000${sut}\u0000${env}\u0000profile`;
+      if (!warnedInvalid.has(warnKey)) {
+        warnedInvalid.add(warnKey);
+        warn?.(
+          `Additional SUT monitoring for test run ${run.testRunId}: entry ${sut} / ${env} still ` +
+            `names a profile, which is no longer read; use tags to choose its profiles`,
+        );
+      }
+    }
     const tags = Array.isArray(e.tags)
       ? [...new Set(e.tags.filter((t): t is string => typeof t === 'string').map((t) => t.trim()))]
           .filter(Boolean)
