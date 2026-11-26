@@ -15,6 +15,7 @@
     "!dist/**/*.test.d.ts",
     "!dist/**/*.test.js.map",
     "!dist/**/*.test.d.ts.map",
+    "skills/**",
     "README.md"
   ],
   "scripts": {
@@ -49,12 +50,12 @@
     "node": ">=24.0.0 <25.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.7.0",
-    "zod": "^3.22.4"
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
-    "@types/node": "^20.11.0"
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
   },
   "publishConfig": {
     "access": "public"

@@ -520,3 +520,19 @@ describe('PerfanaClient', () => {
     });
   });
 });
+
+describe('PerfanaClient timeout', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('turns a hung request into a readable error instead of hanging', async () => {
+    // A fetch that only ever settles when its signal aborts.
+    globalThis.fetch = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+      })) as unknown as typeof fetch;
+    const slow = new PerfanaClient('http://localhost:3001/api', 'k', 20);
+    await assert.rejects(slow.getTestRun('run-1'), /did not answer \/test-runs\/run-1 within 20 ms/);
+  });
+});
