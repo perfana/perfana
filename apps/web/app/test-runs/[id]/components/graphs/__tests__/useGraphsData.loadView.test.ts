@@ -63,7 +63,8 @@ describe('useGraphsData.loadView', () => {
       });
     });
     expect(missing).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // one request for the shared panel
+    // One request for the shared panel, plus its raw (members=true) answer for the series it lacked.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.current.seriesData.get('a')).toHaveLength(1);
     expect(result.current.seriesData.get('b')).toEqual([]);
   });

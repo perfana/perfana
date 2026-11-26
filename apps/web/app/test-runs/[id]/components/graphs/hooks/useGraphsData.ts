@@ -161,11 +161,12 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   const fetchPanelRows = useCallback(async (
     series: SeriesConfig,
     range: ChartTimeRange | null,
+    members = false,
     attempt = 1,
   ): Promise<MetricDataPoint[]> => {
     const again = (): Promise<MetricDataPoint[]> =>
       attempt < PANEL_FETCH_ATTEMPTS
-        ? fetchPanelRows(series, range, attempt + 1)
+        ? fetchPanelRows(series, range, members, attempt + 1)
         : Promise.resolve([]);
     try {
       const params = new URLSearchParams({
@@ -179,6 +180,8 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
         params.set('from', range.from);
         params.set('to', range.to);
       }
+      // Raw per-pod series: without it a grouped panel answers with its groups only.
+      if (members) params.set('members', 'true');
 
       const testRunIdForQuery = testRun?.test_run_id || testRunId;
       const response = await authenticatedFetch(
@@ -206,6 +209,27 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, [testRun, testRunId]);
 
   /**
+   * Each series' rows from one panel answer. A grouped panel answers with its group series
+   * and leaves the pods out, while the Graphs picker lists pods. So a series missing from the
+   * grouped answer is looked up in the raw one (`members=true`); a group name is found in the
+   * first. The client cannot tell a grouped panel from here, so the second read also fires
+   * for a series that is merely empty in the window while others on its panel are not.
+   * An empty first answer (no data, or every attempt failed) skips it: groups are built
+   * from their pods, so the raw answer would be empty too.
+   */
+  const fetchPanelSeries = useCallback(async (
+    group: SeriesConfig[],
+    range: ChartTimeRange | null,
+  ): Promise<MetricDataPoint[][]> => {
+    const rows = await fetchPanelRows(group[0]!, range);
+    const pick = (from: MetricDataPoint[], s: SeriesConfig) => from.filter((m) => m.metric_name === s.metricName);
+    const picked = group.map((s) => pick(rows, s));
+    if (rows.length === 0 || picked.every((p) => p.length > 0)) return picked;
+    const raw = await fetchPanelRows(group[0]!, range, true);
+    return picked.map((p, i) => (p.length > 0 ? p : pick(raw, group[i]!)));
+  }, [fetchPanelRows]);
+
+  /**
    * Fetch metric data for a series from the backend
    */
   const fetchSeriesData = useCallback(async (
@@ -230,9 +254,9 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
         return ms >= fromMs && ms <= toMs;
       });
     }
-    const rows = await fetchPanelRows(series, range);
-    return rows.filter((m) => m.metric_name === series.metricName);
-  }, [testRun, testRunId, zoomRange, fetchPanelRows]);
+    const [rows] = await fetchPanelSeries([series], range);
+    return rows ?? [];
+  }, [testRun, testRunId, zoomRange, fetchPanelSeries]);
 
   /**
    * Fetch a list of series, ONE request per panel rather than one per series.
@@ -269,11 +293,8 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       ...[...panels.values()].map((group) => async () => {
         // Every series in the group answers to the same request, so the first one's
         // dashboard/panel/source is the whole group's.
-        const rows = await fetchPanelRows(group[0]!, range);
-        return group.map(
-          (series) =>
-            [series.id, rows.filter((m) => m.metric_name === series.metricName)] as const,
-        );
+        const rows = await fetchPanelSeries(group, range);
+        return group.map((series, i) => [series.id, rows[i] ?? []] as const);
       }),
       ...aggregated.map((series) => async () => [
         [series.id, await fetchSeriesData(series, range)] as const,
@@ -282,7 +303,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
 
     const fetched = await mapLimit(tasks, OPTION_FETCH_CONCURRENCY, (task) => task());
     return fetched.flat();
-  }, [fetchPanelRows, fetchSeriesData]);
+  }, [fetchPanelSeries, fetchSeriesData]);
 
   /**
    * Narrow every series to a zoom window, or widen back to the whole run with `null`.

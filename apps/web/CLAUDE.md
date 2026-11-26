@@ -1027,11 +1027,14 @@ labels a provisioned rule *From profile* / *From profile (edited)*, keyed on `or
    **Graphs passes `podsByDefault` (v0.2.97.98) and does NOT use that per-pod fetch.** It takes
    the grouped answer and expands each group into its pods locally (`expandGroupsToPods`), because
    `?members=true` answers without `series_groups`, so a raw fetch could not tell which panels are
-   grouped and every panel would grow a "show groups" switch. In that mode `memberPanels` holds the
-   panels switched BACK to groups. Each pod records the groups it stood behind (`fromGroups`), which
-   is what lets a card link naming a group add its pods; without it the link finds no option and is
-   disarmed with the chart empty. Grouped is for comparing runs (Compare, Trends, ADAPT); one run's
-   chart is the raw series.
+   grouped. Since v0.2.97.104 it lists the pods AND the groups side by side, with no switch. Each
+   pod records the groups it stood behind (`fromGroups`), which is what lets a card link naming a
+   group add its pods; a whole-dashboard link adds raw series only. Grouped is for comparing runs
+   (Compare, Trends, ADAPT); one run's chart is the raw series, groups optional.
+   **The chart needs its half too:** the panel read without `members=true` answers a grouped panel
+   with its groups only and drops the pods, so a picked pod drew nothing. `useGraphsData`'s
+   `fetchPanelSeries` re-reads the panel with `members=true` for any series missing from the
+   grouped answer — one extra request per panel, and only when something was missing.
 3. **One control picks every series a group emits (v0.2.97.44).** **Series per group** is a single
    `FormGroup` of four checkboxes — Average per pod, Total, Highest pod, Number of pods — and each
    ticked box is one series named `<group> (avg)` / `(sum)` / `(max)` / `(count)`. There is no

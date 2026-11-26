@@ -166,10 +166,9 @@ function CascadeBody({
   const [seriesOptions, setSeriesOptions] = useState<SeriesOption[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<SeriesOption[]>([]);
-  // Panels switched away from the default view, by `panelKey`: to the per-pod view ("show
-  // pods") normally, or back to the groups ("show groups") when `podsByDefault` is set.
+  // Panels switched to the per-pod view ("show pods"), by `panelKey`. Never set with
+  // `podsByDefault`, which lists pods and groups together and so has no switch.
   const [memberPanels, setMemberPanels] = useState<string[]>([]);
-  const showsPods = (key: string) => podsByDefault !== memberPanels.includes(key);
 
   // One query per column. Deliberately NOT reset when the selection changes: narrowing
   // dashboards to "docker" and then stepping through their panels is the flow this is for.
@@ -218,12 +217,17 @@ function CascadeBody({
     }
     let cancelled = false;
     setSeriesLoading(true);
-    // Pods by default: fetch the grouped answer and expand each group into its pods from the
-    // membership it carries, so the picker still knows which panels are grouped.
+    // Pods by default (Graphs): list every raw series, with each group's own series after its
+    // pods, both pickable. Built from the grouped answer's membership, so no extra request.
     // Otherwise two arguments when nothing is in the per-pod view, so the common call is unchanged.
     (podsByDefault
       ? fetchSeriesForPanels(picked, testRun).then((lists) =>
-        lists.map((list, i) => (memberPanels.includes(panelKey(picked[i]!)) ? list : expandGroupsToPods(list))))
+        lists.map((list) => {
+          const pods = expandGroupsToPods(list);
+          // A group the rule does not rename keeps its pod's name: list that name once.
+          const listed = new Set(pods.map(seriesKey));
+          return [...pods, ...list.filter((o) => o.members?.length && !listed.has(seriesKey(o)))];
+        }))
       : memberPanels.length > 0
         ? fetchSeriesForPanels(picked, testRun, new Set(memberPanels))
         : fetchSeriesForPanels(picked, testRun))
@@ -341,13 +345,19 @@ function CascadeBody({
     // the effect can never fire a second time while armed. That is what lets it read
     // `isAdded` without listing it as a dependency — a second armed run would dedupe against
     // a stale snapshot. Anything that makes this re-enter has to revisit the deps.
-    const exact = want.metricName === undefined
-      ? seriesOptions.filter((s) => !isAdded(s)).map(pickOf)
-      : seriesOptions.filter((s) => s.metricName === want.metricName && !isAdded(s)).map(pickOf);
-    // A link naming a group (an anomaly row) on a pods-by-default picker adds that group's pods.
-    const picks = exact.length > 0 || want.metricName === undefined
-      ? exact
-      : seriesOptions.filter((s) => s.fromGroups?.includes(want.metricName!) && !isAdded(s)).map(pickOf);
+    const open = seriesOptions.filter((s) => !isAdded(s));
+    // Pods by default (Graphs) lists raw series and groups together, but a link adds the raw
+    // series: a whole-dashboard link skips the groups, and a link naming a group (an anomaly
+    // row) adds that group's pods. The group itself stays one click away in the picker.
+    // Pods are found before the added ones are dropped, so a second click on the same link
+    // adds nothing rather than falling through to the group.
+    const pods = podsByDefault && want.metricName !== undefined
+      ? seriesOptions.filter((s) => s.fromGroups?.includes(want.metricName!))
+      : [];
+    const picks = (want.metricName === undefined
+      ? open.filter((s) => !(podsByDefault && s.members?.length))
+      : pods.length > 0 ? pods.filter((s) => !isAdded(s)) : open.filter((s) => s.metricName === want.metricName)
+    ).map(pickOf);
     if (want.metricName === undefined && picks.length > LINK_WILDCARD_MAX_SERIES) {
       onAddSeries(picks.slice(0, LINK_WILDCARD_MAX_SERIES));
       showToast?.(
@@ -634,7 +644,7 @@ function CascadeBody({
         >
           {seriesGroups.map(([group, options]) => {
             const groupPanel = options[0]?.panel;
-            const showingPods = groupPanel ? showsPods(panelKey(groupPanel)) : false;
+            const showingPods = groupPanel ? memberPanels.includes(panelKey(groupPanel)) : false;
             const grouped = options.some((o) => o.members?.length || o.fromGroups?.length);
             return (
               <CascadeGroup
@@ -642,8 +652,8 @@ function CascadeBody({
                 label={group}
                 color={theme.faint}
                 action={
-                  // Pods by default lists every panel "showing pods"; only a grouped one has groups to show.
-                  groupPanel && (grouped || (showingPods && !podsByDefault)) ? (
+                  // Pods by default lists pods and groups together, so there is nothing to switch.
+                  groupPanel && !podsByDefault && (grouped || showingPods) ? (
                     <PodsToggle
                       theme={theme}
                       showingPods={showingPods}
