@@ -165,7 +165,7 @@ export class AutoConfigService {
         );
       }
 
-      for (const target of readAdditionalSutMonitoring(testRun)) {
+      for (const target of readAdditionalSutMonitoring(testRun, (m) => this.logger.warn(m))) {
         await this.processAdditionalSutMonitoring(
           testRun,
           target,

@@ -2,6 +2,7 @@ import { TestRun } from '@perfana/shared/entities';
 import {
   asMonitoringRun,
   dashboardsForCombination,
+  monitoredCombinationOf,
   ownerLabel,
   ownerSutName,
   ownerTestEnvironment,
@@ -63,23 +64,54 @@ describe('additional SUT monitoring', () => {
     expect(ownerLabel(original, 'Pods')).toBe('Pods');
   });
 
-  it('gives each pass only its own dashboards of a template', () => {
-    const r = run([
+  // Value: protects=combination scoping is read from the dashboard row (stored variables + matching label suffix), not from the run's entries; fails_when=scoping goes back to the run's entries (a run without entries hands monitored rows to the owner's SLOs) or to a bare label match; why_new=replaces the label-only case after review finding red-team#1; seam=none; no_claim=rows written by hand
+  it('gives each pass only its own dashboards of a template, whichever run is processed', () => {
+    const vars = (sut: string, env: string) => [
+      { name: 'system_under_test', values: [sut] },
+      { name: 'test_environment', values: [env] },
+    ];
+    const own = { dashboardLabel: 'Pods', variables: vars('shop', 'acc') };
+    const legacy = { dashboardLabel: 'Pods' }; // no stored variables: the owner's
+    const foo = { dashboardLabel: 'Pods - foo bar', variables: vars('foo', 'bar') };
+    const fooSeparate = { dashboardLabel: 'Pods api - foo bar', variables: vars('foo', 'bar') };
+    const acme = { dashboardLabel: 'Pods - acme test', variables: vars('acme', 'test') };
+    // A suffix that does not match the row's own variables is not a monitored row.
+    const lookalike = { dashboardLabel: 'Pods - foo bar', variables: vars('shop', 'acc') };
+    const dashboards = [own, legacy, foo, fooSeparate, acme, lookalike];
+    const withEntries = run([
       { systemUnderTest: 'foo', testEnvironment: 'bar' },
       { systemUnderTest: 'acme', testEnvironment: 'test' },
     ]);
-    const dashboards = [
-      { dashboardLabel: 'Pods' },
-      { dashboardLabel: 'Pods - foo bar' },
-      { dashboardLabel: 'Pods api - foo bar' },
-      { dashboardLabel: 'Pods - acme test' },
-    ];
 
-    expect(dashboardsForCombination(dashboards, r)).toEqual([{ dashboardLabel: 'Pods' }]);
+    expect(dashboardsForCombination(dashboards, withEntries)).toEqual([own, legacy, lookalike]);
     expect(
-      dashboardsForCombination(dashboards, r, { systemUnderTest: 'foo', testEnvironment: 'bar' }),
-    ).toEqual([{ dashboardLabel: 'Pods - foo bar' }, { dashboardLabel: 'Pods api - foo bar' }]);
-    // A run with no entries keeps every dashboard, as before this feature.
-    expect(dashboardsForCombination(dashboards, run(null))).toHaveLength(4);
+      dashboardsForCombination(dashboards, withEntries, {
+        systemUnderTest: 'foo',
+        testEnvironment: 'bar',
+      }),
+    ).toEqual([foo, fooSeparate]);
+    // A run of the same SUT/env that declares no entries still leaves the monitored rows alone.
+    expect(dashboardsForCombination(dashboards, run(null))).toEqual([own, legacy, lookalike]);
+    expect(monitoredCombinationOf(acme, run(null))).toEqual({
+      systemUnderTest: 'acme',
+      testEnvironment: 'test',
+    });
+  });
+
+  // Value: protects=entries whose names break the API's character rule are dropped with a warning before they reach datasource queries; fails_when=MONITORING_NAME check removed or loosened; why_new=the jsonb can arrive by SUT import or SQL, bypassing the DTO; seam=none; no_claim=DTO validation (update-running-test.dto.spec)
+  it('drops entries whose names break the character rule, with a warning', () => {
+    const warn = jest.fn();
+    expect(
+      readAdditionalSutMonitoring(
+        run([
+          { systemUnderTest: 'db"}', testEnvironment: 'acc' },
+          { systemUnderTest: 'a b', testEnvironment: 'c' },
+          { systemUnderTest: 'x'.repeat(101), testEnvironment: 'acc' },
+          { systemUnderTest: 'payment-db', testEnvironment: 'acc.v2' },
+        ]),
+        warn,
+      ),
+    ).toEqual([{ systemUnderTest: 'payment-db', testEnvironment: 'acc.v2' }]);
+    expect(warn).toHaveBeenCalledTimes(3);
   });
 });

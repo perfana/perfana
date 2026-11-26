@@ -212,4 +212,40 @@ describe('GroupingRuleProcessorService', () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining('Connection terminated'));
     expect(warn).not.toHaveBeenCalled();
   });
+
+  // Value: protects=a grouping rule pass writes only onto its own combination's dashboards (target) or the run's own (master); fails_when=the .then(dashboardsForCombination) filter is dropped; why_new=existing cases never set a label or target; seam=none; no_claim=SQL text
+  it('keeps each pass to its own combination of the template dashboards', async () => {
+    const rows = [
+      {
+        id: 'ad-own',
+        dashboardLabel: 'K8s',
+        systemUnderTestId: 'sut-1',
+        organizationId: 'org-1',
+        teamId: null,
+      },
+      {
+        id: 'ad-db',
+        dashboardLabel: 'K8s - db acc',
+        variables: [
+          { name: 'system_under_test', values: ['db'] },
+          { name: 'test_environment', values: ['acc'] },
+        ],
+        systemUnderTestId: 'sut-1',
+        organizationId: 'org-1',
+        teamId: null,
+      },
+    ];
+    const run = testRun({
+      additionalSutMonitoring: [{ systemUnderTest: 'db', testEnvironment: 'acc' }],
+    });
+    const a = setup(rows as never);
+    await a.service.processProfileGroupingRules(run, ['k8s'], [rule()], {
+      systemUnderTest: 'db',
+      testEnvironment: 'acc',
+    });
+    expect(a.query.mock.calls.map((c) => c[1][3])).toEqual(['ad-db']);
+    const b = setup(rows as never);
+    await b.service.processProfileGroupingRules(run, ['k8s'], [rule()]);
+    expect(b.query.mock.calls.map((c) => c[1][3])).toEqual(['ad-own']);
+  });
 });
