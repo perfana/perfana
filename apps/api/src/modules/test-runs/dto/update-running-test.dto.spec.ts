@@ -506,6 +506,8 @@ describe('TestRuns DTOs', () => {
       ['more than 50 tags', { ...entry, tags: Array.from({ length: 51 }, (_, i) => `t${i}`) }],
       ['an overlong tag', { ...entry, tags: ['x'.repeat(101)] }],
       ['a blank tag', { ...entry, tags: ['  '] }],
+      ['an empty tags list', { ...entry, tags: [] }],
+      ['an empty retired profile', { ...entry, profile: '' }],
     ])('rejects %s', async (_l, bad) => {
       const errors = await check([bad]);
       expect(errors.map((e) => e.property)).toContain('additionalSutMonitoring');

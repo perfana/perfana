@@ -701,6 +701,23 @@ describe('AutoConfigService', () => {
       expect(calls[0]![1]).toBe(k8sDashboard);
     });
 
+    // Value: protects=an untagged run whose only entry names the retired profile still logs why it is skipped; fails_when=runs without work are dropped without reading their entries; why_new=hasWork filters such runs before processTestRun; seam=none; no_claim=log wording
+    it('warns about a retired-profile entry on a run that has no other work', async () => {
+      const warnSpy = jest.spyOn((service as any).logger, 'warn');
+      testRunFinderService.findRecentTestRuns.mockResolvedValue([
+        {
+          ...mockTestRun,
+          testRunId: 'untagged-legacy',
+          tags: [],
+          additionalSutMonitoring: [{ systemUnderTest: 'kafka', testEnvironment: 'acc', profile: 'k8s' }],
+        },
+      ]);
+      await service.processAutoConfigDashboards();
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no longer read'));
+      expect(dashboardConfiguratorService.processAutoConfigDashboard).not.toHaveBeenCalled();
+    });
+
     it("skips an entry whose tags match only another organization's profile", async () => {
       await runWith(
         [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] }],

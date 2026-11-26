@@ -80,11 +80,13 @@ export class AutoConfigService {
 
     recentTestRuns
       .filter((tr) => !hasWork(tr))
-      .forEach((tr) =>
+      .forEach((tr) => {
         this.logger.log(
           `No AutoConfig process for test run because there are no tags: ${tr.testRunId}`,
-        ),
-      );
+        );
+        // Still surface entries skipped for a retired profile or a bad name on such a run.
+        readAdditionalSutMonitoring(tr, (m) => this.logger.warn(m));
+      });
 
     const testRuns = recentTestRuns.filter(hasWork);
 

@@ -8,6 +8,7 @@ import {
   Length,
   IsUrl,
   ArrayMaxSize,
+  ArrayMinSize,
   Matches,
   IsInt,
   Min,
@@ -59,6 +60,8 @@ export class AdditionalSutMonitoringDto {
   })
   @IsOptional()
   @IsArray()
+  // Omit tags for the run's profiles; [] would read as "none" but be stored as omitted.
+  @ArrayMinSize(1, { message: 'Omit tags instead of sending an empty list' })
   @ArrayMaxSize(50, { message: 'Maximum 50 tags allowed' })
   @IsString({ each: true })
   @Length(1, 100, { each: true, message: 'Each tag must be between 1 and 100 characters' })
@@ -71,6 +74,7 @@ export class AdditionalSutMonitoringDto {
   @ApiPropertyOptional({ deprecated: true, description: 'Replaced by tags; an entry with profile and no tags is skipped' })
   @IsOptional()
   @IsString()
+  @Length(1, 255)
   profile?: string;
 }
 

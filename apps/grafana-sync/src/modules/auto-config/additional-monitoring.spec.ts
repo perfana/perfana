@@ -41,6 +41,7 @@ describe('additional SUT monitoring', () => {
       { systemUnderTest: 'acme', testEnvironment: 'test' },
     ]);
     expect(readAdditionalSutMonitoring(run(null))).toEqual([]);
+    expect(readAdditionalSutMonitoring(run({ systemUnderTest: 'foo' }))).toEqual([]);
   });
 
   // Value: protects=an entry with the retired profile and no tags is skipped, not widened to the run's profiles; fails_when=the profile check is removed or no longer skips; why_new=profile was replaced by tags in this change; seam=none; no_claim=API-side stripping (whitelist pipe)
@@ -63,9 +64,8 @@ describe('additional SUT monitoring', () => {
     readAdditionalSutMonitoring(silent);
     const warn = jest.fn();
     readAdditionalSutMonitoring(silent, warn);
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('no longer read'));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no longer read'));
-    expect(readAdditionalSutMonitoring(run({ systemUnderTest: 'foo' }))).toEqual([]);
   });
 
   it('monitors the target while the run keeps owning the result', () => {
