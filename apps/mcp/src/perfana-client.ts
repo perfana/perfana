@@ -6,6 +6,8 @@ export class PerfanaClient {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
+    /** Per-request budget; a hung API call would otherwise hang the tool call forever. */
+    private readonly timeoutMs = 30_000,
   ) {}
 
   // ─── Test runs ─────────────────────────────────────────────────────────────
@@ -303,12 +305,23 @@ export class PerfanaClient {
     return headers;
   }
 
+  private async fetch(path: string, init: RequestInit = {}): Promise<Response> {
+    try {
+      return await fetch(`${this.baseUrl}${path}`, { ...init, headers: this.headers(), signal: AbortSignal.timeout(this.timeoutMs) });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        throw new Error(`Perfana API did not answer ${path} within ${this.timeoutMs} ms (raise PERFANA_TIMEOUT_MS if this is a large run)`);
+      }
+      throw err;
+    }
+  }
+
   /**
    * A write. A 403 for a missing role is answered with what the key lacks; any other 403 (editing a
    * story a person already published, say) is passed through as the API words it.
    */
   private async send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, { method, headers: this.headers(), body: JSON.stringify(body) });
+    const res = await this.fetch(path, { method, body: JSON.stringify(body) });
     const text = await res.text().catch(() => '');
     if (!res.ok) {
       const message = apiMessage(text);
@@ -329,8 +342,7 @@ export class PerfanaClient {
   }
 
   private async get<T>(path: string): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const res = await fetch(url, { headers: this.headers() });
+    const res = await this.fetch(path);
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');

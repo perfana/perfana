@@ -96,6 +96,15 @@ For root cause analysis, a typical agent workflow is:
 5. `get_flamegraph` or `get_hotspots` — find CPU hot methods (if Pyroscope connected)
 6. `get_grafana_dashboard_snapshot` — check container/JVM metrics
 
+The server also publishes this workflow as an MCP skill, `skill://perfana/analyze-test-run/SKILL.md`
+(the [Skills extension](https://modelcontextprotocol.io/extensions/skills/overview)), so a client that
+supports it loads the playbook on its own. The source is [`skills/analyze-test-run/SKILL.md`](skills/analyze-test-run/SKILL.md);
+add a folder with a `SKILL.md` under `skills/` to publish another one.
+
+Every tool carries MCP annotations: the 25 read tools are `readOnlyHint: true`, so a client can approve
+them automatically, and the five comment and investigation tools are `readOnlyHint: false` but
+idempotent and non-destructive (a retry returns the first result, and nothing deletes).
+
 ## Leaving the analysis on the run (comments)
 
 What an agent finds usually ends up as chat text that nobody else on the team sees. With a
@@ -196,3 +205,4 @@ investigations per run. Investigation links need the human test run id (as above
 | `PERFANA_API_URL` | `http://localhost:3001/api` | Base URL of the Perfana API |
 | `PERFANA_WEB_URL` | `PERFANA_API_URL` without `/api` | Base URL of the Perfana web app, for investigation links (`http://localhost:4000` on a local stack) |
 | `PERFANA_API_KEY` | _(required)_ | Perfana API key — sent as `Authorization: Bearer <key>`. Generate one in Perfana under **Settings → API Keys**; tick **Allow writing comments** for the comment and investigation write tools. |
+| `PERFANA_TIMEOUT_MS` | `30000` | How long one Perfana API call may take before the tool returns an error instead of hanging. Raise it if reads on very large runs time out. |
