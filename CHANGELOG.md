@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.104] - 2026-11-26
+
+### Fixed
+- **The Graphs card draws a grouped panel's individual pods.** Since v0.2.97.98 the Graphs series picker listed each pod of a panel with a series grouping rule, but a pod you added drew nothing and only the group lines showed. Graphs now loads the pod's own data. Compare, Trends and anomaly detection are unchanged and keep using the groups.
+
+### Changed
+- **Graphs lists a grouped panel's pods and its groups together.** You can add a pod such as `emc-66547f8465-68wd4`, a group such as `pod: emc (avg)`, or both, without the **show groups** switch, which is gone from Graphs. **Select all** on such a panel adds both.
+- "Open in Graphs" on a grouped row in anomaly detection still adds that group's pods, and adds nothing once they are all on the chart. A link to a whole dashboard adds the pods and ungrouped series, not the groups.
+
 ## [0.2.97.103] - 2026-11-26
 
 ### Changed

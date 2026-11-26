@@ -838,6 +838,26 @@ groups and the per-pod rows are gone → Compare shows baseline values → the G
 group and **show pods** works → a preset holding the group name draws after reload → a report
 section from it renders → SUT export/import keeps the rule → SUT delete removes both tables' rows →
 a copy to another workload reports its `origin` and skip reasons. Paste what you saw into the PR.
+Since v0.2.97.104 the Graphs picker lists pods and groups together with no **show pods** switch
+(Compare and Trends keep it); check that a pod added in Graphs draws its own line.
+
+### Graphs: what the raw-series read left open (P3)
+
+**Origin:** v0.2.97.104 review. `useGraphsData.fetchPanelSeries` re-reads a panel with
+`members=true` for any series missing from its grouped answer, so a pod draws.
+
+- **Preset load is unbatched.** `useGraphsPresets.loadPreset` calls `fetchSeriesData` once per
+  series in a bare `Promise.all`, and each pod there is now two full-panel reads. Route it through
+  `fetchSeriesBatch` (one or two reads per panel), as add, zoom and `loadView` already are.
+- **A failed raw read is silent.** When the grouped read succeeds and the `members=true` read
+  gives up, the pods get `[]` beside drawn groups, with only a `console.warn`: it reads as "no data
+  in this window". Tell "failed" from "empty" in `fetchPanelRows` and surface it.
+- **The raw read also fires for an empty series on any panel** while others on it have data (the
+  client cannot tell a grouped panel here). Carry a pod marker on `SeriesConfig` if the cost shows.
+- **A pod on a many-pod panel is coarser than its group.** The raw read spreads the 4000-point
+  LTTB budget over every pod, the grouped read over a few groups.
+- **A group the rule does not rename** (same name as one pod) is listed once, as the pod, but the
+  chart's grouped read answers with the group's values for that name.
 
 ### Re-measure the grouped statistics at production scale (P2)
 
