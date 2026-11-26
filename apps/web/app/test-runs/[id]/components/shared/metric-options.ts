@@ -22,6 +22,7 @@ import {
 } from '@/lib/aggregated-perf-series';
 import { buildUrlPanels, fetchUrlDistinctNames, isUrlPanel } from '@/lib/url-perf-panels';
 import { TestRun } from '@/types/test-runs';
+import { groupSeriesName, SERIES_GROUPING_AGGREGATIONS, type SeriesGroupingAggregation } from '@perfana/shared/utils';
 
 export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
 
@@ -133,12 +134,21 @@ export interface SeriesGroupSummary {
   aggregations: string[];
 }
 
-/** Group name -> members, for the groups a response carries; undefined when it carries none. */
+/**
+ * Listed series name -> members, for the groups a response carries; undefined when it carries none.
+ * A renamed group is listed only as its derived series (`emc (avg)`, `emc (sum)`), never as `emc`,
+ * so each derived name is keyed too. Keyed on the bare group alone, no listed name matched, and the
+ * picker showed no badge and no pods for any renamed group (v0.2.97.44 to v0.2.97.105).
+ */
 export function membersByGroup(groups: SeriesGroupSummary[] | undefined): Record<string, string[]> | undefined {
   if (!Array.isArray(groups) || groups.length === 0) return undefined;
   const out: Record<string, string[]> = {};
   for (const g of groups) {
-    if (g && typeof g.group === 'string' && Array.isArray(g.members)) out[g.group] = g.members;
+    if (!g || typeof g.group !== 'string' || !Array.isArray(g.members)) continue;
+    out[g.group] = g.members;
+    for (const a of Array.isArray(g.aggregations) ? g.aggregations : []) {
+      if ((SERIES_GROUPING_AGGREGATIONS as readonly string[]).includes(a)) out[groupSeriesName(g.group, a as SeriesGroupingAggregation)] = g.members;
+    }
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
