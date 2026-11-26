@@ -500,6 +500,11 @@ describe('templated datasource (${datasource})', () => {
     expect(logs.datasource).toEqual({ type: 'loki', uid: 'loki-main' });
     expect(logs.datasourceId).toBe(9);
 
+    // Grafana's Loki plugin types `step` as a string; a numeric one fails the whole
+    // /api/ds/query with HTTP 500 ("cannot unmarshal number into ... LokiDataQuery.step").
+    expect(metrics).not.toHaveProperty('step');
+    expect(logs).not.toHaveProperty('step');
+
     expect(requestedUids.sort()).toEqual(['loki-main', 'prometheus-main']);
   });
 
