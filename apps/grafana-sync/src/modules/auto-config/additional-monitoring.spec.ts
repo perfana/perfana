@@ -26,17 +26,18 @@ describe('additional SUT monitoring', () => {
         run([
           { systemUnderTest: ' foo ', testEnvironment: 'bar' },
           { systemUnderTest: 'foo', testEnvironment: 'bar' },
-          { systemUnderTest: 'foo', testEnvironment: 'bar', profile: 'k8s' },
+          { systemUnderTest: 'foo', testEnvironment: 'bar', tags: [' k8s', 'jvm', 'k8s', 7] },
+          { systemUnderTest: 'foo', testEnvironment: 'bar', tags: ['jvm', 'k8s'] },
           { systemUnderTest: 'shop', testEnvironment: 'acc' },
           { systemUnderTest: '', testEnvironment: 'x' },
           { systemUnderTest: 'acme', testEnvironment: 7 },
           null,
-          { systemUnderTest: 'acme', testEnvironment: 'test', profile: '  ' },
+          { systemUnderTest: 'acme', testEnvironment: 'test', tags: ['  '] },
         ]),
       ),
     ).toEqual([
       { systemUnderTest: 'foo', testEnvironment: 'bar' },
-      { systemUnderTest: 'foo', testEnvironment: 'bar', profile: 'k8s' },
+      { systemUnderTest: 'foo', testEnvironment: 'bar', tags: ['jvm', 'k8s'] },
       { systemUnderTest: 'acme', testEnvironment: 'test' },
     ]);
     expect(readAdditionalSutMonitoring(run(null))).toEqual([]);

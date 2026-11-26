@@ -169,7 +169,12 @@ export class AutoConfigService {
         await this.processAdditionalSutMonitoring(
           testRun,
           target,
-          target.profile ? this.namedProfile(testRun, target.profile, profiles) : profileNames,
+          target.tags
+            ? matchProfilesForRun(
+                { tags: target.tags, organizationId: testRun.organizationId },
+                profiles,
+              ).map((p) => p.name)
+            : profileNames,
           autoConfigDashboards,
           profileBenchmarks,
           groupingRules,
@@ -178,23 +183,6 @@ export class AutoConfigService {
     } catch (error) {
       this.logger.error(`Error processing test run: ${testRun.testRunId}`, error);
     }
-  }
-
-  /**
-   * An entry's named profile, by the same organization rule as tag matching (fails closed on a
-   * missing organization); tags are not consulted, naming it is the opt-in.
-   */
-  private namedProfile(testRun: TestRun, name: string, profiles: any[]): string[] {
-    const found = profiles.some(
-      (p) =>
-        p.name === name && !!testRun.organizationId && p.organizationId === testRun.organizationId,
-    );
-    if (!found) {
-      this.logger.warn(
-        `Additional SUT monitoring for test run ${testRun.testRunId}: no profile '${name}' in its organization, entry skipped`,
-      );
-    }
-    return found ? [name] : [];
   }
 
   /**
@@ -210,7 +198,15 @@ export class AutoConfigService {
     profileBenchmarks: ProfileBenchmark[],
     groupingRules: ProfileGroupingRuleRow[],
   ): Promise<void> {
-    if (profileNames.length === 0) return;
+    if (profileNames.length === 0) {
+      // log, not warn: auto-config re-reads a recent run every pass.
+      this.logger.log(
+        `Additional SUT monitoring for test run ${testRun.testRunId}: no profile matches ` +
+          `${target.systemUnderTest} / ${target.testEnvironment}` +
+          `${target.tags ? ` (tags ${target.tags.join(', ')})` : ''}, entry skipped`,
+      );
+      return;
+    }
     this.logger.log(
       `Additional SUT monitoring for test run ${testRun.testRunId}: ` +
         `${target.systemUnderTest} / ${target.testEnvironment} with profiles ${profileNames.join(', ')}`,

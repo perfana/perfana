@@ -73,13 +73,16 @@ export function readAdditionalSutMonitoring(
     }
     // The run's own pair is already monitored, and its dashboards would collide with these.
     if (sut === sutNameOf(run) && env === run.testEnvironment) continue;
-    const profile =
-      typeof e.profile === 'string' && e.profile.trim() ? e.profile.trim() : undefined;
-    // Two entries for one pair may name different profiles; both apply to the same dashboards.
-    const key = `${sut}\u0000${env}\u0000${profile ?? ''}`;
+    const tags = Array.isArray(e.tags)
+      ? [...new Set(e.tags.filter((t): t is string => typeof t === 'string').map((t) => t.trim()))]
+          .filter(Boolean)
+          .sort()
+      : [];
+    // Two entries for one pair may carry different tags; both apply to the same dashboards.
+    const key = `${sut}\u0000${env}\u0000${tags.join('\u0000')}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ systemUnderTest: sut, testEnvironment: env, ...(profile ? { profile } : {}) });
+    result.push({ systemUnderTest: sut, testEnvironment: env, ...(tags.length ? { tags } : {}) });
   }
   return result;
 }

@@ -586,7 +586,7 @@ describe('AutoConfigService', () => {
     });
   });
   describe('additional SUT monitoring', () => {
-    const k8sProfile = { ...mockProfile, id: 'p-k8s', name: 'k8s', tags: ['unrelated'] };
+    const k8sProfile = { ...mockProfile, id: 'p-k8s', name: 'k8s', tags: ['kafka'] };
     const k8sDashboard = { ...mockAutoConfigDashboard, profile: 'k8s', dashboardUid: 'k8s-uid' };
 
     const runWith = async (
@@ -606,7 +606,7 @@ describe('AutoConfigService', () => {
       await service.processAutoConfigDashboards();
     };
 
-    it("applies the run's matched profiles to an entry without a profile, owned by the run", async () => {
+    it("applies the run's matched profiles to an entry without tags, owned by the run", async () => {
       await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc' }]);
 
       const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
@@ -633,8 +633,8 @@ describe('AutoConfigService', () => {
       );
     });
 
-    it("applies a named profile instead of the run's, without needing its tags", async () => {
-      await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc', profile: 'k8s' }]);
+    it("applies the profiles an entry's tags match instead of the run's", async () => {
+      await runWith([{ systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] }]);
 
       const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
       expect(calls.map((c) => c[1])).toEqual([mockAutoConfigDashboard, k8sDashboard]);
@@ -642,7 +642,7 @@ describe('AutoConfigService', () => {
         expect.anything(),
         ['k8s'],
         expect.any(Array),
-        expect.objectContaining({ profile: 'k8s' }),
+        expect.objectContaining({ tags: ['kafka'] }),
       );
     });
 
@@ -675,9 +675,9 @@ describe('AutoConfigService', () => {
       );
     });
 
-    it('skips an entry naming a profile of another organization', async () => {
+    it("skips an entry whose tags match only another organization's profile", async () => {
       await runWith(
-        [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', profile: 'k8s' }],
+        [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] }],
         [mockProfile, { ...k8sProfile, organizationId: 'other-org' }],
       );
 

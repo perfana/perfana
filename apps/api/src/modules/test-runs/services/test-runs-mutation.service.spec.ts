@@ -361,14 +361,14 @@ describe('TestRunsMutationService', () => {
       expect(updateTestRunHandler.execute.mock.calls[0][0].data.additionalSutMonitoring).toBeUndefined();
     });
 
-    // Value: protects=entries reach the create command as {systemUnderTest,testEnvironment[,profile]} with a blank/absent profile dropped; fails_when=profile '' is stored (grafana-sync then looks up a profile named '') or extra DTO keys leak into the jsonb; why_new=no service-level test covered the mapping; seam=none; no_claim=DTO validation (covered in dto spec)
-    it('maps additionalSutMonitoring entries, dropping a blank or absent profile', async () => {
+    // Value: protects=entries reach the create command as {systemUnderTest,testEnvironment[,tags]} with empty/absent tags dropped; fails_when=tags [] is stored (grafana-sync then matches no profile instead of the run's) or extra DTO keys leak into the jsonb; why_new=no service-level test covered the mapping; seam=none; no_claim=DTO validation (covered in dto spec)
+    it('maps additionalSutMonitoring entries, dropping empty or absent tags', async () => {
       const updateDto = {
         ...createMockUpdateDto(),
         additionalSutMonitoring: [
-          { systemUnderTest: 'payment-db', testEnvironment: 'prod', profile: '' },
+          { systemUnderTest: 'payment-db', testEnvironment: 'prod', tags: [] },
           { systemUnderTest: 'cache', testEnvironment: 'prod' },
-          { systemUnderTest: 'queue', testEnvironment: 'acc', profile: 'k8s' },
+          { systemUnderTest: 'queue', testEnvironment: 'acc', tags: ['kafka'] },
         ],
       } as any;
       lookupService.findOrCreateSystemUnderTest.mockResolvedValue({ id: 'sys-123', name: 'PaymentService' });
@@ -383,7 +383,7 @@ describe('TestRunsMutationService', () => {
       expect(createTestRunHandler.execute.mock.calls[0][0].data.additionalSutMonitoring).toEqual([
         { systemUnderTest: 'payment-db', testEnvironment: 'prod' },
         { systemUnderTest: 'cache', testEnvironment: 'prod' },
-        { systemUnderTest: 'queue', testEnvironment: 'acc', profile: 'k8s' },
+        { systemUnderTest: 'queue', testEnvironment: 'acc', tags: ['kafka'] },
       ]);
     });
 

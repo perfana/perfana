@@ -52,11 +52,17 @@ export class AdditionalSutMonitoringDto {
   })
   testEnvironment!: string;
 
-  @ApiPropertyOptional({ description: 'Profile to apply; omitted, the profiles the run\'s tags match apply', example: 'k8s-monitoring' })
+  @ApiPropertyOptional({
+    description: 'Tags choosing the profiles for this entry, in place of the run\'s tags (max 50); omitted, the profiles the run\'s tags match apply',
+    type: [String],
+    example: ['kafka'],
+  })
   @IsOptional()
-  @IsString()
-  @Length(1, 255)
-  profile?: string;
+  @IsArray()
+  @ArrayMaxSize(50, { message: 'Maximum 50 tags allowed' })
+  @IsString({ each: true })
+  @Length(1, 100, { each: true, message: 'Each tag must be between 1 and 100 characters' })
+  tags?: string[];
 }
 
 export class DeepLinkDto {

@@ -34,7 +34,7 @@ A profile is a reusable bundle of dashboards and SLOs. Create one so new test ru
 The profile holds your standard dashboards and SLOs. New test runs that use this profile inherit them automatically, so you avoid repeating the same setup on every system.
 
 **Monitor more systems from one test run**
-A test run usually loads more than the system it is named after: a shared database, a message broker, a downstream service. To see those on the run too, list them in `perfana.yaml` under `additionalSutMonitoring` (perfana-cli). Each entry names a system under test and test environment as your dashboards' `system_under_test` and `test_environment` variables know them; `profile` is optional. The names follow the same rule as the run's own: letters, digits, `.`, `_` and `-` only, at most 100 characters each.
+A test run usually loads more than the system it is named after: a shared database, a message broker, a downstream service. To see those on the run too, list them in `perfana.yaml` under `additionalSutMonitoring` (perfana-cli). Each entry names a system under test and test environment as your dashboards' `system_under_test` and `test_environment` variables know them; `tags` is optional. The names follow the same rule as the run's own: letters, digits, `.`, `_` and `-` only, at most 100 characters each.
 
 ```yaml
 test:
@@ -43,13 +43,13 @@ test:
       testEnvironment: acceptance
     - systemUnderTest: kafka
       testEnvironment: acceptance
-      profile: kafka-monitoring
+      tags: [kafka]
 ```
 
 For each entry Perfana adds the profile's dashboards with their variables set to that system and environment, together with the profile's SLOs and series grouping rules. They are added to the run's own system and environment, not to a separate one: no system or environment is created for `payment-db`. They are labelled with the combination they monitor, for example *JVM Overview - payment-db acceptance*.
 
-- Without `profile`, the entry uses the same profiles as the run itself (the ones its tags match).
-- With `profile`, it uses that profile only. The profile has to belong to the run's organization, but it does not need to share a tag with the run. To add the dashboards without the SLOs, create a profile holding only those dashboards and name it here.
+- Without `tags`, the entry uses the same profiles as the run itself (the ones its tags match).
+- With `tags`, it uses the profiles those tags match instead of the run's, by the same rule as a run's tags: a profile sharing at least one tag, in the run's organization. To add the dashboards without the SLOs, give a profile holding only those dashboards its own tag and use that tag here.
 - An entry is checked like the run itself: a dashboard whose data source has no value for that system or environment is skipped (see *Troubleshooting*).
 - Removing an entry, or the whole list, leaves the dashboards it added in place, and they keep being collected for every later run of this system and environment. Delete them under the system's dashboard settings when you no longer want them; a monitored environment that no longer exists lowers the run's data collection coverage.
 
