@@ -12,7 +12,7 @@ jest.mock('@/lib/grafana-dashboards', () => ({
 }));
 
 import { authenticatedFetch } from '@/lib/api';
-import { fetchPanelsForDashboards, fetchSeriesForPanel, fetchSeriesForPanels, panelKey } from '../metric-options';
+import { expandGroupsToPods, fetchPanelsForDashboards, fetchSeriesForPanel, fetchSeriesForPanels, panelKey } from '../metric-options';
 
 const mockFetch = authenticatedFetch as jest.MockedFunction<typeof authenticatedFetch>;
 
@@ -56,6 +56,31 @@ it('marks a group name with its members from /distinct-series', async () => {
   expect(options.map((o) => [o.metricName, o.members])).toEqual([
     ['api', [POD_A, POD_B]],
     ['api (pod count)', undefined],
+    ['heap', undefined],
+  ]);
+});
+
+// The shape the API has sent since v0.2.97.44: a renamed group is listed only as its derived
+// series, never as the bare group name.
+it('marks each derived series of a renamed group with the group members', async () => {
+  mockFetch.mockResolvedValue(
+    json({
+      metric_names: ['emc (avg)', 'emc (count)', 'heap'],
+      series_groups: [{ group: 'emc', members: [POD_A, POD_B], aggregations: ['avg', 'count'] }],
+    }),
+  );
+
+  const options = await fetchSeriesForPanel(panel, testRun);
+
+  expect(options.map((o) => [o.metricName, o.members])).toEqual([
+    ['emc (avg)', [POD_A, POD_B]],
+    ['emc (count)', [POD_A, POD_B]],
+    ['heap', undefined],
+  ]);
+  // Graphs lists the pods once each, recording every derived series they stood behind.
+  expect(expandGroupsToPods(options).map((o) => [o.metricName, o.fromGroups])).toEqual([
+    [POD_A, ['emc (avg)', 'emc (count)']],
+    [POD_B, ['emc (avg)', 'emc (count)']],
     ['heap', undefined],
   ]);
 });

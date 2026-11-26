@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.106] - 2026-11-26
+
+### Fixed
+- **The series pickers recognise a renamed series group again, so Graphs lists its pods.** Since v0.2.97.44 a grouped panel's series are named `<group> (avg)`, `(sum)`, `(max)` and `(count)`, but the pickers looked a group's pods up under the bare group name, which is never listed. So no series was known to be a group: Graphs showed only the group series and none of the pods that v0.2.97.104 was meant to add, and the `N pods` badge and **show pods** switch were missing in Compare and Trends. "Open in Graphs" on a grouped anomaly row now finds that group's pods too.
+
 ## [0.2.97.105] - 2026-11-26
 
 ### Fixed
