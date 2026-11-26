@@ -43,12 +43,15 @@ describe('additional SUT monitoring', () => {
     expect(readAdditionalSutMonitoring(run(null))).toEqual([]);
   });
 
-  // Value: protects=a stored v0.2.97.102 entry with the retired profile key is reported, not silently given the run's profiles; fails_when=the profile check is removed; why_new=profile was replaced by tags in this change; seam=none; no_claim=API-side stripping (whitelist pipe)
-  it('warns once about an entry that still names the retired profile', () => {
+  // Value: protects=an entry with the retired profile and no tags is skipped, not widened to the run's profiles; fails_when=the profile check is removed or no longer skips; why_new=profile was replaced by tags in this change; seam=none; no_claim=API-side stripping (whitelist pipe)
+  it('skips, warning once, an entry that names the retired profile without tags', () => {
     const warn = jest.fn();
-    const legacy = run([{ systemUnderTest: 'kafka', testEnvironment: 'acc', profile: 'k8s' }]);
+    const legacy = run([
+      { systemUnderTest: 'kafka', testEnvironment: 'acc', profile: 'k8s' },
+      { systemUnderTest: 'db', testEnvironment: 'acc', profile: 'k8s', tags: ['pg'] },
+    ]);
     expect(readAdditionalSutMonitoring(legacy, warn)).toEqual([
-      { systemUnderTest: 'kafka', testEnvironment: 'acc' },
+      { systemUnderTest: 'db', testEnvironment: 'acc', tags: ['pg'] },
     ]);
     readAdditionalSutMonitoring(legacy, warn);
     expect(warn).toHaveBeenCalledTimes(1);

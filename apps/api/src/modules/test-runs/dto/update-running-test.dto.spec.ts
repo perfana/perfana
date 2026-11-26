@@ -485,6 +485,8 @@ describe('TestRuns DTOs', () => {
 
     it('accepts entries with and without tags', async () => {
       expect(await check([entry, { ...entry, tags: ['kafka'] }])).toHaveLength(0);
+      // The retired profile is still accepted, so a perfana-cli v0.9.0 run does not fail to start.
+      expect(await check([{ ...entry, profile: 'k8s' }])).toHaveLength(0);
     });
 
     it('rejects more than 20 entries', async () => {
@@ -503,6 +505,7 @@ describe('TestRuns DTOs', () => {
       // Value: protects=entry tags capped at 50 and 100 chars each; fails_when=ArrayMaxSize or the each-Length bound is dropped; why_new=only empty/non-list tags were covered; seam=none; no_claim=controller wiring
       ['more than 50 tags', { ...entry, tags: Array.from({ length: 51 }, (_, i) => `t${i}`) }],
       ['an overlong tag', { ...entry, tags: ['x'.repeat(101)] }],
+      ['a blank tag', { ...entry, tags: ['  '] }],
     ])('rejects %s', async (_l, bad) => {
       const errors = await check([bad]);
       expect(errors.map((e) => e.property)).toContain('additionalSutMonitoring');

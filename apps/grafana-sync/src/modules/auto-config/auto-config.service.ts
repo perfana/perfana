@@ -74,15 +74,19 @@ export class AutoConfigService {
     const lastSyncTimestamp = new Date(Date.now() - 5 * 60 * 1000);
     const recentTestRuns = await this.testRunFinderService.findRecentTestRuns(lastSyncTimestamp);
 
+    // An untagged run still has work when an additional-monitoring entry carries its own tags.
+    const hasWork = (tr: TestRun) =>
+      (tr.tags || []).length > 0 || readAdditionalSutMonitoring(tr).some((e) => e.tags);
+
     recentTestRuns
-      .filter((tr) => !(tr.tags || []).length)
+      .filter((tr) => !hasWork(tr))
       .forEach((tr) =>
         this.logger.log(
           `No AutoConfig process for test run because there are no tags: ${tr.testRunId}`,
         ),
       );
 
-    const testRuns = recentTestRuns.filter((tr) => (tr.tags || []).length > 0);
+    const testRuns = recentTestRuns.filter(hasWork);
 
     if (testRuns.length === 0) {
       this.logger.log('No recent test runs with tags found. AutoConfig processing skipped.');

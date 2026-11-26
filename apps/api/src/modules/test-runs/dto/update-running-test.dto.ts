@@ -62,7 +62,16 @@ export class AdditionalSutMonitoringDto {
   @ArrayMaxSize(50, { message: 'Maximum 50 tags allowed' })
   @IsString({ each: true })
   @Length(1, 100, { each: true, message: 'Each tag must be between 1 and 100 characters' })
+  @Matches(/\S/, { each: true, message: 'A tag must not be blank' })
   tags?: string[];
+
+  // Deprecated (v0.2.97.102, perfana-cli v0.9.0). Accepted rather than stripped, so an older CLI
+  // keeps working and its entry is stored with the key; grafana-sync then skips that entry with a
+  // warning instead of giving it the run's own profiles.
+  @ApiPropertyOptional({ deprecated: true, description: 'Replaced by tags; an entry with profile and no tags is skipped' })
+  @IsOptional()
+  @IsString()
+  profile?: string;
 }
 
 export class DeepLinkDto {

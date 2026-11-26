@@ -73,23 +73,24 @@ export function readAdditionalSutMonitoring(
     }
     // The run's own pair is already monitored, and its dashboards would collide with these.
     if (sut === sutNameOf(run) && env === run.testEnvironment) continue;
-    // v0.2.97.102 took `profile`; it is no longer read, so say so instead of silently using the
-    // run's profiles. The API strips the key on new writes; this catches stored rows.
-    if (e.profile !== undefined) {
-      const warnKey = `${run.testRunId}\u0000${sut}\u0000${env}\u0000profile`;
-      if (!warnedInvalid.has(warnKey)) {
-        warnedInvalid.add(warnKey);
-        warn?.(
-          `Additional SUT monitoring for test run ${run.testRunId}: entry ${sut} / ${env} still ` +
-            `names a profile, which is no longer read; use tags to choose its profiles`,
-        );
-      }
-    }
     const tags = Array.isArray(e.tags)
       ? [...new Set(e.tags.filter((t): t is string => typeof t === 'string').map((t) => t.trim()))]
           .filter(Boolean)
           .sort()
       : [];
+    // v0.2.97.102 took `profile`. Without tags, falling back to the run's profiles would put
+    // dashboards and SLOs it never named on this system (and they stay), so skip it instead.
+    if (e.profile !== undefined && !tags.length) {
+      const warnKey = `${run.testRunId}\u0000${sut}\u0000${env}\u0000profile`;
+      if (!warnedInvalid.has(warnKey)) {
+        warnedInvalid.add(warnKey);
+        warn?.(
+          `Additional SUT monitoring for test run ${run.testRunId}: entry ${sut} / ${env} skipped, ` +
+            `it names a profile, which is no longer read; give it tags to choose its profiles`,
+        );
+      }
+      continue;
+    }
     // Two entries for one pair may carry different tags; both apply to the same dashboards.
     const key = `${sut}\u0000${env}\u0000${tags.join('\u0000')}`;
     if (seen.has(key)) continue;

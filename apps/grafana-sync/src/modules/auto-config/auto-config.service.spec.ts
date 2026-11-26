@@ -675,6 +675,32 @@ describe('AutoConfigService', () => {
       );
     });
 
+    // Value: protects=an untagged run whose entry carries tags is still processed for that entry; fails_when=loadAutoConfigContext filters runs on their own tags only; why_new=entry tags made untagged runs meaningful; seam=none; no_claim=live grafana-sync run
+    it('processes an untagged run for an entry that carries its own tags', async () => {
+      testRunFinderService.findRecentTestRuns.mockResolvedValue([
+        {
+          ...mockTestRun,
+          tags: [],
+          additionalSutMonitoring: [
+            { systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] },
+          ],
+        },
+      ]);
+      testRunFinderService.findProfiles.mockResolvedValue([mockProfile, k8sProfile]);
+      testRunFinderService.findProfileBenchmarks.mockResolvedValue([]);
+      groupingRuleProcessorService.findProfileGroupingRules.mockResolvedValue([]);
+      dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([
+        mockAutoConfigDashboard,
+        k8sDashboard,
+      ]);
+      await service.processAutoConfigDashboards();
+
+      const calls = dashboardConfiguratorService.processAutoConfigDashboard.mock.calls;
+      expect(calls).toHaveLength(1);
+      expect(calls[0]![0].systemUnderTest?.name).toBe('payment-db');
+      expect(calls[0]![1]).toBe(k8sDashboard);
+    });
+
     it("skips an entry whose tags match only another organization's profile", async () => {
       await runWith(
         [{ systemUnderTest: 'payment-db', testEnvironment: 'acc', tags: ['kafka'] }],

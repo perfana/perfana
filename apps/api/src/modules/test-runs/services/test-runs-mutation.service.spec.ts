@@ -369,6 +369,8 @@ describe('TestRunsMutationService', () => {
           { systemUnderTest: 'payment-db', testEnvironment: 'prod', tags: [] },
           { systemUnderTest: 'cache', testEnvironment: 'prod' },
           { systemUnderTest: 'queue', testEnvironment: 'acc', tags: ['kafka'] },
+          { systemUnderTest: 'legacy', testEnvironment: 'acc', profile: 'k8s' },
+          { systemUnderTest: 'both', testEnvironment: 'acc', profile: 'k8s', tags: ['pg'] },
         ],
       } as any;
       lookupService.findOrCreateSystemUnderTest.mockResolvedValue({ id: 'sys-123', name: 'PaymentService' });
@@ -384,6 +386,9 @@ describe('TestRunsMutationService', () => {
         { systemUnderTest: 'payment-db', testEnvironment: 'prod' },
         { systemUnderTest: 'cache', testEnvironment: 'prod' },
         { systemUnderTest: 'queue', testEnvironment: 'acc', tags: ['kafka'] },
+        // Kept only without tags, so grafana-sync skips the entry instead of widening it.
+        { systemUnderTest: 'legacy', testEnvironment: 'acc', profile: 'k8s' },
+        { systemUnderTest: 'both', testEnvironment: 'acc', tags: ['pg'] },
       ]);
     });
 

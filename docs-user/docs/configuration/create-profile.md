@@ -49,7 +49,8 @@ test:
 For each entry Perfana adds the profile's dashboards with their variables set to that system and environment, together with the profile's SLOs and series grouping rules. They are added to the run's own system and environment, not to a separate one: no system or environment is created for `payment-db`. They are labelled with the combination they monitor, for example *JVM Overview - payment-db acceptance*.
 
 - Without `tags`, the entry uses the same profiles as the run itself (the ones its tags match).
-- With `tags`, it uses the profiles those tags match instead of the run's, by the same rule as a run's tags: a profile sharing at least one tag, in the run's organization. To add the dashboards without the SLOs, give a profile holding only those dashboards its own tag and use that tag here.
+- With `tags`, it uses the profiles those tags match instead of the run's, by the same rule as a run's tags: a profile sharing at least one tag, in the run's organization. To add the dashboards without the SLOs, give a profile holding only those dashboards its own tag and use that tag here. A run with no tags of its own still gets the entries that carry tags.
+- An entry that still uses the older `profile` key (perfana-cli v0.9.0) and has no `tags` is skipped, with a warning in the grafana-sync log. Replace `profile` with the tag of that profile.
 - An entry is checked like the run itself: a dashboard whose data source has no value for that system or environment is skipped (see *Troubleshooting*).
 - Removing an entry, or the whole list, leaves the dashboards it added in place, and they keep being collected for every later run of this system and environment. Delete them under the system's dashboard settings when you no longer want them; a monitored environment that no longer exists lowers the run's data collection coverage.
 
