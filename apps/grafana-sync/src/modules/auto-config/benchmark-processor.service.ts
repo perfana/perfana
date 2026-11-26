@@ -9,6 +9,8 @@ import { TestRunFinderService } from './test-run-finder.service';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { AutoConfigUpdatesService } from './auto-config-updates.service';
 import { validateRegexPattern } from '@perfana/shared/utils';
+import type { AdditionalSutMonitoring } from '@perfana/shared/types';
+import { dashboardsForCombination } from './additional-monitoring';
 import {
   PERF_TEST_PROFILE_SOURCE,
   PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
@@ -38,8 +40,13 @@ export class BenchmarkProcessorService {
     testRun: TestRun,
     profileNames: string[],
     profileBenchmarks: ProfileBenchmark[],
+    /** An additional monitored combination (additional-monitoring.ts); omitted, the run's own. */
+    target?: AdditionalSutMonitoring,
   ): Promise<void> {
-    this.logger.log(`Processing profile benchmarks for test run: ${testRun.testRunId}`);
+    this.logger.log(
+      `Processing profile benchmarks for test run: ${testRun.testRunId}` +
+        (target ? ` (monitoring ${target.systemUnderTest} / ${target.testEnvironment})` : ''),
+    );
 
     // Filter profile benchmarks that match the test run's profiles
     const matchingBenchmarks = profileBenchmarks.filter((benchmark) =>
@@ -51,7 +58,7 @@ export class BenchmarkProcessorService {
     );
 
     for (const profileBenchmark of matchingBenchmarks) {
-      await this.processSingleBenchmark(testRun, profileBenchmark);
+      await this.processSingleBenchmark(testRun, profileBenchmark, target);
     }
 
     this.logger.log(`Completed processing profile benchmarks for test run: ${testRun.testRunId}`);
@@ -63,10 +70,22 @@ export class BenchmarkProcessorService {
   private async processSingleBenchmark(
     testRun: TestRun,
     profileBenchmark: ProfileBenchmark,
+    target?: AdditionalSutMonitoring,
   ): Promise<void> {
     try {
       // Match workload pattern against test run workload/test type
       if (!this.matchesWorkloadPattern(testRun, profileBenchmark)) {
+        return;
+      }
+
+      // Perf-test, Dynatrace host and Splunk dashboards are the run's own (written by the worker
+      // from its own collection), never a monitored combination's: the run's own pass covers them.
+      if (
+        target &&
+        [PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE, SPLUNK_PROFILE_SOURCE].includes(
+          profileBenchmark.source,
+        )
+      ) {
         return;
       }
 
@@ -102,7 +121,7 @@ export class BenchmarkProcessorService {
           return;
         }
       }
-      const applicationDashboards = isPerfTest
+      const found = isPerfTest
         ? await this.dashboardFinderService.findApplicationDashboardsByUidPattern(
             lookup,
             systemUnderTestName,
@@ -116,6 +135,11 @@ export class BenchmarkProcessorService {
             testRun.testEnvironment,
             testRun.organizationId,
           );
+      // A template's dashboards under this SUT/env include those of every monitored combination;
+      // each pass keeps its own, so a combination gets only its own profile's SLOs.
+      const applicationDashboards = isPerfTest
+        ? found
+        : dashboardsForCombination(found, testRun, target);
 
       this.logger.log(
         `Found ${applicationDashboards.length} application dashboards for ${isPerfTest ? 'uid pattern' : 'template uid'} ${lookup}`,

@@ -6,7 +6,8 @@ import {
   ConsolidatedResult,
   AdaptConfig,
   TestRunVariables,
-  DeepLinksCollection
+  DeepLinksCollection,
+  AdditionalSutMonitoring
 } from '../types';
 
 @Entity('test_runs')
@@ -54,6 +55,7 @@ export class TestRun {
     'duration',
     'plannedDuration',
     'variables',
+    'additionalSutMonitoring',
     'expires',
     'expired',
   ] as const;
@@ -144,6 +146,10 @@ export class TestRun {
 
   @Column('jsonb', { nullable: true })
   variables?: TestRunVariables;
+
+  /** Migration 1837. Read by grafana-sync's auto-config; see AdditionalSutMonitoring. */
+  @Column('jsonb', { name: 'additional_sut_monitoring', nullable: true })
+  additionalSutMonitoring?: AdditionalSutMonitoring[] | null;
 
   @Column('jsonb', { name: 'deep_links', nullable: true })
   deepLinks?: DeepLinksCollection;

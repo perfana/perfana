@@ -3,6 +3,8 @@ import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { TestRun, ProfileBenchmark, ProfileGrafanaDashboard } from '@perfana/shared/entities';
 import { matchProfilesForRun } from '@perfana/shared/utils/profile-match';
+import type { AdditionalSutMonitoring } from '@perfana/shared/types';
+import { asMonitoringRun, readAdditionalSutMonitoring } from './additional-monitoring';
 import { TestRunFinderService } from './test-run-finder.service';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { DashboardConfiguratorService } from './dashboard-configurator.service';
@@ -162,8 +164,88 @@ export class AutoConfigService {
           groupingRules,
         );
       }
+
+      for (const target of readAdditionalSutMonitoring(testRun)) {
+        await this.processAdditionalSutMonitoring(
+          testRun,
+          target,
+          target.profile ? this.namedProfile(testRun, target.profile, profiles) : profileNames,
+          autoConfigDashboards,
+          profileBenchmarks,
+          groupingRules,
+        );
+      }
     } catch (error) {
       this.logger.error(`Error processing test run: ${testRun.testRunId}`, error);
+    }
+  }
+
+  /**
+   * An entry's named profile, by the same organization rule as tag matching (fails closed on a
+   * missing organization); tags are not consulted, naming it is the opt-in.
+   */
+  private namedProfile(testRun: TestRun, name: string, profiles: any[]): string[] {
+    const found = profiles.some(
+      (p) =>
+        p.name === name && !!testRun.organizationId && p.organizationId === testRun.organizationId,
+    );
+    if (!found) {
+      this.logger.warn(
+        `Additional SUT monitoring for test run ${testRun.testRunId}: no profile '${name}' in its organization, entry skipped`,
+      );
+    }
+    return found ? [name] : [];
+  }
+
+  /**
+   * Dashboards, profile SLOs and grouping rules of `profileNames` for one extra system/environment
+   * combination, stored under the run's own system and environment (see additional-monitoring.ts).
+   * One failing entry does not stop the next.
+   */
+  private async processAdditionalSutMonitoring(
+    testRun: TestRun,
+    target: AdditionalSutMonitoring,
+    profileNames: string[],
+    autoConfigDashboards: ProfileGrafanaDashboard[],
+    profileBenchmarks: ProfileBenchmark[],
+    groupingRules: ProfileGroupingRuleRow[],
+  ): Promise<void> {
+    if (profileNames.length === 0) return;
+    this.logger.log(
+      `Additional SUT monitoring for test run ${testRun.testRunId}: ` +
+        `${target.systemUnderTest} / ${target.testEnvironment} with profiles ${profileNames.join(', ')}`,
+    );
+    try {
+      await this.processAutoConfigDashboardsForTestRun(
+        asMonitoringRun(testRun, target),
+        profileNames,
+        autoConfigDashboards,
+        testRun.variables || [],
+      );
+      // SLOs and rules belong to the run's own system/environment/workload, so they get the run
+      // itself, scoped to this combination's dashboards.
+      if (profileBenchmarks.length > 0) {
+        await this.benchmarkProcessorService.processProfileBenchmarks(
+          testRun,
+          profileNames,
+          profileBenchmarks,
+          target,
+        );
+      }
+      if (groupingRules.length > 0) {
+        await this.groupingRuleProcessorService.processProfileGroupingRules(
+          testRun,
+          profileNames,
+          groupingRules,
+          target,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error processing additional SUT monitoring ${target.systemUnderTest} / ${target.testEnvironment} ` +
+          `for test run: ${testRun.testRunId}`,
+        error,
+      );
     }
   }
 

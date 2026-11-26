@@ -396,6 +396,12 @@ export class TestRunsMutationService {
       tags: existingTestRun ? d.tags : d.tags || [],
       abort: d.abort || false,
       variables: d.variables || [],
+      // Omitted keeps the stored list on an update (TypeORM skips undefined), like tags.
+      additionalSutMonitoring: d.additionalSutMonitoring?.map(({ systemUnderTest, testEnvironment, profile }) => ({
+        systemUnderTest,
+        testEnvironment,
+        ...(profile ? { profile } : {}),
+      })),
       // Ownership tracking (use API key's organization)
       organizationId: existingTestRun?.organization_id || organizationId,
       createdBy: existingTestRun ? undefined : userId,

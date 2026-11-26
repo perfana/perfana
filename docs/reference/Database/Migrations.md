@@ -89,6 +89,7 @@ The project migrated from Supabase-managed PostgreSQL to self-hosted PostgreSQL 
 
 > [!warning] Destructive Commands
 > `npm run db:reset` drops and recreates the entire database. Never run in production.
+| `1837000000000-AdditionalSutMonitoring` | Additional SUT monitoring (v0.2.97.101). Adds `test_runs.additional_sut_monitoring` (jsonb, NULL = none): `[{systemUnderTest, testEnvironment, profile?}]` sent by perfana-cli from `perfana.yaml`, read by grafana-sync's auto-config, which adds those combinations' profile dashboards, SLOs and series grouping rules to the run's own system and environment (`apps/grafana-sync/src/modules/auto-config/additional-monitoring.ts`). Nullable, no default, so the ADD COLUMN is catalog-only; numbered above 1791, so no SAVEPOINT and a bounded lock wait. Run it before the API and grafana-sync: TypeORM selects every declared column, so both fail every test-run read with `column "additional_sut_monitoring" does not exist` until it lands (root `CLAUDE.md` #82). |
 
 ## Related
 
