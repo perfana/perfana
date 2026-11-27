@@ -47,6 +47,7 @@ import { Capability } from '../../constants/capabilities.constants';
 import { AuditService } from '../audit/audit.service';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 import { loadControlGroupForRun, loadControlGroupStatistics } from '../metrics/control-group-baseline';
+import { CONTROL_GROUP_BASELINE } from '@perfana/shared/types';
 import {
   CopyLokiStreamMappingsDto,
   CreateLokiConfigDto,
@@ -60,6 +61,15 @@ import {
 } from './dto/loki.dto';
 
 const LABELS_TTL_MS = 10 * 60 * 1000;
+/** What the Loki card's "vs baseline" figures compare against; see LokiService.resolveBaseline. */
+interface LokiBaseline {
+  kind: 'control-group' | 'run' | 'previous-runs' | 'none';
+  /** The runs whose snapshots patterns and applications are compared with. */
+  testRunIds: string[];
+  controlGroupId: string | null;
+  controlGroupRuns: number;
+}
+
 /** How many baseline runs' pattern snapshots decide whether a pattern is new. */
 const NEW_PATTERN_BASELINE_RUNS = 5;
 
@@ -555,7 +565,7 @@ export class LokiService {
    * snapshots the worker took at analysis. `configured` is false when the workload has no
    * enabled Loki panel, so the card hides.
    */
-  async runSummary(testRunId: string, userId: string, roles: string[]) {
+  async runSummary(testRunId: string, userId: string, roles: string[], baselineParam?: string) {
     const run = await withRequestEm(this.testRunRepo).findOne({ where: { testRunId } });
     if (!run) throw new NotFoundException('Test run not found');
     await this.loadSut(run.systemUnderTestId, userId, roles, 'read', 'Test run not found');
@@ -627,14 +637,15 @@ export class LokiService {
       };
     });
 
-    const insights = await this.runInsights(run.testRunId, run.systemUnderTestId, run.testEnvironment, run.workload, configById, start, end, mappings);
+    const baseline = await this.resolveBaseline(run, start, baselineParam);
+    const insights = await this.runInsights(run.testRunId, configById, start, end, mappings, baseline.testRunIds);
     // A level panel with nothing but `(none)` means the level label is on none of the lines. The
     // per-application snapshot grouped on the same label, so it holds no errors either: show no
     // error rate rather than a 0% that reads as "clean".
     const levelPanel = panels.find((p) => p.isLevelPanel && p.series.length > 0);
     const levelMissing = !!levelPanel && levelLabelMissing(levelPanel.series);
     // The level panel's ratio when there is one; otherwise the per-application snapshot's.
-    const errorRate = levelMissing ? null : (await this.errorRate(run.testRunId, panels)) ?? errorRateFromServices(insights.services);
+    const errorRate = levelMissing ? null : (await this.errorRate(run.testRunId, panels, baseline)) ?? errorRateFromServices(insights.services);
     const firstConfig = configById.get(queries[0]!.lokiConfigId);
 
     return {
@@ -646,6 +657,8 @@ export class LokiService {
         }
         : null,
       levelLabelMissing: levelMissing,
+      // What every "vs baseline" figure on the card was compared against, so the card can say so.
+      baseline: { kind: baseline.kind, testRunIds: baseline.testRunIds },
       sources: mappings.map((m) => ({
         id: m.id, level: m.level, selector: m.selector, labels: m.labels,
         exploreUrl: explore(configById.get(m.lokiConfigId), m.selector),
@@ -658,6 +671,51 @@ export class LokiService {
   }
 
   /**
+   * The runs every "vs baseline" figure on the card compares against.
+   *
+   * - `control-group` (the picker's default when the run has one): the run's ADAPT control group.
+   *   The error rate uses its pooled statistics; patterns and applications use its newest
+   *   NEW_PATTERN_BASELINE_RUNS runs, since a snapshot read per run.
+   * - a test run id: that one run, which must be a run of the same workload (the picker lists them).
+   * - absent: the control group, else the workload's NEW_PATTERN_BASELINE_RUNS previous completed runs.
+   */
+  private async resolveBaseline(run: TestRun, start: Date | null, param?: string): Promise<LokiBaseline> {
+    const q = withRequestQuery(this.dataSource);
+    if (param && param !== CONTROL_GROUP_BASELINE) {
+      const pinned = param === run.testRunId ? null : await withRequestEm(this.testRunRepo).findOne({
+        where: { testRunId: param, systemUnderTestId: run.systemUnderTestId, testEnvironment: run.testEnvironment, workload: run.workload },
+      });
+      // Same answer for a run that does not exist, one in another workload and one the caller cannot see.
+      if (!pinned) throw new NotFoundException('Baseline run not found in this workload');
+      return { kind: 'run', testRunIds: [pinned.testRunId], controlGroupId: null, controlGroupRuns: 0 };
+    }
+    let group: Awaited<ReturnType<typeof loadControlGroupForRun>> = null;
+    try {
+      group = await loadControlGroupForRun(q, run.testRunId);
+    } catch (err) {
+      this.logger.warn(`Loki baseline: control group for ${run.testRunId} unavailable: ${errMsg(err)}`);
+    }
+    if (group) {
+      return {
+        kind: 'control-group',
+        testRunIds: group.testRuns.filter((id) => id !== run.testRunId).slice(-NEW_PATTERN_BASELINE_RUNS),
+        controlGroupId: group.id,
+        controlGroupRuns: group.nTestRuns,
+      };
+    }
+    if (param === CONTROL_GROUP_BASELINE || !start) return { kind: 'none', testRunIds: [], controlGroupId: null, controlGroupRuns: 0 };
+    const prev = await q.query(
+      `SELECT test_run_id FROM test_runs
+        WHERE system_under_test_id = $1 AND test_environment = $2 AND workload = $3
+          AND completed = true AND test_run_id <> $4 AND start_time < $5
+        ORDER BY start_time DESC LIMIT $6`,
+      [run.systemUnderTestId, run.testEnvironment, run.workload, run.testRunId, start, NEW_PATTERN_BASELINE_RUNS],
+    ) as Array<{ test_run_id: string }>;
+    const ids = prev.map((r) => r.test_run_id);
+    return { kind: ids.length > 0 ? 'previous-runs' : 'none', testRunIds: ids, controlGroupId: null, controlGroupRuns: 0 };
+  }
+
+  /**
    * Error lines and their share of all lines, from the level panel (split by the connection's level
    * label, aggregation count), against the same ratio in the run's control group. A ratio, so it is
    * comparable across runs with different bucket sizes, which raw counts per bucket are not.
@@ -665,6 +723,7 @@ export class LokiService {
   private async errorRate(
     testRunId: string,
     panels: Array<{ isLevelPanel: boolean; panelId: number; applicationDashboardId: string | null; metricsSourceId: string | null; series: Array<{ name: string; total: number | null; mean: number | null }> }>,
+    source: LokiBaseline,
   ) {
     const levelPanel = panels.find((p) => p.isLevelPanel && p.series.length > 0);
     if (!levelPanel || levelLabelMissing(levelPanel.series)) return null;
@@ -673,23 +732,34 @@ export class LokiService {
     const pct = totals.total > 0 ? (totals.errors / totals.total) * 100 : 0;
     let baseline: { errorRatePct: number; runs: number } | null = null;
     try {
-      // The run is authorized by the caller; ds_control_groups has no RLS of its own.
+      // The run is authorized by the caller, and a pinned baseline run by resolveBaseline;
+      // ds_control_groups has no RLS of its own.
       const q = withRequestQuery(this.dataSource);
-      const group = await loadControlGroupForRun(q, testRunId);
-      if (group && levelPanel.applicationDashboardId) {
-        const rows = await loadControlGroupStatistics(q, group.id, {
-          applicationDashboardId: levelPanel.applicationDashboardId,
-          panelId: levelPanel.panelId,
-        });
-        let all = 0;
-        let err = 0;
-        for (const r of rows) {
-          if (r.mean === null || r.metric_name === null) continue;
-          all += r.mean;
-          if (isErrorLevel(r.metric_name)) err += r.mean;
-        }
-        if (all > 0) baseline = { errorRatePct: (err / all) * 100, runs: group.nTestRuns };
+      const dashboardId = levelPanel.applicationDashboardId;
+      let rows: Array<{ metric_name: string | null; mean: number | null }> = [];
+      let runs = 0;
+      if (dashboardId && source.kind === 'control-group' && source.controlGroupId) {
+        rows = await loadControlGroupStatistics(q, source.controlGroupId, { applicationDashboardId: dashboardId, panelId: levelPanel.panelId });
+        runs = source.controlGroupRuns;
+      } else if (dashboardId && source.testRunIds.length > 0) {
+        // A pinned run, or the previous runs: the same ratio over their own level panel statistics.
+        // A per-bucket mean summed per level, so a run with longer buckets does not weigh more.
+        const raw = await q.query(
+          `SELECT test_run_id, metric_name, mean FROM ds_metric_statistics
+            WHERE test_run_id = ANY($1::varchar[]) AND application_dashboard_id = $2 AND panel_id = $3`,
+          [source.testRunIds, dashboardId, levelPanel.panelId],
+        ) as Array<{ test_run_id: string; metric_name: string | null; mean: number | null }>;
+        rows = raw;
+        runs = new Set(raw.map((r) => r.test_run_id)).size;
       }
+      let all = 0;
+      let err = 0;
+      for (const r of rows) {
+        if (r.mean === null || r.metric_name === null) continue;
+        all += r.mean;
+        if (isErrorLevel(r.metric_name)) err += r.mean;
+      }
+      if (all > 0) baseline = { errorRatePct: (err / all) * 100, runs };
     } catch (err) {
       this.logger.warn(`Loki baseline error rate for ${testRunId} unavailable: ${errMsg(err)}`);
     }
@@ -703,13 +773,11 @@ export class LokiService {
    */
   private async runInsights(
     testRunId: string,
-    systemUnderTestId: string,
-    testEnvironment: string,
-    workload: string,
     configById: Map<string, LokiConfig>,
     start: Date | null,
     end: Date,
     mappings: LokiStreamMapping[],
+    baselineRuns: string[],
   ) {
     const q = withRequestQuery(this.dataSource);
     const present = await q.query(
@@ -739,25 +807,6 @@ export class LokiService {
           [testRunId],
         ) as ServiceRow[]
       : [];
-
-    // Baseline runs: the control group's, else the workload's previous completed runs.
-    let baselineRuns: string[] = [];
-    try {
-      const group = await loadControlGroupForRun(q, testRunId);
-      baselineRuns = (group?.testRuns ?? []).filter((id) => id !== testRunId).slice(-NEW_PATTERN_BASELINE_RUNS);
-    } catch {
-      baselineRuns = [];
-    }
-    if (baselineRuns.length === 0 && start) {
-      const prev = await q.query(
-        `SELECT test_run_id FROM test_runs
-          WHERE system_under_test_id = $1 AND test_environment = $2 AND workload = $3
-            AND completed = true AND test_run_id <> $4 AND start_time < $5
-          ORDER BY start_time DESC LIMIT $6`,
-        [systemUnderTestId, testEnvironment, workload, testRunId, start, NEW_PATTERN_BASELINE_RUNS],
-      ) as Array<{ test_run_id: string }>;
-      baselineRuns = prev.map((r) => r.test_run_id);
-    }
 
     // Known pattern keys per scope ('' = all streams). A scope with no baseline snapshot at all
     // cannot be judged: "new" is null for it, never claimed without evidence. Per-application scopes

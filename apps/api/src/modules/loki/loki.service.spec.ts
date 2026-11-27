@@ -234,7 +234,6 @@ describe('LokiService run insights per application', () => {
           { service: 'checkout', total: '3000', errors: '30', warns: '5', loki_config_id: CFG },
         ];
       }
-      if (sql.includes('control-group:for-run')) return [{ control_group_id: 'g', test_runs: ['base-1', 'base-2'], n_test_runs: 2, first_datetime: null, last_datetime: null }];
       if (sql.includes('SELECT DISTINCT')) return rows.baselinePatterns;
       if (sql.includes('FROM loki_run_services WHERE test_run_id = ANY')) return rows.baselineServices;
       return [];
@@ -243,7 +242,7 @@ describe('LokiService run insights per application', () => {
       newPatterns: number | null;
       patterns: Array<{ service: string | null; isNew: boolean | null }>;
       services: Array<{ service: string; errorRatePct: number; baseline: { errorRatePct: number; runs: number } | null; isNew: boolean | null; newPatterns: number | null }>;
-    }> }).runInsights('run-1', SUT, 'acc', 'load', new Map(), new Date(0), new Date(1000), []);
+    }> }).runInsights('run-1', new Map(), new Date(0), new Date(1000), [], ['base-1', 'base-2']);
   }
 
   it('gives each application its error rate, pooled baseline and new patterns, worst first', async () => {
@@ -271,5 +270,70 @@ describe('LokiService run insights per application', () => {
     expect(r.services.every((s) => s.isNew === null && s.newPatterns === null)).toBe(true);
     expect(r.patterns.find((p) => p.service === 'payments')!.isNew).toBeNull();
     expect(r.newPatterns).toBe(1);
+  });
+});
+
+describe('LokiService baseline resolution', () => {
+  // Value: protects=which runs every "vs baseline" figure on the Loki card compares against; fails_when=a pinned run outside the workload is accepted, or the default stops preferring the control group; why_new=resolveBaseline is new; seam=none; no_claim=the SQL itself (mocked query runner)
+  const RUN = { testRunId: 'run-9', systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load' };
+  type Resolved = { kind: string; testRunIds: string[]; controlGroupId: string | null; controlGroupRuns: number };
+  function resolve(param: string | undefined, opts: { group?: boolean; previous?: string[]; pinned?: boolean } = {}) {
+    const { service, dataSource, testRunRepo } = build();
+    dataSource.manager.query.mockImplementation((async (sql: string) => {
+      if (sql.includes('control-group:for-run')) {
+        return opts.group ? [{ control_group_id: 'g', test_runs: ['a', 'b', 'run-9', 'c', 'd', 'e', 'f'], n_test_runs: 7, first_datetime: null, last_datetime: null }] : [];
+      }
+      if (sql.includes('FROM test_runs')) return (opts.previous ?? []).map((test_run_id) => ({ test_run_id }));
+      return [];
+    }) as never);
+    testRunRepo.findOne.mockResolvedValue(opts.pinned ? { testRunId: 'run-5' } : null);
+    const call = (service as unknown as { resolveBaseline: (r: unknown, s: Date | null, p?: string) => Promise<Resolved> })
+      .resolveBaseline(RUN, new Date(1000), param);
+    return { call, testRunRepo };
+  }
+
+  it('defaults to the control group: pooled for the error rate, its newest 5 other runs for patterns', async () => {
+    const { call } = resolve(undefined, { group: true });
+    expect(await call).toEqual({ kind: 'control-group', testRunIds: ['b', 'c', 'd', 'e', 'f'], controlGroupId: 'g', controlGroupRuns: 7 });
+  });
+
+  it('falls back to the previous runs only when nothing was picked', async () => {
+    expect(await resolve(undefined, { previous: ['p1', 'p2'] }).call).toMatchObject({ kind: 'previous-runs', testRunIds: ['p1', 'p2'] });
+    expect(await resolve('control-group', { previous: ['p1'] }).call).toMatchObject({ kind: 'none', testRunIds: [] });
+  });
+
+  it('takes a pinned run only from the same workload', async () => {
+    const { call, testRunRepo } = resolve('run-5', { pinned: true, group: true });
+    expect(await call).toMatchObject({ kind: 'run', testRunIds: ['run-5'], controlGroupId: null });
+    expect(testRunRepo.findOne).toHaveBeenCalledWith({ where: { testRunId: 'run-5', systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load' } });
+  });
+
+  it('refuses a pinned run it cannot find in the workload, and the run itself', async () => {
+    await expect(resolve('elsewhere').call).rejects.toThrow('Baseline run not found in this workload');
+    await expect(resolve('run-9', { pinned: true }).call).rejects.toThrow('Baseline run not found in this workload');
+  });
+
+  it('compares the error rate with a pinned run\'s own level panel, pooled per level', async () => {
+    const { service, dataSource } = build();
+    const sqls: string[] = [];
+    dataSource.manager.query.mockImplementation((async (sql: string) => {
+      sqls.push(sql);
+      if (sql.includes('FROM ds_metric_statistics')) {
+        return [
+          { test_run_id: 'run-5', metric_name: 'error', mean: 2 },
+          { test_run_id: 'run-5', metric_name: 'info', mean: 98 },
+        ];
+      }
+      return [];
+    }) as never);
+    const panels = [{
+      isLevelPanel: true, panelId: 1, applicationDashboardId: 'dash', metricsSourceId: null,
+      series: [{ name: 'error', total: 10, mean: 1 }, { name: 'info', total: 990, mean: 99 }],
+    }];
+    const rate = await (service as unknown as { errorRate: (...a: unknown[]) => Promise<{ errorRatePct: number; baseline: { errorRatePct: number; runs: number } | null }> })
+      .errorRate('run-9', panels, { kind: 'run', testRunIds: ['run-5'], controlGroupId: null, controlGroupRuns: 0 });
+    expect(rate.errorRatePct).toBe(1);
+    expect(rate.baseline).toEqual({ errorRatePct: 2, runs: 1 });
+    expect(sqls.some((q) => q.includes('ds_control_group_statistics'))).toBe(false);
   });
 });

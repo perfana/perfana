@@ -144,8 +144,13 @@ export class LokiController {
 
   @Get('runs/:testRunId/summary')
   @ApiOperation({ summary: 'What the test run page Loki card shows: streams, panel totals, error rate vs baseline, top patterns and error lines' })
-  runSummary(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext) {
-    return this.loki.runSummary(testRunId, ctx.userId, ctx.roles);
+  @ApiQuery({
+    name: 'baseline', required: false,
+    description: "What to compare with: 'control-group', or a test run id of the same workload. Absent: the control group, else the 5 previous completed runs.",
+  })
+  runSummary(@Param('testRunId') testRunId: string, @UserCtx() ctx: UserContext, @Query('baseline') baseline?: string) {
+    if (baseline !== undefined && (baseline.length === 0 || baseline.length > 255)) throw new BadRequestException('baseline must be 1-255 characters');
+    return this.loki.runSummary(testRunId, ctx.userId, ctx.roles, baseline);
   }
 
   // --- panels ----------------------------------------------------------------
