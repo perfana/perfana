@@ -15,6 +15,8 @@ import {
   lokiLabelValues,
   lokiPanelPoints,
   lokiTestConnection,
+  mergeMappings,
+  patternLineFilter,
   detectLokiLevelSource,
   levelParserStage,
   LokiConnection,
@@ -46,7 +48,8 @@ import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { Capability } from '../../constants/capabilities.constants';
 import { AuditService } from '../audit/audit.service';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
-import { loadControlGroupForRun, loadControlGroupStatistics } from '../metrics/control-group-baseline';
+import { loadControlGroupForRun } from '../metrics/control-group-baseline';
+import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
 import { CONTROL_GROUP_BASELINE } from '@perfana/shared/types';
 import {
   CopyLokiStreamMappingsDto,
@@ -63,16 +66,25 @@ import {
 const LABELS_TTL_MS = 10 * 60 * 1000;
 /** Label lookups kept at most: the key carries caller-chosen labels and matchers. */
 const LABELS_CACHE_MAX = 500;
-/** Error lines over all lines from a level panel's mean per level; null with no lines. */
-function levelRatio(rows: Array<{ metric_name: string | null; mean: number | null }>): number | null {
+/** Error lines over all lines from a level panel's lines per level; null with no lines. */
+function levelRatio(rows: Array<{ metric_name: string | null; total: number | null }>): number | null {
   let all = 0;
   let err = 0;
   for (const r of rows) {
-    if (r.mean === null || r.metric_name === null) continue;
-    all += r.mean;
-    if (isErrorLevel(r.metric_name)) err += r.mean;
+    if (r.total === null || r.metric_name === null) continue;
+    all += r.total;
+    if (isErrorLevel(r.metric_name)) err += r.total;
   }
   return all > 0 ? err / all : null;
+}
+
+/** Per-connection `level_lines` of one application, added up; null when no row carries them. */
+export function mergeLevelLines(rows: Array<Record<string, number> | null> | null | undefined): Record<string, number> | null {
+  const present = (rows ?? []).filter((r): r is Record<string, number> => !!r && typeof r === 'object');
+  if (present.length === 0) return null;
+  const out: Record<string, number> = {};
+  for (const r of present) for (const [k, v] of Object.entries(r)) if (Number.isFinite(Number(v))) out[k] = (out[k] ?? 0) + Number(v);
+  return out;
 }
 
 /** What the Loki card's "vs baseline" figures compare against; see LokiService.resolveBaseline. */
@@ -80,8 +92,8 @@ interface LokiBaseline {
   kind: 'control-group' | 'run' | 'previous-runs' | 'none';
   /** The runs whose snapshots patterns and applications are compared with. */
   testRunIds: string[];
-  controlGroupId: string | null;
-  controlGroupRuns: number;
+  /** The runs the error rate is compared with: the whole control group, else `testRunIds`. */
+  errorRateRunIds: string[];
 }
 
 /** How many baseline runs' pattern snapshots decide whether a pattern is new. */
@@ -599,16 +611,9 @@ export class LokiService {
     const configIds = [...new Set(queries.map((q) => q.lokiConfigId))];
     const configs = await withRequestEm(this.configRepo).find({ where: configIds.map((id) => ({ id })), relations: { grafanaInstance: true } });
     const configById = new Map(configs.map((c) => [c.id, c]));
-    const q = withRequestQuery(this.dataSource);
 
     const dashboardIds = [...new Set(queries.map((x) => x.applicationDashboardId).filter((id): id is string => !!id))];
-    type StatRow = { application_dashboard_id: string; panel_id: number; metric_name: string; mean: number | null; max_value: number | null; count: number | null };
-    const stats: StatRow[] = dashboardIds.length === 0 ? [] : await q.query(
-      `SELECT application_dashboard_id, panel_id, metric_name, mean, max_value, count
-         FROM ds_metric_statistics
-        WHERE test_run_id = $1 AND application_dashboard_id = ANY($2::uuid[])`,
-      [run.testRunId, dashboardIds],
-    );
+    const stats = await this.fullRunSeries(run.testRunId, dashboardIds);
 
     const start = run.startTime ? new Date(run.startTime) : null;
     const end = run.endTime ? new Date(run.endTime) : new Date();
@@ -617,21 +622,9 @@ export class LokiService {
       if (!config || !g || !start) return null;
       return lokiExploreUrl(g.client_url, g.orgId, config.datasourceUid, expr, start, end);
     };
-    const bucketSeconds = 60;
-
     const panels = queries.map((query) => {
       const config = configById.get(query.lokiConfigId);
-      const selected = selectMappings(query.logql, mappings.filter((m) => m.lokiConfigId === query.lokiConfigId));
-      let link: string | null = null;
-      if (selected[0]) {
-        try {
-          link = explore(config, buildMetricExpr(selected[0], {
-            logql: query.logql, aggregation: query.aggregation, splitBy: query.splitBy, bucketSeconds, testRunId: run.testRunId,
-          }));
-        } catch {
-          link = null;
-        }
-      }
+      const link = this.panelExploreLink(query, config, mappings, run.testRunId, start, end);
       const additive = (() => { try { return parseAggregation(query.aggregation).combine === 'sum'; } catch { return false; } })();
       const series = stats
         .filter((st) => st.application_dashboard_id === query.applicationDashboardId && st.panel_id === query.panelId)
@@ -639,8 +632,7 @@ export class LokiService {
           name: st.metric_name,
           mean: st.mean,
           peak: st.max_value,
-          // A count/bytes/sum panel's mean per bucket times its buckets is the window's total.
-          total: additive && st.mean !== null && st.count !== null ? Math.round(st.mean * st.count) : null,
+          total: additive && st.total !== null ? Math.round(st.total) : null,
         }))
         .sort((a, b) => (b.total ?? b.mean ?? 0) - (a.total ?? a.mean ?? 0));
       return {
@@ -684,11 +676,69 @@ export class LokiService {
         id: m.id, level: m.level, selector: m.selector, labels: m.labels,
         exploreUrl: explore(configById.get(m.lokiConfigId), m.selector),
       })),
+      // Every stream of the first connection at once, when their selectors combine.
+      exploreUrl: (() => {
+        const merged = mergeMappings(mappings.filter((m) => m.lokiConfigId === firstConfig?.id));
+        return merged ? explore(firstConfig, buildLogExpr(merged)) : null;
+      })(),
       window: start ? { from: start.toISOString(), to: end.toISOString() } : null,
       errorRate,
       panels: panels.map(({ applicationDashboardId: _a, metricsSourceId: _m, ...p }) => p),
       ...insights,
     };
+  }
+
+  /**
+   * Each Loki panel's Explore link narrowed to one application (a value of the connection's service
+   * label, or `(none)` for the lines without it): what the card's panels link to on that
+   * application's tab. Asked for per tab, so the summary does not carry a link per application.
+   */
+  async runPanelLinks(testRunId: string, service: string, userId: string, roles: string[]) {
+    const run = await withRequestEm(this.testRunRepo).findOne({ where: { testRunId } });
+    if (!run) throw new NotFoundException('Test run not found');
+    await this.loadSut(run.systemUnderTestId, userId, roles, 'read', 'Test run not found');
+    const scope = { systemUnderTestId: run.systemUnderTestId, testEnvironment: run.testEnvironment, workload: run.workload };
+    const queries = (await withRequestEm(this.queryRepo).find({ where: scope, order: { panelId: 'ASC' } })).filter((q) => q.enabled);
+    if (queries.length === 0) return [];
+    const mappings = await this.mappingsInScope(scope.systemUnderTestId, scope.testEnvironment, scope.workload);
+    const configIds = [...new Set(queries.map((q) => q.lokiConfigId))];
+    const configs = await withRequestEm(this.configRepo).find({ where: configIds.map((id) => ({ id })), relations: { grafanaInstance: true } });
+    const configById = new Map(configs.map((c) => [c.id, c]));
+    const start = run.startTime ? new Date(run.startTime) : null;
+    const end = run.endTime ? new Date(run.endTime) : new Date();
+    return queries.map((query) => ({
+      panelId: query.panelId,
+      title: query.panelTitle,
+      link: this.panelExploreLink(query, configById.get(query.lokiConfigId), mappings, run.testRunId, start, end, service),
+    }));
+  }
+
+  /**
+   * A panel's query in Explore over the run. Explore takes one selector: all the panel's streams
+   * when they combine, else the first. With `service`, only that application: its own stream when
+   * it has one, else its lines by a label filter, appended after the panel's pipeline so it also
+   * reads a label a parser stage extracts.
+   */
+  private panelExploreLink(
+    query: LokiQuery, config: LokiConfig | undefined, mappings: LokiStreamMapping[],
+    testRunId: string, start: Date | null, end: Date, service?: string,
+  ): string | null {
+    const g = config?.grafanaInstance;
+    if (!config || !g || !start) return null;
+    const selected = selectMappings(query.logql, mappings.filter((m) => m.lokiConfigId === query.lokiConfigId));
+    const label = config.serviceLabel || 'service_name';
+    const own = service && service !== NO_LABEL_VALUE
+      ? selected.find((m) => m.matchers.some((x) => x.label === label && x.op === '=' && x.value === service))
+      : undefined;
+    const mapping = own ?? mergeMappings(selected) ?? selected[0];
+    if (!mapping) return null;
+    try {
+      const logql = service !== undefined && !own ? `${query.logql} ${labelFilter(label, service === NO_LABEL_VALUE ? '' : service)}` : query.logql;
+      const expr = buildMetricExpr(mapping, { logql, aggregation: query.aggregation, splitBy: query.splitBy, bucketSeconds: 60, testRunId });
+      return lokiExploreUrl(g.client_url, g.orgId, config.datasourceUid, expr, start, end);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -708,7 +758,7 @@ export class LokiService {
       });
       // Same answer for a run that does not exist, one in another workload and one the caller cannot see.
       if (!pinned) throw new NotFoundException('Baseline run not found in this workload');
-      return { kind: 'run', testRunIds: [pinned.testRunId], controlGroupId: null, controlGroupRuns: 0 };
+      return { kind: 'run', testRunIds: [pinned.testRunId], errorRateRunIds: [pinned.testRunId] };
     }
     let group: Awaited<ReturnType<typeof loadControlGroupForRun>> = null;
     try {
@@ -720,11 +770,10 @@ export class LokiService {
       return {
         kind: 'control-group',
         testRunIds: group.testRuns.filter((id) => id !== run.testRunId).slice(-NEW_PATTERN_BASELINE_RUNS),
-        controlGroupId: group.id,
-        controlGroupRuns: group.nTestRuns,
+        errorRateRunIds: group.testRuns.filter((id) => id !== run.testRunId),
       };
     }
-    if (param === CONTROL_GROUP_BASELINE || !start) return { kind: 'none', testRunIds: [], controlGroupId: null, controlGroupRuns: 0 };
+    if (param === CONTROL_GROUP_BASELINE || !start) return { kind: 'none', testRunIds: [], errorRateRunIds: [] };
     const prev = await q.query(
       `SELECT test_run_id FROM test_runs
         WHERE system_under_test_id = $1 AND test_environment = $2 AND workload = $3
@@ -733,7 +782,7 @@ export class LokiService {
       [run.systemUnderTestId, run.testEnvironment, run.workload, run.testRunId, start, NEW_PATTERN_BASELINE_RUNS],
     ) as Array<{ test_run_id: string }>;
     const ids = prev.map((r) => r.test_run_id);
-    return { kind: ids.length > 0 ? 'previous-runs' : 'none', testRunIds: ids, controlGroupId: null, controlGroupRuns: 0 };
+    return { kind: ids.length > 0 ? 'previous-runs' : 'none', testRunIds: ids, errorRateRunIds: ids };
   }
 
   /**
@@ -753,38 +802,52 @@ export class LokiService {
     const pct = totals.total > 0 ? (totals.errors / totals.total) * 100 : 0;
     let baseline: { errorRatePct: number; runs: number } | null = null;
     try {
-      // The run is authorized by the caller, and a pinned baseline run by resolveBaseline;
-      // ds_control_groups has no RLS of its own.
-      const q = withRequestQuery(this.dataSource);
+      // The run is authorized by the caller, and a pinned baseline run by resolveBaseline. Each
+      // baseline run's own error ratio over its whole run, then averaged over the runs: pooling the
+      // lines would let a longer or busier run weigh more.
       const dashboardId = levelPanel.applicationDashboardId;
-      let rows: Array<{ metric_name: string | null; mean: number | null }> = [];
-      let runs = 0;
-      if (dashboardId && source.kind === 'control-group' && source.controlGroupId) {
-        rows = await loadControlGroupStatistics(q, source.controlGroupId, { applicationDashboardId: dashboardId, panelId: levelPanel.panelId });
-        runs = source.controlGroupRuns;
-      } else if (dashboardId && source.testRunIds.length > 0) {
-        // A pinned run, or the previous runs: each run's own error ratio from its level panel, then
-        // averaged over the runs. Pooling the per-bucket means instead would weigh a run with longer
-        // buckets (larger means) more.
-        const raw = await q.query(
-          `SELECT test_run_id, metric_name, mean FROM ds_metric_statistics
-            WHERE test_run_id = ANY($1::varchar[]) AND application_dashboard_id = $2 AND panel_id = $3`,
-          [source.testRunIds, dashboardId, levelPanel.panelId],
-        ) as Array<{ test_run_id: string; metric_name: string | null; mean: number | null }>;
+      if (dashboardId && source.errorRateRunIds.length > 0) {
+        // One bounded read per run: one span over a control group built across weeks would lock
+        // and scan every chunk between its oldest and newest run.
+        const raw: Awaited<ReturnType<LokiService['fullRunSeries']>> = [];
+        for (const id of source.errorRateRunIds) raw.push(...await this.fullRunSeries(id, [dashboardId], levelPanel.panelId));
         const ratios = [...new Set(raw.map((r) => r.test_run_id))]
           .map((id) => levelRatio(raw.filter((r) => r.test_run_id === id)))
           .filter((x): x is number => x !== null);
         if (ratios.length > 0) baseline = { errorRatePct: (ratios.reduce((a, b) => a + b, 0) / ratios.length) * 100, runs: ratios.length };
       }
-      // The control group's statistics are already pooled into one mean per level.
-      if (!baseline && rows.length > 0) {
-        const ratio = levelRatio(rows);
-        if (ratio !== null) baseline = { errorRatePct: ratio * 100, runs };
-      }
     } catch (err) {
       this.logger.warn(`Loki baseline error rate for ${testRunId} unavailable: ${errMsg(err)}`);
     }
     return { totalLines: totals.total, errorLines: totals.errors, errorRatePct: pct, baseline };
+  }
+
+  /**
+   * One run's Loki panel series over its WHOLE window, from `ds_metrics`. The card shows
+   * the full test run everywhere (its snapshot, its window and its Explore links are all full-run),
+   * so it does not read `ds_metric_statistics`, which leaves the ramp-up and ramp-down out.
+   * Bounded by the run's own window, because a `ds_metrics` read without a time bound locks every chunk.
+   */
+  private async fullRunSeries(runId: string, dashboardIds: string[], panelId?: number) {
+    if (dashboardIds.length === 0) return [];
+    const q = withRequestQuery(this.dataSource);
+    const [times] = await q.query(
+      `SELECT start_time, end_time FROM test_runs WHERE test_run_id = $1`, [runId],
+    ) as Array<{ start_time: Date | null; end_time: Date | null }>;
+    // No start, no window: rather nothing than a read that locks every chunk of the hypertable.
+    if (!times?.start_time) return [];
+    const panelClause = panelId === undefined ? '' : 'AND panel_id = $3';
+    const bounds = timeBoundsSql(analysisBoundsFromRow(times, false), 'time', panelId === undefined ? 3 : 4);
+    const rows = await q.query(
+      `SELECT test_run_id, application_dashboard_id, panel_id, metric_name,
+              AVG(value) AS mean, MAX(value) AS max_value, SUM(value) AS total
+         FROM ds_metrics
+        WHERE test_run_id = $1 AND application_dashboard_id = ANY($2::uuid[]) ${panelClause} ${bounds.clause}
+        GROUP BY test_run_id, application_dashboard_id, panel_id, metric_name`,
+      [runId, dashboardIds, ...(panelId === undefined ? [] : [panelId]), ...bounds.params],
+    ) as Array<{ test_run_id: string; application_dashboard_id: string; panel_id: number; metric_name: string; mean: number | string | null; max_value: number | string | null; total: number | string | null }>;
+    const num = (v: number | string | null) => (v === null ? null : Number(v));
+    return rows.map((r) => ({ ...r, panel_id: Number(r.panel_id), mean: num(r.mean), max_value: num(r.max_value), total: num(r.total) }));
   }
 
   /**
@@ -819,11 +882,13 @@ export class LokiService {
       `SELECT loki_config_id, "time", level, line, labels, ${serviceCol} FROM loki_run_samples WHERE test_run_id = $1 ORDER BY "time" DESC LIMIT 1000`,
       [testRunId],
     ) as Array<{ loki_config_id: string | null; time: Date; level: string | null; line: string; labels: Record<string, string>; service: string | null }>;
-    type ServiceRow = { service: string; total: string; errors: string; warns: string; loki_config_id: string | null };
+    type ServiceRow = { service: string; total: string; errors: string; warns: string; loki_config_id: string | null; levels: Array<Record<string, number> | null> | null };
     const serviceRows = perService
       ? await q.query(
+          // level_lines through to_jsonb: the column arrives with migration 1841, and a named
+          // column would fail every read on a database that has not run it yet.
           `SELECT service, SUM(total_lines)::bigint AS total, SUM(error_lines)::bigint AS errors, SUM(warn_lines)::bigint AS warns,
-                  MIN(loki_config_id::text) AS loki_config_id
+                  MIN(loki_config_id::text) AS loki_config_id, jsonb_agg(to_jsonb(loki_run_services) -> 'level_lines') AS levels
              FROM loki_run_services WHERE test_run_id = $1 GROUP BY service`,
           [testRunId],
         ) as ServiceRow[]
@@ -874,10 +939,19 @@ export class LokiService {
     const explore = (configId: string | null, service: string | null, pipeline: string): string | null => {
       const config = configId ? configById.get(configId) : undefined;
       const g = config?.grafanaInstance;
-      const mapping = mappings.find((m) => m.lokiConfigId === configId);
-      if (!config || !g || !start || !mapping) return null;
+      const inConfig = mappings.filter((m) => m.lokiConfigId === configId);
+      if (!config || !g || !start || inConfig.length === 0) return null;
       try {
-        const only = service ? `${labelFilter(serviceLabelOf(configId), service)} ` : '';
+        const label = serviceLabelOf(configId);
+        // The stream that IS this application when there is one; else every stream (combined when
+        // possible) narrowed by a label filter. Narrowing the first stream alone found nothing
+        // for an application on another stream.
+        const own = service && service !== NO_LABEL_VALUE
+          ? inConfig.find((m) => m.matchers.some((x) => x.label === label && x.op === '=' && x.value === service))
+          : undefined;
+        const mapping = own ?? mergeMappings(inConfig) ?? inConfig[0]!;
+        // `(none)`: the lines without the label, which `label=""` selects.
+        const only = service && !own ? `${labelFilter(label, service === NO_LABEL_VALUE ? '' : service)} ` : '';
         return lokiExploreUrl(g.client_url, g.orgId, config.datasourceUid, buildLogExpr(mapping, `${only}${pipeline}`.trim()), start, end);
       } catch {
         return null;
@@ -893,8 +967,8 @@ export class LokiService {
       source: r.source,
       service: r.service ?? null,
       isNew: isNewIn(r.service ?? '', r.pattern_key),
-      // `|>` is Loki's pattern match filter (Loki 3.1+); on older Loki Explore shows the parse error.
-      exploreUrl: explore(r.loki_config_id, r.service ?? null, `|> ${JSON.stringify(r.pattern)}`),
+      // `|>` (Loki 3.1+) for a patterns-API pattern, a regex for a sampled one: see patternLineFilter.
+      exploreUrl: explore(r.loki_config_id, r.service ?? null, patternLineFilter(r.pattern, r.source)),
     }));
     const overall = patterns.filter((p) => p.service === null);
     const newOf = (scope: string | null) => {
@@ -912,12 +986,14 @@ export class LokiService {
           totalLines: total,
           errorLines: errors,
           warnLines: Number(r.warns),
+          /** Lines per level, summed over the connections; null when the snapshot predates migration 1841. */
+          levels: mergeLevelLines(r.levels),
           errorRatePct: total > 0 ? (errors / total) * 100 : 0,
           baseline: b && b.total > 0 ? { errorRatePct: (b.errors / b.total) * 100, runs: b.runs.size } : null,
           /** Absent from every baseline run's snapshot; null when the baseline has no per-application snapshot. */
           isNew: baselineHasServices ? !b : null,
           newPatterns: newOf(r.service),
-          exploreUrl: explore(r.loki_config_id, r.service === '(none)' ? null : r.service, ''),
+          exploreUrl: explore(r.loki_config_id, r.service, ''),
         };
       })
       .sort((a, b) => b.errorLines - a.errorLines || b.totalLines - a.totalLines || a.service.localeCompare(b.service));
