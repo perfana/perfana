@@ -87,6 +87,10 @@ type Configured = Extract<LokiRunSummary, { configured: true }>;
 export interface ScopeView {
   app: string | null;
   rate: LokiErrorRate | null;
+  /** Lines in scope, also when there is no error rate (no level panel, or no level on the lines). */
+  totalLines: number | null;
+  /** The level label is on none of the run's lines, so error counts mean nothing. */
+  levelMissing: boolean;
   patterns: LokiRunPattern[];
   newPatterns: number | null;
   patternsSource: string | null;
@@ -102,10 +106,14 @@ export interface ScopeView {
  */
 export function scopeOf(summary: Configured, app: string | null, serviceLabel: string): ScopeView {
   const svcOf = (x: { service?: string | null }) => x.service ?? null;
+  const levelMissing = !!summary.levelLabelMissing;
   if (app === null) {
+    const services = summary.services ?? [];
     return {
       app,
       rate: summary.errorRate,
+      totalLines: summary.errorRate?.totalLines ?? (services.length > 0 ? services.reduce((n, x) => n + x.totalLines, 0) : null),
+      levelMissing,
       patterns: summary.patterns.filter((p) => svcOf(p) === null),
       newPatterns: summary.newPatterns,
       patternsSource: summary.patternsSource,
@@ -118,7 +126,10 @@ export function scopeOf(summary: Configured, app: string | null, serviceLabel: s
   const own = summary.samples.filter((x) => svcOf(x) === app);
   return {
     app,
-    rate: svc ? { totalLines: svc.totalLines, errorLines: svc.errorLines, errorRatePct: svc.errorRatePct, baseline: svc.baseline } : null,
+    // With no level on the lines the snapshot's error counts are all 0: show the lines, not a 0% rate.
+    rate: svc && !levelMissing ? { totalLines: svc.totalLines, errorLines: svc.errorLines, errorRatePct: svc.errorRatePct, baseline: svc.baseline } : null,
+    totalLines: svc?.totalLines ?? null,
+    levelMissing,
     patterns,
     newPatterns: svc?.newPatterns ?? null,
     patternsSource: patterns[0]?.source ?? summary.patternsSource,
@@ -492,7 +503,7 @@ function KpiStrip({ scope, trend }: { scope: ScopeView; trend: ReturnType<typeof
         p: 2, border: 1, borderColor: 'divider', borderRadius: 2,
       }}
     >
-      <KPIDisplay value={rate ? fmt(rate.totalLines) : '–'} label="Log lines" color="neutral" />
+      <KPIDisplay value={rate ? fmt(rate.totalLines) : scope.totalLines !== null ? fmt(scope.totalLines) : '–'} label="Log lines" color="neutral" />
       <KPIDisplay value={rate ? fmt(rate.errorLines) : fmt(errorPatterns.reduce((n, p) => n + p.count, 0) || null)} label="Error lines" color={(rate?.errorLines ?? 0) > 0 ? 'error' : 'neutral'} />
       <Box>
         <KPIDisplay
@@ -502,7 +513,9 @@ function KpiStrip({ scope, trend }: { scope: ScopeView; trend: ReturnType<typeof
         />
         {!rate && (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
-            {scope.app ? 'No line counts for this application in the snapshot.' : 'Add the \u201cLog lines by level\u201d starter panel to get the error rate.'}
+            {scope.levelMissing
+              ? 'No log level on these lines (see above).'
+              : scope.app ? 'No line counts for this application in the snapshot.' : 'Add the \u201cLog lines by level\u201d starter panel to get the error rate.'}
           </Typography>
         )}
         {rate?.baseline && (

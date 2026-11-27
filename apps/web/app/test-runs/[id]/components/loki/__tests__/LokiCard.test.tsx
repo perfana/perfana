@@ -167,3 +167,10 @@ it('flags the missing level label on the collapsed card', async () => {
   render(<LokiCard testRun={testRun} expanded={false} onExpand={() => {}} />);
   expect(await screen.findByText('No log level on these lines')).toBeInTheDocument();
 });
+
+it('counts lines but no error rate in every scope when the level label is missing', () => {
+  if (!configured.configured) throw new Error('fixture');
+  const missing = { ...configured, errorRate: null, levelLabelMissing: true };
+  expect(scopeOf(missing, null, 'service_name')).toMatchObject({ rate: null, totalLines: 6000 + (configured.services ?? [])[1]!.totalLines, levelMissing: true });
+  expect(scopeOf(missing, 'checkout', 'service_name')).toMatchObject({ rate: null, totalLines: 6000, levelMissing: true });
+});
