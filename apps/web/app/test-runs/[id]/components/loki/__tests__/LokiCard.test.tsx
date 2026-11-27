@@ -8,6 +8,7 @@ jest.mock('next/navigation', () => ({
 jest.mock('@/lib/loki', () => ({
   ...jest.requireActual('@/lib/loki'),
   fetchLokiRunSummary: jest.fn(),
+  fetchLokiPanelLinks: jest.fn(async () => []),
 }));
 
 jest.mock('@/lib/api', () => ({
@@ -21,8 +22,8 @@ jest.mock('@/lib/control-group-baseline', () => ({
   fetchControlGroup: jest.fn(async () => ({ control_group_id: 'g', test_runs: ['run-a', 'run-b'], n_test_runs: 2, first_datetime: null, last_datetime: null })),
 }));
 
-import { fetchLokiRunSummary, LokiRunSummary } from '@/lib/loki';
-import LokiCard, { errorRateTrend, formatPct, isErrorName, scopeOf } from '../LokiCard';
+import { fetchLokiPanelLinks, fetchLokiRunSummary, LokiRunSummary } from '@/lib/loki';
+import LokiCard, { appLevelSeries, errorRateTrend, formatPct, isErrorName, scopeOf } from '../LokiCard';
 
 const mockSummary = fetchLokiRunSummary as jest.MockedFunction<typeof fetchLokiRunSummary>;
 const testRun = { test_run_id: 'run-1' };
@@ -137,8 +138,10 @@ it('narrows patterns and lines to the selected application, and clears back to a
   expect(screen.getByText(/card declined <_>/)).toBeInTheDocument();
   expect(screen.queryByText(/db timeout after <_>/)).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: /card declined 4242/ })).toBeInTheDocument();
-  // The level panel is not split by service_name, so it keeps every series.
-  expect(screen.getByText('Panels not split by service_name show all applications.')).toBeInTheDocument();
+  // The level panel is not split by service_name: it reads payments' own levels from the snapshot.
+  expect(screen.getByText("payments only, from the run's log snapshot")).toBeInTheDocument();
+  expect(screen.getByText('other levels')).toBeInTheDocument();
+  expect(screen.queryByText('Panels not split by service_name show all applications.')).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('tab', { name: /All applications/ }));
   expect(screen.getByText(/db timeout after <_>/)).toBeInTheDocument();
@@ -221,4 +224,52 @@ describe('baseline picker', () => {
     render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
     expect(await screen.findByText('No control group: compared with the 2 runs before this one')).toHaveAttribute('title', 'Compared with: p1, p2');
   });
+});
+
+describe('appLevelSeries', () => {
+  // Value: protects=an application tab shows that application's levels, not every application's; fails_when=the level panel goes back to the whole panel's series; why_new=level panel on an app tab; seam=none; no_claim=rendering
+  it("splits the application's lines into error, warn and the rest", () => {
+    const svc = { service: 'be', totalLines: 100, errorLines: 3, warnLines: 0, errorRatePct: 3, baseline: null, isNew: null, newPatterns: null, exploreUrl: null };
+    expect(appLevelSeries(svc)).toEqual([
+      { name: 'error', total: 3, mean: null, peak: null },
+      { name: 'other levels', total: 97, mean: null, peak: null },
+    ]);
+    expect(appLevelSeries(undefined)).toBeNull();
+    // A snapshot with per-level counts names every level, busiest first.
+    expect(appLevelSeries({ ...svc, levels: { warn: 0, info: 97, error: 3 } })!.map((r) => [r.name, r.total])).toEqual([['info', 97], ['error', 3]]);
+  });
+});
+
+describe('panel Explore links on an application tab', () => {
+  // Value: protects=on an app tab a panel links to that app's query (fetched per tab), none while loading, back to the run link on All; header prefers the all-streams link; fails_when=the tab keeps the all-apps link or shows it while loading; why_new=useAppPanelLinks untested; seam=none; no_claim=the API
+  it('swaps the panel link for the application link once it loads', async () => {
+    let resolve!: (rows: Array<{ panelId: number; title: string; link: string | null }>) => void;
+    (fetchLokiPanelLinks as jest.Mock).mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+    mockSummary.mockResolvedValue({ ...configured, exploreUrl: 'https://grafana/explore?all=1' });
+    render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+    const panelLink = () => screen.queryByRole('link', { name: 'Open Log lines by level in Grafana Explore' });
+    await waitFor(() => expect(panelLink()).toHaveAttribute('href', 'https://grafana/explore?panel=1'));
+    expect(screen.getByRole('link', { name: /Open in Grafana Explore/ })).toHaveAttribute('href', 'https://grafana/explore?all=1');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'payments' }));
+    expect(fetchLokiPanelLinks).toHaveBeenLastCalledWith('run-1', 'payments');
+    expect(panelLink()).not.toBeInTheDocument();
+    resolve([{ panelId: 1, title: 'Log lines by level', link: 'https://grafana/explore?panel=1&svc=payments' }]);
+    await waitFor(() => expect(panelLink()).toHaveAttribute('href', 'https://grafana/explore?panel=1&svc=payments'));
+
+    fireEvent.click(screen.getByRole('tab', { name: /All applications/ }));
+    expect(panelLink()).toHaveAttribute('href', 'https://grafana/explore?panel=1');
+  });
+});
+
+it('says an application tab has no patterns, rather than that the run has no snapshot', async () => {
+  // Value: protects=the KPI caption on an app tab with no patterns of its own reads "No patterns for this application"; fails_when=it falls back to the run-wide "No pattern snapshot for this run"; why_new=caption branch untested; seam=none; no_claim=wording elsewhere
+  mockSummary.mockResolvedValue({
+    ...configured,
+    services: configured.services.map((s) => (s.service === 'checkout' ? { ...s, newPatterns: null } : s)),
+  });
+  render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+  fireEvent.click(await screen.findByRole('tab', { name: 'checkout' }));
+  expect(screen.getByText('No patterns for this application')).toBeInTheDocument();
+  expect(screen.queryByText('No pattern snapshot for this run')).not.toBeInTheDocument();
 });

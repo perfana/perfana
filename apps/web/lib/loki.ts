@@ -279,6 +279,8 @@ export interface LokiRunService {
   isNew: boolean | null;
   newPatterns: number | null;
   exploreUrl: string | null;
+  /** Lines per level; null when the run's snapshot predates per-level counts. */
+  levels?: Record<string, number> | null;
 }
 
 /** What the API calls the lines that carry no service label. */
@@ -299,6 +301,8 @@ export type LokiRunSummary =
       /** True when the level panel holds nothing but `(none)`: the level label is on none of the run's lines. */
       levelLabelMissing?: boolean;
       sources: Array<Pick<LokiStreamMapping, 'id' | 'level' | 'selector' | 'labels'> & { exploreUrl: string | null }>;
+      /** Every stream of the run's connection in one Explore query; null when their selectors cannot combine. */
+      exploreUrl?: string | null;
       window: { from: string; to: string } | null;
       errorRate: LokiErrorRate | null;
       panels: LokiRunPanel[];
@@ -324,6 +328,13 @@ export interface LokiRunBaseline {
 }
 
 /** `baseline`: `CONTROL_GROUP_BASELINE` or a test run id of the same workload; omitted, the API's default. */
+/** Each panel's Explore link narrowed to one application, for the card's application tab. */
+export const fetchLokiPanelLinks = (testRunId: string, service: string) =>
+  call<Array<{ panelId: number; title: string; link: string | null }>>(
+    `/loki/runs/${encodeURIComponent(testRunId)}/panel-links?service=${encodeURIComponent(service)}`,
+    'Failed to load the Loki panel links',
+  );
+
 export const fetchLokiRunSummary = (testRunId: string, baseline?: string | null) =>
   call<LokiRunSummary>(
     `/loki/runs/${encodeURIComponent(testRunId)}/summary${baseline ? `?baseline=${encodeURIComponent(baseline)}` : ''}`,
