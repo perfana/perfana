@@ -15,8 +15,13 @@ import {
 } from '@mui/material';
 import { ExpandLess, ExpandMore, MoreVert, OpenInNew } from '@mui/icons-material';
 import { useEffect } from 'react';
+import { authenticatedFetch } from '@/lib/api';
+import { fetchControlGroup, type ControlGroup } from '@/lib/control-group-baseline';
+import type { RelatedTestRun } from '../compare/types';
+import { controlGroupOption } from '../compare/utils/compare-utils';
+import { BaselineTestRunSelect } from '../shared/BaselineTestRunSelect';
 import {
-  fetchLokiRunSummary, LokiErrorRate, LokiRunPanel, LokiRunPattern, LokiRunSample, LokiRunService, LokiRunSummary, NO_SERVICE,
+  fetchLokiRunSummary, LokiErrorRate, LokiRunBaseline, LokiRunPanel, LokiRunPattern, LokiRunSample, LokiRunService, LokiRunSummary, NO_SERVICE,
 } from '@/lib/loki';
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import { buildSystemConfigUrl } from '@/lib/system-config-url';
@@ -160,14 +165,28 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
     return true;
   });
 
+  // null: the API's default (the control group, else the previous runs). Otherwise what was picked.
+  const [baselinePick, setBaselinePick] = useState<string | null>(null);
+  const [baselineError, setBaselineError] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
+  const baselineOptions = useBaselineOptions(testRun, expanded);
+
   useEffect(() => {
     let cancelled = false;
-    fetchLokiRunSummary(testRun.test_run_id)
-      .then((s) => { if (!cancelled) setSummary(s); })
-      // An API without the route (404) or a run outside the caller's scope reads as "no Loki".
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load'); });
+    setReloading(true);
+    fetchLokiRunSummary(testRun.test_run_id, baselinePick)
+      .then((s) => { if (!cancelled) { setSummary(s); setBaselineError(null); } })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Failed to load';
+        // A picked baseline that fails keeps the card on what it showed; the first load failing
+        // (an API without the route, or a run outside the caller's scope) reads as "no Loki".
+        if (baselinePick !== null) setBaselineError(message);
+        else setError(message);
+      })
+      .finally(() => { if (!cancelled) setReloading(false); });
     return () => { cancelled = true; };
-  }, [testRun.test_run_id]);
+  }, [testRun.test_run_id, baselinePick]);
 
   if (error || (summary && !summary.configured)) return null;
 
@@ -297,6 +316,14 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                 </Box>
 
                 {configured.levelLabelMissing && <LevelMissingAlert connection={configured.connection} />}
+
+                <BaselinePicker
+                  summary={configured}
+                  options={baselineOptions}
+                  onPick={setBaselinePick}
+                  reloading={reloading}
+                  error={baselineError}
+                />
 
                 {services.length > 0 && (
                   <ApplicationTabs services={services} serviceLabel={serviceLabel} selected={scope?.app ?? null} onSelect={setApp} />
@@ -832,6 +859,78 @@ function PanelSummary({ panel, commentCounts, app, serviceLabel }: {
  * run's lines, so no error rate can be told apart (the API leaves it out rather than show 0%). The
  * usual cause is JSON or logfmt lines on a Loki that does not add `detected_level`.
  */
+/**
+ * The control group and the comparable runs of the workload: what the Compare card offers as a
+ * baseline. Asked for once, on first expand.
+ */
+function useBaselineOptions(testRun: LokiCardProps['testRun'], enabled: boolean) {
+  const [options, setOptions] = useState<{ runs: RelatedTestRun[]; controlGroup: ControlGroup | null } | null>(null);
+  const runId = testRun.test_run_id;
+  useEffect(() => {
+    if (!enabled || options) return;
+    let cancelled = false;
+    const params = new URLSearchParams();
+    if (testRun.test_environment) params.set('environment', testRun.test_environment);
+    if (testRun.workload) params.set('workload', testRun.workload);
+    const runs = authenticatedFetch(`/test-runs/${encodeURIComponent(runId)}/related${params.size ? `?${params}` : ''}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: RelatedTestRun[] | null) => (Array.isArray(d) ? d : []))
+      .catch(() => [] as RelatedTestRun[]);
+    Promise.all([runs, fetchControlGroup(runId)]).then(([r, g]) => {
+      if (!cancelled) setOptions({ runs: r, controlGroup: g });
+    });
+    return () => { cancelled = true; };
+  }, [enabled, options, runId, testRun.test_environment, testRun.workload]);
+  useEffect(() => { setOptions(null); }, [runId]);
+  return options;
+}
+
+/** What "previous-runs" and "none" say, since neither is an option in the list. */
+export function defaultBaselineText(baseline: LokiRunBaseline | undefined): string | null {
+  if (!baseline) return null;
+  if (baseline.kind === 'previous-runs') {
+    return `No control group: comparing with the ${baseline.testRunIds.length} previous run${baseline.testRunIds.length === 1 ? '' : 's'} (${baseline.testRunIds.join(', ')})`;
+  }
+  if (baseline.kind === 'none') return 'Nothing to compare with: no control group and no earlier run';
+  return null;
+}
+
+function BaselinePicker({ summary, options, onPick, reloading, error }: {
+  summary: Configured;
+  options: ReturnType<typeof useBaselineOptions>;
+  onPick: (id: string | null) => void;
+  reloading: boolean;
+  error: string | null;
+}) {
+  const b = summary.baseline;
+  // An API older than the picker answers no baseline: nothing to show or pick.
+  if (!b) return null;
+  let value: RelatedTestRun | null = null;
+  if (b.kind === 'control-group' && options?.controlGroup) value = controlGroupOption(options.controlGroup);
+  else if (b.kind === 'run' && b.testRunIds[0]) {
+    value = options?.runs.find((r) => r.test_run_id === b.testRunIds[0]) ?? { test_run_id: b.testRunIds[0], created_at: '', completed: true };
+  }
+  const patternsNote = b.kind === 'control-group' && b.testRunIds.length > 0
+    ? `Error rates use the whole group; new patterns and applications its newest ${b.testRunIds.length} run${b.testRunIds.length === 1 ? '' : 's'} (${b.testRunIds.join(', ')}).`
+    : null;
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 2, maxWidth: 640 }}>
+      <BaselineTestRunSelect
+        relatedTestRuns={options?.runs ?? []}
+        controlGroup={options?.controlGroup ?? null}
+        value={value}
+        onChange={(picked) => onPick(picked?.test_run_id ?? null)}
+        label="Baseline"
+        size="small"
+        helperText={options ? (value ? undefined : defaultBaselineText(b) ?? undefined) : 'Loading baselines…'}
+      />
+      {patternsNote && <Typography variant="caption" color="text.secondary">{patternsNote}</Typography>}
+      {reloading && <Typography variant="caption" color="text.secondary" role="status">Comparing…</Typography>}
+      {error && <Alert severity="warning">Could not compare with that baseline: {error}</Alert>}
+    </Box>
+  );
+}
+
 function LevelMissingAlert({ connection }: { connection: Configured['connection'] }) {
   const parser = connection?.levelParser && connection.levelParser !== 'none' ? `| ${connection.levelParser} ` : '';
   return (

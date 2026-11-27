@@ -10,6 +10,17 @@ jest.mock('@/lib/loki', () => ({
   fetchLokiRunSummary: jest.fn(),
 }));
 
+jest.mock('@/lib/api', () => ({
+  ...jest.requireActual('@/lib/api'),
+  authenticatedFetch: jest.fn(async () => ({ ok: true, json: async () => [
+    { test_run_id: 'run-0', created_at: '2026-11-26T10:00:00Z', start_time: '2026-11-26T10:00:00Z', completed: true },
+  ] })),
+}));
+jest.mock('@/lib/control-group-baseline', () => ({
+  ...jest.requireActual('@/lib/control-group-baseline'),
+  fetchControlGroup: jest.fn(async () => ({ control_group_id: 'g', test_runs: ['run-a', 'run-b'], n_test_runs: 2, first_datetime: null, last_datetime: null })),
+}));
+
 import { fetchLokiRunSummary, LokiRunSummary } from '@/lib/loki';
 import LokiCard, { errorRateTrend, formatPct, isErrorName, scopeOf } from '../LokiCard';
 
@@ -173,4 +184,28 @@ it('counts lines but no error rate in every scope when the level label is missin
   const missing = { ...configured, errorRate: null, levelLabelMissing: true };
   expect(scopeOf(missing, null, 'service_name')).toMatchObject({ rate: null, totalLines: 6000 + (configured.services ?? [])[1]!.totalLines, levelMissing: true });
   expect(scopeOf(missing, 'checkout', 'service_name')).toMatchObject({ rate: null, totalLines: 6000, levelMissing: true });
+});
+
+describe('baseline picker', () => {
+  // Value: protects=the Loki card names its baseline and refetches against a picked one; fails_when=the pick is not sent, or the default control group is not shown as selected; why_new=the picker is new; seam=none; no_claim=the API's resolution (mocked summary)
+  it('shows the control group as the baseline and refetches with a picked run', async () => {
+    mockSummary.mockReset();
+    mockSummary.mockResolvedValue({ ...configured, baseline: { kind: 'control-group', testRunIds: ['run-a', 'run-b'] } } as LokiRunSummary);
+    render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+    const input = await screen.findByLabelText('Baseline');
+    await waitFor(() => expect(input).toHaveValue('Control group (2 runs)'));
+    expect(screen.getByText(/new patterns and applications its newest 2 runs \(run-a, run-b\)/)).toBeInTheDocument();
+
+    fireEvent.mouseDown(input);
+    fireEvent.click(await screen.findByText('run-0'));
+    await waitFor(() => expect(mockSummary).toHaveBeenLastCalledWith('run-1', 'run-0'));
+    expect(mockSummary).toHaveBeenNthCalledWith(1, 'run-1', null);
+  });
+
+  it('says what it compared with when there is no control group', async () => {
+    mockSummary.mockReset();
+    mockSummary.mockResolvedValue({ ...configured, baseline: { kind: 'previous-runs', testRunIds: ['p1', 'p2'] } } as LokiRunSummary);
+    render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+    expect(await screen.findByText(/comparing with the 2 previous runs \(p1, p2\)/)).toBeInTheDocument();
+  });
 });

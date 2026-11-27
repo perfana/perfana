@@ -134,18 +134,28 @@ missing label as one empty series, which the panel names `(none)`.
 
 ## What the card shows
 
-`GET /loki/runs/:testRunId/summary` returns, without asking Loki:
+`GET /loki/runs/:testRunId/summary[?baseline=]` returns, without asking Loki:
+
+0. **`baseline`: what every "vs baseline" figure compared with** (`LokiService.resolveBaseline`).
+   `?baseline=control-group` (`CONTROL_GROUP_BASELINE`) is the run's control group: its pooled
+   `ds_control_group_statistics` for the error rate, its five newest other runs for patterns and
+   applications (each reads a snapshot per run). `?baseline=<test run id>` is that one run, which
+   must be in the same system, environment and workload (else 404, the same answer for a run that
+   does not exist and one the caller cannot see); its error rate comes from its own level panel in
+   `ds_metric_statistics`. Absent, the control group, else the workload's five previous completed
+   runs (`previous-runs`, error rate pooled over their level panels), else `none`. The response
+   carries `{ kind, testRunIds }`, and the card's **Baseline** picker (the Compare card's, shared as
+   `BaselineTestRunSelect`) shows it and sends the pick.
 
 1. **Error rate vs baseline.** From the level panel (split by the connection's level label,
    aggregation `count`): error lines / all lines, where `error` is any of error, err, fatal,
    critical, crit, panic, emerg, alert, severe. The baseline is the same ratio over the run's
-   control group's pooled `ds_control_group_statistics` (the group the latest ADAPT conclusion
-   names). A ratio, so it compares across runs with different bucket sizes, which raw counts per
+   baseline (item 0): the control group's pooled `ds_control_group_statistics` (the group the
+   latest ADAPT conclusion names), or a pinned or previous run's level panel. A ratio, so it compares across runs with different bucket sizes, which raw counts per
    bucket do not. The card calls it worse at 1.5x the baseline ratio and ignores differences under
    0.1 percentage point.
 2. **Top log patterns**, from the snapshot, each marked `isNew` when its normalised key is in no
-   baseline run's snapshot (the control group's runs, else the workload's five previous completed
-   runs); `null` when no baseline run has a snapshot, so "new" is never claimed without evidence.
+   baseline run's snapshot (item 0); `null` when no baseline run has a snapshot, so "new" is never claimed without evidence.
    Each links to Explore with Loki's pattern filter (`|> "<pattern>"`, Loki 3.1+).
 3. **Latest error and warning lines**, from the snapshot.
 4. **Panels** with series totals (mean × buckets for additive aggregations), share of the panel,

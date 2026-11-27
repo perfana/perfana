@@ -52,8 +52,9 @@ Setting Loki up has two parts: connect it once for the organization, then choose
 
 New test runs of that workload collect the Loki panels while the test runs and again at analysis. A **Loki Logs** card appears in the run's Root Cause Analysis tab with:
 
-- the **error rate** (error lines as a share of all lines) against the run's baseline;
-- the **Applications** table: per application (the **Application label**, default `service_name`) its lines, error lines, error rate against the same application in the baseline runs, and new patterns. Click an application to narrow the rest of the card to it; click the chip's **×** to see all applications again;
+- a **Baseline** picker, with the same choices as the Compare card: the run's **control group** (the earlier runs anomaly detection compares it with; the default when it has one) or any run of the same workload. Under it the card names the runs it compared with. Without a control group and with nothing picked, it compares with the five previous runs and says so;
+- the **error rate** (error lines as a share of all lines) against that baseline;
+- a tab per application (the **Application label**, default `service_name`), and on the **All applications** tab the **Applications** table: per application its lines, error lines, error rate against the same application in the baseline runs, and new patterns. A row, or its tab, narrows the rest of the card to that application;
 - the **top log patterns** of the run, with the ones not seen in the baseline runs marked **NEW**, and a link to the matching lines in Grafana Explore;
 - the **latest error and warning lines**, each expandable to show its labels;
 - each **panel** with its series totals, an **Open in Grafana Explore** link and a **⋮** menu that opens its series in Graphs, Compare or Trends.

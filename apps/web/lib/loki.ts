@@ -306,10 +306,26 @@ export type LokiRunSummary =
       patternsSource: string | null;
       newPatterns: number | null;
       baselineRunCount?: number;
+      /** What the "vs baseline" figures compared against. Absent from an API older than the baseline picker. */
+      baseline?: LokiRunBaseline;
       samples: LokiRunSample[];
       /** Absent from an API older than the Applications view. */
       services?: LokiRunService[];
     };
 
-export const fetchLokiRunSummary = (testRunId: string) =>
-  call<LokiRunSummary>(`/loki/runs/${encodeURIComponent(testRunId)}/summary`, 'Failed to load the Loki summary');
+/**
+ * `control-group`: the run's ADAPT control group (pooled for the error rate, its newest 5 runs for
+ * patterns); `run`: one pinned run; `previous-runs`: the 5 previous completed runs, used only when
+ * nothing was picked and the run has no control group; `none`: nothing to compare with.
+ */
+export interface LokiRunBaseline {
+  kind: 'control-group' | 'run' | 'previous-runs' | 'none';
+  testRunIds: string[];
+}
+
+/** `baseline`: `CONTROL_GROUP_BASELINE` or a test run id of the same workload; omitted, the API's default. */
+export const fetchLokiRunSummary = (testRunId: string, baseline?: string | null) =>
+  call<LokiRunSummary>(
+    `/loki/runs/${encodeURIComponent(testRunId)}/summary${baseline ? `?baseline=${encodeURIComponent(baseline)}` : ''}`,
+    'Failed to load the Loki summary',
+  );
