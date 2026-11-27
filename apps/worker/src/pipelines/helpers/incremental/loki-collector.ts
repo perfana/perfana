@@ -17,6 +17,8 @@ import {
   type LokiStreamMappingLike,
 } from '@perfana/shared/services/loki/client';
 import { safeDecrypt } from '@perfana/shared/utils';
+import { LOKI_STARTER_PANEL_TITLES } from '@perfana/shared/constants';
+import { DEFAULT_PERFORMANCE_THRESHOLDS } from '../../../constants/performance-metrics.js';
 import { WorkerDatabaseService } from '../../../common/database.service.js';
 import { resolveFetchProxyDispatcher } from '../../../config/proxy-resolver.js';
 import type { PanelMetricsDocument } from '../../../types/dynatrace/index.js';
@@ -53,7 +55,7 @@ interface TestRunData {
   teamId?: string | null;
 }
 
-interface LokiQueryRow {
+export interface LokiQueryRow {
   id: string;
   loki_config_id: string;
   dashboard_label: string;
@@ -155,6 +157,60 @@ export function lokiConfigBelongsTo(config: LokiConfigRow, organizationId: strin
   return !!organizationId && config.organization_id === organizationId && config.grafana_organization_id === organizationId;
 }
 
+/** The starter panel whose rise is a regression: error lines, lower is better. */
+export const LOKI_ERROR_PANEL_TITLE: string = LOKI_STARTER_PANEL_TITLES[1];
+/** `config_data.source` of the row seedLokiCompareConfigs writes. */
+export const LOKI_STARTER_COMPARE_SOURCE = 'loki-starter';
+
+export const LOKI_ERROR_PANEL_CONFIG = {
+  metricClassification: { classification: 'USE_errors', higherIsBetter: false },
+  thresholds: {
+    aggregation: 'mean',
+    percentageThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.percentageThreshold,
+    iqrThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.iqrThreshold,
+    absoluteThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.absoluteThreshold,
+  },
+  source: LOKI_STARTER_COMPARE_SOURCE,
+};
+
+/**
+ * Classify the "Error lines by service" panel for ADAPT, so more error lines than the baseline is a
+ * regression rather than an unclassified difference. Only that panel: lines by level mixes error
+ * and info lines, and log volume moves with load, so both stay unclassified.
+ *
+ * Panel-level, `ON CONFLICT DO NOTHING`: a row someone saved (or a template wrote) wins. Stamped
+ * `worker-pipeline` like the perf-test pipeline's own rows, so a golden-path template merges into
+ * it instead of reading it as a hand edit. Matched by the starter's title: a renamed panel is the
+ * user's, and is left alone. Best effort, like every seed: a failure never fails collection.
+ */
+export async function seedLokiCompareConfigs(
+  db: WorkerDatabaseService,
+  logger: Logger,
+  testRun: TestRunData,
+  queries: Array<Pick<LokiQueryRow, 'panel_title' | 'panel_id' | 'application_dashboard_id'>>,
+): Promise<void> {
+  const targets = queries.filter((q) => q.panel_title === LOKI_ERROR_PANEL_TITLE && q.application_dashboard_id);
+  if (targets.length === 0) return;
+  try {
+    await db.query(
+      `INSERT INTO ds_compare_config (
+          system_under_test_id, test_environment, workload, application_dashboard_id, panel_id,
+          metric_name, config_data, organization_id, team_id, created_by, updated_by)
+       SELECT $1, $2, $3, t.dashboard_id, t.panel_id, NULL, $6::jsonb, ad.organization_id, ad.team_id, 'worker-pipeline', 'worker-pipeline'
+         FROM unnest($4::uuid[], $5::int[]) AS t(dashboard_id, panel_id)
+         JOIN application_dashboards ad ON ad.id = t.dashboard_id
+       ON CONFLICT DO NOTHING`,
+      [
+        testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload,
+        targets.map((q) => q.application_dashboard_id), targets.map((q) => q.panel_id),
+        JSON.stringify(LOKI_ERROR_PANEL_CONFIG),
+      ],
+    );
+  } catch (err) {
+    logger.warn(`Loki: could not classify the error lines panel for ADAPT: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export class LokiCollector {
   constructor(
     private logger: Logger,
@@ -182,6 +238,7 @@ export class LokiCollector {
       if (queries.length === 0) {
         return { success: true, dataPoints: 0, errors: [], duration: Date.now() - started };
       }
+      await seedLokiCompareConfigs(this.db, this.logger, testRun, queries);
       const mappings = await loadLokiMappings(this.db, testRun);
       const context: TestRunContext = {
         startTime: testRun.startTime,

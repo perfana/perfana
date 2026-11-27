@@ -225,3 +225,14 @@ grafana-sync through `loki_queries`, provisioned SLOs stored with `benchmarks.so
 - The pattern ingester keeps hours, so a run analysed long after it ended (a worker outage) gets
   sampled patterns or none.
 - Overlapping mappings double-count (see "Several mappings").
+
+## ADAPT classification out of the box
+
+`seedLokiCompareConfigs` (worker, `loki-collector.ts`) writes one panel-level `ds_compare_config`
+row for the **Error lines by service** starter panel, matched by its title, on every Loki
+collection: `USE_errors`, `higherIsBetter: false`, `mean`, the default thresholds,
+`config_data.source = 'loki-starter'`. It is `ON CONFLICT DO NOTHING`, so a row someone saved or a
+template wrote wins, and it is stamped `worker-pipeline`, like the perf-test pipeline's rows, so a
+golden-path template merges into it rather than reading it as a hand edit. Lines by level and log
+volume stay unclassified on purpose: the first mixes error and info lines in one panel, and the
+second moves with load. Best effort: a failure logs a warning and collection goes on.

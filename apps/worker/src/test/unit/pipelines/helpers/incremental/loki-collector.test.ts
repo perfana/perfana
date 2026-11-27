@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const fetchMock = vi.fn();
 vi.mock('../../../../../config/proxy-resolver.js', () => ({ resolveFetchProxyDispatcher: vi.fn(async () => undefined) }));
 
-import { LokiCollector, LOKI_INGEST_LOOKBACK_MS } from '../../../../../pipelines/helpers/incremental/loki-collector.js';
+import { LokiCollector, LOKI_INGEST_LOOKBACK_MS, LOKI_ERROR_PANEL_CONFIG, seedLokiCompareConfigs } from '../../../../../pipelines/helpers/incremental/loki-collector.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
 
@@ -103,5 +103,29 @@ describe('LokiCollector', () => {
   it('fails the tick when the connection is gone', async () => {
     const result = await makeCollector({ config: null }).collector.collect('run-1', liveRun, undefined, from, to);
     expect(result.success).toBe(false);
+  });
+});
+
+describe('seedLokiCompareConfigs', () => {
+  // Value: protects=the Error lines panel is classified USE_errors lower-is-better for ADAPT, and nothing else is; fails_when=another starter panel gets classified, or a saved row is overwritten; why_new=the seed is new; seam=none; no_claim=the INSERT against Postgres (mocked db)
+  const run = { systemUnderTestId: 's', testEnvironment: 'e', workload: 'w' } as never;
+  const q = (panel_title: string, panel_id: number, application_dashboard_id: string | null = 'ad1') => ({ panel_title, panel_id, application_dashboard_id });
+
+  it('writes one panel-level USE_errors row for the Error lines panel only, never overwriting', async () => {
+    const db = { query: vi.fn(async () => []) };
+    await seedLokiCompareConfigs(db as never, logger, run, [q('Log lines by level', 1), q('Error lines by service', 2), q('Log volume by service', 3)]);
+    expect(db.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = db.query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain('ON CONFLICT DO NOTHING');
+    expect(params.slice(0, 5)).toEqual(['s', 'e', 'w', ['ad1'], [2]]);
+    expect(JSON.parse(params[5] as string).metricClassification).toEqual({ classification: 'USE_errors', higherIsBetter: false });
+    expect(LOKI_ERROR_PANEL_CONFIG.source).toBe('loki-starter');
+  });
+
+  it('does nothing without that panel, and a failure never throws', async () => {
+    const db = { query: vi.fn(async () => { throw new Error('boom'); }) };
+    await seedLokiCompareConfigs(db as never, logger, run, [q('Log lines by level', 1), q('Error lines by service', 2, null)]);
+    expect(db.query).not.toHaveBeenCalled();
+    await expect(seedLokiCompareConfigs(db as never, logger, run, [q('Error lines by service', 2)])).resolves.toBeUndefined();
   });
 });
