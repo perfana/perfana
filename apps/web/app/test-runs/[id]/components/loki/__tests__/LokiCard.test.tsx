@@ -202,6 +202,19 @@ describe('baseline picker', () => {
     expect(mockSummary).toHaveBeenNthCalledWith(1, 'run-1', null);
   });
 
+  it('starts again from the default baseline on another run', async () => {
+    // Value: protects=a baseline picked on one run is not sent for the next; fails_when=the pick survives a run change; why_new=pick reset is new; seam=none; no_claim=page navigation (rerender stands in)
+    mockSummary.mockReset();
+    mockSummary.mockResolvedValue({ ...configured, baseline: { kind: 'control-group', testRunIds: ['run-a'] } } as LokiRunSummary);
+    const { rerender } = render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+    fireEvent.mouseDown(await screen.findByLabelText('Baseline'));
+    fireEvent.click(await screen.findByText('run-0'));
+    await waitFor(() => expect(mockSummary).toHaveBeenLastCalledWith('run-1', 'run-0'));
+    rerender(<LokiCard testRun={{ test_run_id: 'run-2' }} expanded onExpand={() => {}} />);
+    await waitFor(() => expect(mockSummary).toHaveBeenLastCalledWith('run-2', null));
+    expect(mockSummary).not.toHaveBeenCalledWith('run-2', 'run-0');
+  });
+
   it('says what it compared with when there is no control group', async () => {
     mockSummary.mockReset();
     mockSummary.mockResolvedValue({ ...configured, baseline: { kind: 'previous-runs', testRunIds: ['p1', 'p2'] } } as LokiRunSummary);

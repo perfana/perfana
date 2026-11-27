@@ -166,10 +166,15 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
   });
 
   // null: the API's default (the control group, else the previous runs). Otherwise what was picked.
-  const [baselinePick, setBaselinePick] = useState<string | null>(null);
+  // A pick belongs to the run it was made on: another run starts again from the default, in the
+  // same render, so the summary is never fetched for the new run with the old run's pick.
+  const [pickState, setPickState] = useState<{ runId: string; id: string | null }>({ runId: testRun.test_run_id, id: null });
+  const baselinePick = pickState.runId === testRun.test_run_id ? pickState.id : null;
+  const setBaselinePick = (id: string | null) => setPickState({ runId: testRun.test_run_id, id });
   const [baselineError, setBaselineError] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
   const baselineOptions = useBaselineOptions(testRun, expanded);
+  useEffect(() => { setBaselineError(null); }, [testRun.test_run_id]);
 
   useEffect(() => {
     let cancelled = false;

@@ -351,6 +351,23 @@ describe('LokiService baseline resolution', () => {
     await expect(resolve('run-9', { pinned: true }).call).rejects.toThrow('Baseline run not found in this workload');
   });
 
+  it('averages the previous runs\' own error ratios, so a run with longer buckets does not weigh more', async () => {
+    // Value: protects=the previous-runs baseline is the mean of each run's ratio; fails_when=per-bucket means are pooled across runs; why_new=only one-run baselines were tested; seam=none; no_claim=the SQL (mocked query runner)
+    const { service, dataSource } = build();
+    dataSource.manager.query.mockImplementation((async (sql: string) => sql.includes('FROM ds_metric_statistics') ? [
+      // 1% errors, 30 s buckets
+      { test_run_id: 'p1', metric_name: 'error', mean: 1 }, { test_run_id: 'p1', metric_name: 'info', mean: 99 },
+      // 3% errors, 60 s buckets: twice the means
+      { test_run_id: 'p2', metric_name: 'error', mean: 6 }, { test_run_id: 'p2', metric_name: 'info', mean: 194 },
+    ] : []) as never);
+    const panels = [{ isLevelPanel: true, panelId: 1, applicationDashboardId: 'dash', metricsSourceId: null, series: [{ name: 'info', total: 100, mean: 1 }] }];
+    const rate = await (service as unknown as { errorRate: (...a: unknown[]) => Promise<{ baseline: { errorRatePct: number; runs: number } | null }> })
+      .errorRate('run-9', panels, { kind: 'previous-runs', testRunIds: ['p1', 'p2'], controlGroupId: null, controlGroupRuns: 0 });
+    // Mean of 1% and 3%; pooling would give 7/300 = 2.33%.
+    expect(rate.baseline!.errorRatePct).toBeCloseTo(2, 10);
+    expect(rate.baseline!.runs).toBe(2);
+  });
+
   it('compares the error rate with a pinned run\'s own level panel, pooled per level', async () => {
     const { service, dataSource } = build();
     const sqls: string[] = [];

@@ -61,6 +61,18 @@ import {
 } from './dto/loki.dto';
 
 const LABELS_TTL_MS = 10 * 60 * 1000;
+/** Error lines over all lines from a level panel's mean per level; null with no lines. */
+function levelRatio(rows: Array<{ metric_name: string | null; mean: number | null }>): number | null {
+  let all = 0;
+  let err = 0;
+  for (const r of rows) {
+    if (r.mean === null || r.metric_name === null) continue;
+    all += r.mean;
+    if (isErrorLevel(r.metric_name)) err += r.mean;
+  }
+  return all > 0 ? err / all : null;
+}
+
 /** What the Loki card's "vs baseline" figures compare against; see LokiService.resolveBaseline. */
 interface LokiBaseline {
   kind: 'control-group' | 'run' | 'previous-runs' | 'none';
@@ -742,24 +754,24 @@ export class LokiService {
         rows = await loadControlGroupStatistics(q, source.controlGroupId, { applicationDashboardId: dashboardId, panelId: levelPanel.panelId });
         runs = source.controlGroupRuns;
       } else if (dashboardId && source.testRunIds.length > 0) {
-        // A pinned run, or the previous runs: the same ratio over their own level panel statistics.
-        // A per-bucket mean summed per level, so a run with longer buckets does not weigh more.
+        // A pinned run, or the previous runs: each run's own error ratio from its level panel, then
+        // averaged over the runs. Pooling the per-bucket means instead would weigh a run with longer
+        // buckets (larger means) more.
         const raw = await q.query(
           `SELECT test_run_id, metric_name, mean FROM ds_metric_statistics
             WHERE test_run_id = ANY($1::varchar[]) AND application_dashboard_id = $2 AND panel_id = $3`,
           [source.testRunIds, dashboardId, levelPanel.panelId],
         ) as Array<{ test_run_id: string; metric_name: string | null; mean: number | null }>;
-        rows = raw;
-        runs = new Set(raw.map((r) => r.test_run_id)).size;
+        const ratios = [...new Set(raw.map((r) => r.test_run_id))]
+          .map((id) => levelRatio(raw.filter((r) => r.test_run_id === id)))
+          .filter((x): x is number => x !== null);
+        if (ratios.length > 0) baseline = { errorRatePct: (ratios.reduce((a, b) => a + b, 0) / ratios.length) * 100, runs: ratios.length };
       }
-      let all = 0;
-      let err = 0;
-      for (const r of rows) {
-        if (r.mean === null || r.metric_name === null) continue;
-        all += r.mean;
-        if (isErrorLevel(r.metric_name)) err += r.mean;
+      // The control group's statistics are already pooled into one mean per level.
+      if (!baseline && rows.length > 0) {
+        const ratio = levelRatio(rows);
+        if (ratio !== null) baseline = { errorRatePct: ratio * 100, runs };
       }
-      if (all > 0) baseline = { errorRatePct: (err / all) * 100, runs };
     } catch (err) {
       this.logger.warn(`Loki baseline error rate for ${testRunId} unavailable: ${errMsg(err)}`);
     }
