@@ -142,6 +142,38 @@ It replaces the run's rows only when it found something: re-analysing a run whos
 dropped keeps the earlier snapshot. Lines are cut to 2,000 characters, labels to 30, and NUL /
 unpaired surrogates are removed (jsonb refuses them). Best-effort: errors are logged, never thrown.
 
+## Applications (v0.2.97.109, migration 1839)
+
+The card's view per application, keyed on `loki_configs.service_label` (default `service_name`,
+which Loki 3 derives for every stream). Independent of the panels: a snapshot, taken in the same
+pass as the patterns.
+
+- **Counts.** Per mapping, `sum by (<service_label>, <level_label>) (count_over_time(<selector>
+  [<step>s]))` over the run window, summed per service and split into total / error / warn lines,
+  written to `loki_run_services`. `by` reads stream labels, structured metadata and parsed labels
+  alike. Lines without the label are stored as `(none)`; the card does not offer it as a scope.
+- **Per-application patterns and lines** for the 20 services with most errors, then most lines
+  (`LOKI_MAX_SERVICES`): lines through a label filter (`| service_name="x"`, any kind of label);
+  patterns through a stream matcher, because the patterns API takes a selector only. A service
+  label that is not a stream label gets no per-application patterns, and the card says so. Without
+  the patterns API, the overall sampled lines are clustered per service instead. Rows carry
+  `service`; NULL rows are the all-streams snapshot, unchanged.
+- **Baseline per application**: the same baseline runs as the patterns; the error ratio pooled over
+  their `loki_run_services` rows (`SUM(errors) / SUM(total)`). NEW is judged per scope: an
+  application's patterns against that application's baseline patterns, once any baseline run has
+  per-application rows; an application in none of them is itself NEW. With no per-application
+  baseline at all, NEW is null rather than claimed.
+- **Overall error rate** falls back to the per-application counts when the workload has no level
+  panel; its baseline then weights each application's baseline ratio by its lines in this run.
+- **The card**: an Applications table, worst first, with the error rate drawn against a baseline
+  tick; selecting one narrows the KPIs, patterns, lines (falling back to the all-streams lines that
+  carry its label) and every panel split by the service label. A comment on an application's
+  pattern switches the card to that application when it is opened.
+
+Before migration 1839 the worker writes the all-streams snapshot only and the API returns no
+`services`; `loki_configs.service_label` is read through `to_jsonb` so the collector does not fail on
+a database that has 1838 and not 1839.
+
 ## Profile SLO
 
 `loki-panels` is `splunk-panels` with the nouns changed: no profile dashboard, `dashboard_uid` a

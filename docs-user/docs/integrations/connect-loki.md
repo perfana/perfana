@@ -20,6 +20,7 @@ Setting Loki up has two parts: connect it once for the organization, then choose
    Perfana lists the Loki datasources on that Grafana. If Grafana does not list them, type the datasource **uid**: in Grafana open **Connections** → **Data sources** → your Loki datasource; the uid is the last part of the address.
 4. Choose the **Loki datasource** and enter a **Label**, for example `Loki production`.
 5. Check the **Level label**: the label that holds a line's level. Loki 3 adds `detected_level` by itself; older setups often use `level` or `severity`.
+   Check the **Application label** too: the label that names an application, `service_name` by default (Loki 3 adds it to every stream). The run page's Applications table is built from it.
 6. Optional: change **Concurrent queries**, the number of queries Perfana runs at once.
 7. Click **Test connection**.
    Perfana lists the labels Loki has seen in the last hour, or says why it could not reach it.
@@ -49,6 +50,7 @@ Setting Loki up has two parts: connect it once for the organization, then choose
 New test runs of that workload collect the Loki panels while the test runs and again at analysis. A **Loki Logs** card appears in the run's Root Cause Analysis tab with:
 
 - the **error rate** (error lines as a share of all lines) against the run's baseline;
+- the **Applications** table: per application (the **Application label**, default `service_name`) its lines, error lines, error rate against the same application in the baseline runs, and new patterns. Click an application to narrow the rest of the card to it; click the chip's **×** to see all applications again;
 - the **top log patterns** of the run, with the ones not seen in the baseline runs marked **NEW**, and a link to the matching lines in Grafana Explore;
 - the **latest error and warning lines**, each expandable to show its labels;
 - each **panel** with its series totals, an **Open in Grafana Explore** link and a **⋮** menu that opens its series in Graphs, Compare or Trends.
@@ -63,6 +65,8 @@ Runs that finished before you set this up are not collected automatically. Re-ev
 - *Grafana does not list its datasources* — Type the datasource uid instead; listing needs a permission some Grafana setups withhold.
 - *A panel shows no data for a run* — Check that streams are mapped at a level that covers the run's environment and workload, and that the panel is enabled. The preview says when a split label is missing from the lines.
 - *The card shows no patterns* — Patterns are taken when the run is analysed. If Loki's patterns API is not available, Perfana groups up to 2,000 sampled error and warning lines and says so; if Loki no longer holds the window, re-analysing finds nothing and keeps any earlier snapshot.
+- *No Applications table* — The lines carry no Application label, or the run was analysed before Perfana 0.2.97.109; re-analyse it while Loki still holds the window. Check the label in the connection's **Settings**.
+- *An application shows lines but no patterns* — Patterns are taken for the 20 applications with the most errors, and only when the Application label is a stream label. Lines and counts still work.
 - *No error rate on the card* — Add the **Log lines by level** starter panel, or any count panel split by the connection's level label.
 
 ## Related

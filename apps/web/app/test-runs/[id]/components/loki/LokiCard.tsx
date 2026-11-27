@@ -16,7 +16,7 @@ import {
 import { ExpandLess, ExpandMore, MoreVert, OpenInNew } from '@mui/icons-material';
 import { useEffect } from 'react';
 import {
-  fetchLokiRunSummary, LokiErrorRate, LokiRunPanel, LokiRunPattern, LokiRunSample, LokiRunSummary,
+  fetchLokiRunSummary, LokiErrorRate, LokiRunPanel, LokiRunPattern, LokiRunSample, LokiRunService, LokiRunSummary, NO_SERVICE,
 } from '@/lib/loki';
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import KPIDisplay from '../shared/KPIDisplay';
@@ -51,8 +51,12 @@ interface LokiCardProps {
 
 /** Comment anchor for a panel. Panel ids repeat across dashboards, so the title goes with it. */
 const panelKey = (p: LokiRunPanel) => `panel:${p.panelId}|${p.title}`;
-/** Comment anchor for a pattern: its text, which is what stays stable across re-analyses. */
-const patternKey = (p: LokiRunPattern) => `pattern:${p.pattern}`;
+/**
+ * Comment anchor for a pattern: its text, which is what stays stable across re-analyses, plus the
+ * application it was taken for (the same text can be a pattern of several applications).
+ */
+const patternKey = (p: Pick<LokiRunPattern, 'pattern' | 'service'>) =>
+  p.service ? `pattern:${JSON.stringify([p.service, p.pattern])}` : `pattern:${p.pattern}`;
 
 const fmt = (n: number | null | undefined, digits = 0) =>
   n === null || n === undefined || !Number.isFinite(n) ? '–' : n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -73,15 +77,73 @@ export function errorRateTrend(rate: LokiErrorRate | null): 'worse' | 'better' |
   return ratio >= WORSE_RATIO ? 'worse' : ratio <= 1 / WORSE_RATIO ? 'better' : 'same';
 }
 
+type Configured = Extract<LokiRunSummary, { configured: true }>;
+
+/** What the card shows for one scope: all applications (`app` null) or one application. */
+export interface ScopeView {
+  app: string | null;
+  rate: LokiErrorRate | null;
+  patterns: LokiRunPattern[];
+  newPatterns: number | null;
+  patternsSource: string | null;
+  samples: LokiRunSample[];
+  /** For "Not seen in the N baseline runs". */
+  baselineRuns: number;
+}
+
+/**
+ * The summary narrowed to one application. Rows written before the Applications view carry no
+ * `service` and read as all-streams rows. An application with no lines of its own in the snapshot
+ * (it was outside the busiest ones) falls back to the all-streams lines that carry its label.
+ */
+export function scopeOf(summary: Configured, app: string | null, serviceLabel: string): ScopeView {
+  const svcOf = (x: { service?: string | null }) => x.service ?? null;
+  if (app === null) {
+    return {
+      app,
+      rate: summary.errorRate,
+      patterns: summary.patterns.filter((p) => svcOf(p) === null),
+      newPatterns: summary.newPatterns,
+      patternsSource: summary.patternsSource,
+      samples: summary.samples.filter((x) => svcOf(x) === null),
+      baselineRuns: summary.baselineRunCount ?? 0,
+    };
+  }
+  const svc = summary.services?.find((x) => x.service === app);
+  const patterns = summary.patterns.filter((p) => svcOf(p) === app);
+  const own = summary.samples.filter((x) => svcOf(x) === app);
+  return {
+    app,
+    rate: svc ? { totalLines: svc.totalLines, errorLines: svc.errorLines, errorRatePct: svc.errorRatePct, baseline: svc.baseline } : null,
+    patterns,
+    newPatterns: svc?.newPatterns ?? null,
+    patternsSource: patterns[0]?.source ?? summary.patternsSource,
+    samples: own.length > 0 ? own : summary.samples.filter((x) => svcOf(x) === null && x.labels?.[serviceLabel] === app),
+    baselineRuns: svc?.baseline?.runs ?? summary.baselineRunCount ?? 0,
+  };
+}
+
 const levelColor = (level: string | null): 'error' | 'warning' | 'default' =>
   isErrorName(level) ? 'error' : level === 'warn' ? 'warning' : 'default';
 
 export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps) {
   const [summary, setSummary] = useState<LokiRunSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [app, setApp] = useState<string | null>(null);
   const commentCounts = useCommentItemCounts('loki', expanded);
-  useCommentItemFocus('loki', (key) => !!summary?.configured && (
-    summary.panels.some((p) => panelKey(p) === key) || summary.patterns.some((p) => patternKey(p) === key)));
+  useCommentItemFocus('loki', (key) => {
+    if (!summary?.configured) return false;
+    if (summary.panels.some((p) => panelKey(p) === key)) return true;
+    const pattern = summary.patterns.find((p) => patternKey(p) === key);
+    if (!pattern) return false;
+    // A pattern of another scope is not on screen: switch to its scope, ready on the next check.
+    const scope = pattern.service ?? null;
+    if (scope !== app) {
+      setApp(scope);
+      return false;
+    }
+    return true;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -98,8 +160,14 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
   const hasData = !!configured?.panels.some((p) => p.series.length > 0);
   const rate = configured?.errorRate ?? null;
   const trend = errorRateTrend(rate);
-  const errorPatterns = configured?.patterns.filter((p) => isErrorName(p.level)) ?? [];
+  const serviceLabel = configured?.connection?.serviceLabel || 'service_name';
+  const overall = configured ? scopeOf(configured, null, serviceLabel) : null;
+  const errorPatterns = overall?.patterns.filter((p) => isErrorName(p.level)) ?? [];
   const newErrorPatterns = errorPatterns.filter((p) => p.isNew).length;
+  const services = (configured?.services ?? []).filter((x) => x.totalLines > 0);
+  const worseServices = services.filter((x) => x.service !== NO_SERVICE && errorRateTrend(x) === 'worse');
+  const scope = configured && app !== null && services.some((x) => x.service === app) ? scopeOf(configured, app, serviceLabel) : overall;
+  const scopeTrend = errorRateTrend(scope?.rate ?? null);
 
   return (
     <Box sx={{ gridColumn: expanded ? '1 / -1' : 'auto', height: expanded ? 'auto' : '293px', display: 'flex', flexDirection: 'column' }}>
@@ -156,6 +224,15 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                 {configured.newPatterns !== null && configured.newPatterns > 0 && (
                   <SoftBadge count={configured.newPatterns} label={configured.newPatterns === 1 ? 'new pattern' : 'new patterns'} color={newErrorPatterns > 0 ? 'red' : 'orange'} />
                 )}
+                {services.length > 1 && (
+                  <SoftBadge count={services.length} label="applications" color="neutral" />
+                )}
+                {worseServices.length > 0 && (
+                  <SoftBadge
+                    label={worseServices.length === 1 ? `${worseServices[0]!.service}: more errors` : `${worseServices.length} applications with more errors`}
+                    color="red"
+                  />
+                )}
                 {!hasData && configured.patterns.length === 0 && <SoftBadge label="No log data for this run" color="orange" />}
                 <SoftBadge count={configured.sources.length} label={configured.sources.length === 1 ? 'stream selector' : 'stream selectors'} color="neutral" />
               </Box>
@@ -192,7 +269,25 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                   )}
                 </Box>
 
-                <KpiStrip summary={configured} trend={trend} />
+                {services.length > 0 && (
+                  <ApplicationsSection services={services} serviceLabel={serviceLabel} selected={scope?.app ?? null} onSelect={setApp} />
+                )}
+
+                {scope?.app && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <Typography variant="body2" color="text.secondary">Showing</Typography>
+                    <Chip
+                      size="small"
+                      color="primary"
+                      label={`${serviceLabel}=${scope.app}`}
+                      onDelete={() => setApp(null)}
+                      sx={{ ...MONO, fontSize: 12 }}
+                    />
+                    <Typography variant="caption" color="text.secondary">Clear to see all applications</Typography>
+                  </Box>
+                )}
+
+                {scope && <KpiStrip scope={scope} trend={scopeTrend} />}
 
                 {!hasData && (
                   <Alert severity="info" sx={{ mb: 2 }}>
@@ -201,13 +296,20 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                   </Alert>
                 )}
 
-                <PatternsSection summary={configured} commentCounts={commentCounts} />
-                <SamplesSection samples={configured.samples} />
+                {scope && <PatternsSection key={`p-${scope.app ?? ''}`} scope={scope} commentCounts={commentCounts} />}
+                {scope && <SamplesSection key={`s-${scope.app ?? ''}`} samples={scope.samples} app={scope.app} />}
 
                 <Typography variant="subtitle1" fontWeight={600} sx={{ mt: 3, mb: 1 }}>Panels</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(auto-fit, minmax(360px, 1fr))' }, gap: 3 }}>
-                  {configured.panels.map((p) => <PanelSummary key={panelKey(p)} panel={p} commentCounts={commentCounts} />)}
+                  {configured.panels.map((p) => (
+                    <PanelSummary key={panelKey(p)} panel={p} commentCounts={commentCounts} app={scope?.app ?? null} serviceLabel={serviceLabel} />
+                  ))}
                 </Box>
+                {scope?.app && configured.panels.some((p) => p.splitBy !== serviceLabel) && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                    Panels not split by {serviceLabel} show all applications.
+                  </Typography>
+                )}
               </Box>
             )}
           </Collapse>
@@ -217,11 +319,118 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
   );
 }
 
-type Configured = Extract<LokiRunSummary, { configured: true }>;
+/**
+ * One row per application (a value of the connection's service label), most error lines first.
+ * Clicking a row narrows the KPIs, patterns, lines and service-split panels to that application.
+ */
+function ApplicationsSection({ services, serviceLabel, selected, onSelect }: {
+  services: LokiRunService[]; serviceLabel: string; selected: string | null; onSelect: (app: string | null) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const rows = showAll ? services : services.slice(0, MAX_ROWS);
+  const topRate = Math.max(0.01, ...rows.map((s) => Math.max(s.errorRatePct, s.baseline?.errorRatePct ?? 0)));
+  return (
+    <Box sx={{ mb: 3 }}>
+      <Typography variant="subtitle1" fontWeight={600}>Applications</Typography>
+      <Typography variant="caption" color="text.secondary">
+        Lines per <code>{serviceLabel}</code> in the run, against the same application in the baseline runs. Select one to narrow the card to it.
+      </Typography>
+      <Table size="small" sx={{ mt: 1, '& td, & th': { px: 1 } }}>
+        <TableHead>
+          <TableRow>
+            <TableCell>Application</TableCell>
+            <TableCell align="right">Lines</TableCell>
+            <TableCell align="right">Errors</TableCell>
+            <TableCell sx={{ width: { xs: 120, md: 220 } }}>Error rate</TableCell>
+            <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>Baseline</TableCell>
+            <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>New patterns</TableCell>
+            <TableCell sx={{ width: 40 }} />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((s) => {
+            const none = s.service === NO_SERVICE;
+            const isSelected = selected === s.service;
+            const t = errorRateTrend(s);
+            return (
+              <TableRow
+                key={s.service}
+                hover={!none}
+                selected={isSelected}
+                onClick={none ? undefined : () => onSelect(isSelected ? null : s.service)}
+                sx={{ cursor: none ? 'default' : 'pointer' }}
+              >
+                <TableCell sx={MONO}>
+                  {none ? (
+                    <Tooltip title={`Lines with no ${serviceLabel} label`}><span>(no {serviceLabel})</span></Tooltip>
+                  ) : (
+                    <Box
+                      component="button"
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={(e) => { e.stopPropagation(); onSelect(isSelected ? null : s.service); }}
+                      sx={{ all: 'unset', cursor: 'pointer', '&:focus-visible': { outline: 2, outlineColor: 'primary.main' } }}
+                    >
+                      {s.service}
+                    </Box>
+                  )}
+                  {s.isNew && <Chip size="small" color="error" label="NEW" sx={{ height: 18, fontSize: 10, ml: 0.75 }} />}
+                </TableCell>
+                <TableCell align="right" sx={MONO}>{fmt(s.totalLines)}</TableCell>
+                <TableCell align="right" sx={{ ...MONO, color: s.errorLines > 0 ? 'readable.error' : 'text.primary' }}>{fmt(s.errorLines)}</TableCell>
+                <TableCell>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ position: 'relative', flex: 1, height: 8, borderRadius: 1, bgcolor: 'action.hover', display: { xs: 'none', md: 'block' } }}>
+                      <Box sx={{ position: 'absolute', inset: '0 auto 0 0', borderRadius: 1, width: `${Math.min(100, (s.errorRatePct / topRate) * 100)}%`, bgcolor: t === 'worse' ? 'error.main' : LOKI_ORANGE }} />
+                      {s.baseline && (
+                        <Box
+                          aria-hidden
+                          title={`Baseline ${formatPct(s.baseline.errorRatePct)}`}
+                          sx={{ position: 'absolute', top: -2, bottom: -2, width: 2, bgcolor: 'text.primary', left: `${Math.min(100, (s.baseline.errorRatePct / topRate) * 100)}%` }}
+                        />
+                      )}
+                    </Box>
+                    <Typography component="span" sx={{ ...MONO, minWidth: 56, textAlign: 'right' }}>{formatPct(s.errorRatePct)}</Typography>
+                  </Box>
+                </TableCell>
+                <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                  {s.baseline ? (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={t === 'worse' ? 'error' : t === 'better' ? 'success' : 'default'}
+                      label={`${formatPct(s.baseline.errorRatePct)}${t === 'worse' ? ' ↑' : t === 'better' ? ' ↓' : ''}`}
+                      sx={{ ...MONO, fontSize: 12 }}
+                    />
+                  ) : <Typography component="span" variant="caption" color="text.secondary">–</Typography>}
+                </TableCell>
+                <TableCell align="right" sx={{ ...MONO, display: { xs: 'none', md: 'table-cell' } }}>{s.newPatterns ?? '–'}</TableCell>
+                <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                  {s.exploreUrl && (
+                    <Tooltip title="Open this application's lines in Grafana Explore">
+                      <IconButton size="small" component={Link} href={s.exploreUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${s.service} in Grafana Explore`}>
+                        <OpenInNew fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      {services.length > MAX_ROWS && (
+        <Button size="small" onClick={() => setShowAll((v) => !v)} startIcon={showAll ? <ExpandLess /> : <ExpandMore />} sx={{ mt: 0.5 }}>
+          {showAll ? 'Show fewer' : `Show all ${services.length}`}
+        </Button>
+      )}
+    </Box>
+  );
+}
 
-function KpiStrip({ summary, trend }: { summary: Configured; trend: ReturnType<typeof errorRateTrend> }) {
-  const rate = summary.errorRate;
-  const errorPatterns = summary.patterns.filter((p) => isErrorName(p.level));
+function KpiStrip({ scope, trend }: { scope: ScopeView; trend: ReturnType<typeof errorRateTrend> }) {
+  const rate = scope.rate;
+  const errorPatterns = scope.patterns.filter((p) => isErrorName(p.level));
   return (
     <Box
       sx={{
@@ -239,7 +448,7 @@ function KpiStrip({ summary, trend }: { summary: Configured; trend: ReturnType<t
         />
         {!rate && (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
-            Add the &ldquo;Log lines by level&rdquo; starter panel to get the error rate.
+            {scope.app ? 'No line counts for this application in the snapshot.' : 'Add the \u201cLog lines by level\u201d starter panel to get the error rate.'}
           </Typography>
         )}
         {rate?.baseline && (
@@ -250,14 +459,14 @@ function KpiStrip({ summary, trend }: { summary: Configured; trend: ReturnType<t
       </Box>
       <Box>
         <KPIDisplay
-          value={summary.newPatterns ?? '–'}
+          value={scope.newPatterns ?? '–'}
           label="New patterns"
-          color={(summary.newPatterns ?? 0) > 0 ? (errorPatterns.some((p) => p.isNew) ? 'error' : 'warning') : 'neutral'}
+          color={(scope.newPatterns ?? 0) > 0 ? (errorPatterns.some((p) => p.isNew) ? 'error' : 'warning') : 'neutral'}
         />
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
-          {summary.newPatterns === null
-            ? summary.patterns.length > 0 ? 'No baseline run has a pattern snapshot yet' : 'No pattern snapshot for this run'
-            : `Not seen in the ${summary.baselineRunCount ?? 0} baseline run${summary.baselineRunCount === 1 ? '' : 's'}`}
+          {scope.newPatterns === null
+            ? scope.patterns.length > 0 ? 'No baseline run has a pattern snapshot yet' : 'No pattern snapshot for this run'
+            : `Not seen in the ${scope.baselineRuns} baseline run${scope.baselineRuns === 1 ? '' : 's'}`}
         </Typography>
       </Box>
     </Box>
@@ -266,21 +475,23 @@ function KpiStrip({ summary, trend }: { summary: Configured; trend: ReturnType<t
 
 type PatternFilter = 'all' | 'problems' | 'new';
 
-function PatternsSection({ summary, commentCounts }: { summary: Configured; commentCounts: CommentItemCounts }) {
+function PatternsSection({ scope, commentCounts }: { scope: ScopeView; commentCounts: CommentItemCounts }) {
   const [filter, setFilter] = useState<PatternFilter>('problems');
   const [showAll, setShowAll] = useState(false);
-  const total = summary.patterns.reduce((n, p) => n + p.count, 0);
-  const visible = useMemo(() => summary.patterns.filter((p) =>
-    filter === 'all' ? true : filter === 'new' ? p.isNew === true : isErrorName(p.level) || p.level === 'warn'), [summary.patterns, filter]);
+  const total = scope.patterns.reduce((n, p) => n + p.count, 0);
+  const visible = useMemo(() => scope.patterns.filter((p) =>
+    filter === 'all' ? true : filter === 'new' ? p.isNew === true : isErrorName(p.level) || p.level === 'warn'), [scope.patterns, filter]);
   const rows = showAll ? visible : visible.slice(0, PATTERN_ROWS);
   const top = Math.max(1, ...rows.map((p) => p.count));
 
-  if (summary.patterns.length === 0) {
+  if (scope.patterns.length === 0) {
     return (
       <Box sx={{ mb: 3 }}>
         <Typography variant="subtitle1" fontWeight={600}>Top log patterns</Typography>
         <Typography variant="body2" color="text.secondary">
-          No pattern snapshot for this run. Patterns are taken when the run is analysed; re-analyse it while Loki still holds the window.
+          {scope.app
+            ? 'No patterns were taken for this application. Patterns are taken for the 20 applications with the most errors, and per application only when the service label is a stream label.'
+            : 'No pattern snapshot for this run. Patterns are taken when the run is analysed; re-analyse it while Loki still holds the window.'}
         </Typography>
       </Box>
     );
@@ -292,14 +503,14 @@ function PatternsSection({ summary, commentCounts }: { summary: Configured; comm
         <Box>
           <Typography variant="subtitle1" fontWeight={600}>Top log patterns</Typography>
           <Typography variant="caption" color="text.secondary">
-            {summary.patternsSource === 'sampled'
+            {scope.patternsSource === 'sampled'
               ? 'Grouped by Perfana from up to 2,000 sampled error and warning lines (Loki\'s patterns API is not available), so counts are over the sample.'
               : 'Log line shapes Loki detected during the run, with variable parts shown as <_>.'}
           </Typography>
         </Box>
         <ToggleButtonGroup size="small" exclusive value={filter} onChange={(_e, v: PatternFilter | null) => v && setFilter(v)} aria-label="Which patterns to show">
           <ToggleButton value="problems">Errors &amp; warnings</ToggleButton>
-          <ToggleButton value="new" disabled={summary.newPatterns === null}>New{summary.newPatterns ? ` (${summary.newPatterns})` : ''}</ToggleButton>
+          <ToggleButton value="new" disabled={scope.newPatterns === null}>New{scope.newPatterns ? ` (${scope.newPatterns})` : ''}</ToggleButton>
           <ToggleButton value="all">All</ToggleButton>
         </ToggleButtonGroup>
       </Box>
@@ -321,7 +532,7 @@ function PatternsSection({ summary, commentCounts }: { summary: Configured; comm
           <TableBody>
             {rows.map((p) => (
               <TableRow
-                key={p.pattern}
+                key={patternKey(p)}
                 data-comment-item={patternKey(p)}
                 sx={{ '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 } }}
               >
@@ -374,7 +585,7 @@ function PatternsSection({ summary, commentCounts }: { summary: Configured; comm
   );
 }
 
-function SamplesSection({ samples }: { samples: LokiRunSample[] }) {
+function SamplesSection({ samples, app }: { samples: LokiRunSample[]; app: string | null }) {
   const [level, setLevel] = useState<'error' | 'warn'>('error');
   const [open, setOpen] = useState<number | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -382,7 +593,7 @@ function SamplesSection({ samples }: { samples: LokiRunSample[] }) {
   const warns = samples.filter((s) => s.level === 'warn');
   const list = level === 'error' ? errors : warns;
   const rows = showAll ? list : list.slice(0, SAMPLE_ROWS);
-  if (samples.length === 0) return null;
+  if (samples.length === 0 && !app) return null;
   return (
     <Box sx={{ mb: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
@@ -440,9 +651,14 @@ function SamplesSection({ samples }: { samples: LokiRunSample[] }) {
   );
 }
 
-function PanelSummary({ panel, commentCounts }: { panel: LokiRunPanel; commentCounts: CommentItemCounts }) {
+function PanelSummary({ panel, commentCounts, app, serviceLabel }: {
+  panel: LokiRunPanel; commentCounts: CommentItemCounts; app: string | null; serviceLabel: string;
+}) {
   const additive = /^(count|bytes|sum\()/.test(panel.aggregation.trim());
-  const rows = panel.series.slice(0, MAX_ROWS);
+  // A panel split by the service label narrows to the selected application's row; its share stays
+  // a share of the whole panel, which is what "how much of the log volume is this app" asks.
+  const narrowed = app !== null && panel.splitBy === serviceLabel;
+  const rows = (narrowed ? panel.series.filter((s) => s.name === app) : panel.series).slice(0, MAX_ROWS);
   const total = additive ? panel.series.reduce((n, s) => n + (s.total ?? 0), 0) : 0;
   const top = Math.max(1, ...rows.map((s) => (additive ? s.total : s.mean) ?? 0));
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -534,7 +750,7 @@ function PanelSummary({ panel, commentCounts }: { panel: LokiRunPanel; commentCo
           </TableBody>
         </Table>
       )}
-      {panel.series.length > MAX_ROWS && (
+      {!narrowed && panel.series.length > MAX_ROWS && (
         <Typography variant="caption" color="text.secondary">and {panel.series.length - MAX_ROWS} more</Typography>
       )}
     </Box>

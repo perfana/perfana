@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.109] - 2026-11-27
+
+### Added
+- **Applications in the Loki Logs card.** The card lists every application in the run, by the connection's new **Application label** (default `service_name`), with its lines, error lines, error rate against the same application in the baseline runs, and the number of patterns not seen there; an application missing from every baseline run is marked NEW. Selecting an application narrows the KPIs, the top log patterns, the latest error and warning lines, and the panels split by that label to it. The collapsed card names the application whose error rate rose. A workload with no "Log lines by level" panel now gets its error rate from the same per-application counts.
+- Patterns and lines are taken per application at analysis for the 20 applications with the most errors (then most lines). Per-application patterns need the application label to be a stream label, which `service_name` is in Loki 3; lines and counts work with structured metadata or parsed labels too.
+- Migration 1839 adds `loki_configs.service_label`, a `service` column on `loki_run_patterns` and `loki_run_samples`, and `loki_run_services`. Run it before the API and worker reach this version; runs analysed earlier show no Applications table until they are re-analysed while Loki still holds their window.
+
 ## [0.2.97.108] - 2026-11-27
 
 ### Added

@@ -11,14 +11,14 @@ jest.mock('@/lib/loki', () => ({
 }));
 
 import { fetchLokiRunSummary, LokiRunSummary } from '@/lib/loki';
-import LokiCard, { errorRateTrend, formatPct, isErrorName } from '../LokiCard';
+import LokiCard, { errorRateTrend, formatPct, isErrorName, scopeOf } from '../LokiCard';
 
 const mockSummary = fetchLokiRunSummary as jest.MockedFunction<typeof fetchLokiRunSummary>;
 const testRun = { test_run_id: 'run-1' };
 
 const configured: LokiRunSummary = {
   configured: true,
-  connection: { id: 'c1', label: 'Loki prod', levelLabel: 'detected_level' },
+  connection: { id: 'c1', label: 'Loki prod', levelLabel: 'detected_level', serviceLabel: 'service_name' },
   sources: [{ id: 'm1', level: 'environment', selector: '{namespace="perf"}', labels: [], exploreUrl: 'https://grafana/explore?x=1' }],
   window: { from: '2026-11-27T10:00:00Z', to: '2026-11-27T11:00:00Z' },
   errorRate: { totalLines: 10000, errorLines: 250, errorRatePct: 2.5, baseline: { errorRatePct: 0.5, runs: 4 } },
@@ -28,13 +28,22 @@ const configured: LokiRunSummary = {
     series: [{ name: 'info', mean: 162, peak: 300, total: 9750 }, { name: 'error', mean: 4, peak: 40, total: 250 }],
   }],
   patterns: [
-    { pattern: '<_> level=error msg="db timeout after <_>"', level: 'error', count: 200, firstSeen: '2026-11-27T10:05:00Z', lastSeen: '2026-11-27T10:50:00Z', source: 'patterns', isNew: true, exploreUrl: 'https://grafana/explore?p=1' },
-    { pattern: '<_> level=info msg="GET /health"', level: 'info', count: 9000, firstSeen: null, lastSeen: null, source: 'patterns', isNew: false, exploreUrl: null },
+    { pattern: '<_> level=error msg="db timeout after <_>"', level: 'error', count: 200, firstSeen: '2026-11-27T10:05:00Z', lastSeen: '2026-11-27T10:50:00Z', source: 'patterns', isNew: true, exploreUrl: 'https://grafana/explore?p=1', service: null },
+    { pattern: '<_> level=info msg="GET /health"', level: 'info', count: 9000, firstSeen: null, lastSeen: null, source: 'patterns', isNew: false, exploreUrl: null, service: null },
+    { pattern: '<_> level=error msg="card declined <_>"', level: 'error', count: 40, firstSeen: null, lastSeen: null, source: 'patterns', isNew: true, exploreUrl: null, service: 'payments' },
   ],
   patternsSource: 'patterns',
   newPatterns: 1,
   baselineRunCount: 4,
-  samples: [{ time: '2026-11-27T10:50:00Z', level: 'error', line: 'db timeout after 3000ms', labels: { service_name: 'checkout' } }],
+  samples: [
+    { time: '2026-11-27T10:50:00Z', level: 'error', line: 'db timeout after 3000ms', labels: { service_name: 'checkout' }, service: null },
+    { time: '2026-11-27T10:51:00Z', level: 'error', line: 'card declined 4242', labels: { service_name: 'payments' }, service: 'payments' },
+  ],
+  services: [
+    { service: 'checkout', totalLines: 6000, errorLines: 210, warnLines: 10, errorRatePct: 3.5, baseline: { errorRatePct: 0.4, runs: 4 }, isNew: false, newPatterns: 0, exploreUrl: 'https://grafana/explore?svc=checkout' },
+    { service: 'payments', totalLines: 4000, errorLines: 40, warnLines: 0, errorRatePct: 1, baseline: null, isNew: true, newPatterns: 1, exploreUrl: null },
+    { service: '(none)', totalLines: 0, errorLines: 0, warnLines: 0, errorRatePct: 0, baseline: null, isNew: null, newPatterns: null, exploreUrl: null },
+  ],
 };
 
 it('renders nothing when the workload has no Loki panels', async () => {
@@ -89,4 +98,45 @@ it('judges the error rate against the baseline as a ratio, ignoring sub-0.1-poin
   expect(formatPct(0.004)).toBe('<0.01%');
   expect(isErrorName('FATAL')).toBe(true);
   expect(isErrorName('warn')).toBe(false);
+});
+
+it('lists the applications, worst first, and flags the one whose error rate rose', async () => {
+  mockSummary.mockResolvedValue(configured);
+  render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+  expect(await screen.findByText('Applications')).toBeInTheDocument();
+  const checkout = screen.getByRole('button', { name: 'checkout' });
+  expect(checkout).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('link', { name: 'Open checkout in Grafana Explore' })).toHaveAttribute('href', 'https://grafana/explore?svc=checkout');
+  // An application with no lines in the run is left out.
+  expect(screen.queryByText(/no service_name/)).not.toBeInTheDocument();
+});
+
+it('narrows patterns and lines to the selected application, and clears back to all', async () => {
+  mockSummary.mockResolvedValue(configured);
+  render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+  expect(await screen.findByText(/db timeout after <_>/)).toBeInTheDocument();
+  expect(screen.queryByText(/card declined <_>/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'payments' }));
+  expect(screen.getByRole('button', { name: 'payments' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByText('service_name=payments')).toBeInTheDocument();
+  expect(screen.getByText(/card declined <_>/)).toBeInTheDocument();
+  expect(screen.queryByText(/db timeout after <_>/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /card declined 4242/ })).toBeInTheDocument();
+  // The level panel is not split by service_name, so it keeps every series.
+  expect(screen.getByText('Panels not split by service_name show all applications.')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByTestId('CancelIcon'));
+  expect(screen.getByText(/db timeout after <_>/)).toBeInTheDocument();
+});
+
+it('scopes the KPIs to an application, falling back to all-streams lines carrying its label', () => {
+  if (!configured.configured) throw new Error('fixture');
+  const checkout = scopeOf(configured, 'checkout', 'service_name');
+  expect(checkout.rate).toMatchObject({ totalLines: 6000, errorLines: 210, errorRatePct: 3.5 });
+  expect(checkout.samples.map((x) => x.line)).toEqual(['db timeout after 3000ms']);
+  expect(checkout.patterns).toEqual([]);
+  const all = scopeOf(configured, null, 'service_name');
+  expect(all.patterns.every((p) => p.service === null)).toBe(true);
+  expect(all.newPatterns).toBe(1);
 });

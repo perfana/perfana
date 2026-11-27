@@ -26,6 +26,10 @@ export class CreateLokiConfigDto {
   @IsOptional() @IsString() @Matches(LABEL_NAME) @MaxLength(100)
   levelLabel?: string;
 
+  @ApiPropertyOptional({ description: 'Label that names an application, for the per-application view', default: 'service_name' })
+  @IsOptional() @IsString() @Matches(LABEL_NAME) @MaxLength(100)
+  serviceLabel?: string;
+
   @ApiPropertyOptional({ default: 2 }) @IsOptional() @IsInt() @Min(1) @Max(20)
   maxConcurrentQueries?: number;
 }
@@ -140,7 +144,7 @@ export class StarterLokiQueriesDto {
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(255) testEnvironment!: string;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(255) workload!: string;
 
-  @ApiPropertyOptional({ description: 'Label that names a service in these streams', default: 'service_name' })
+  @ApiPropertyOptional({ description: 'Label that names a service in these streams; defaults to the connection\'s service label' })
   @IsOptional() @IsString() @Matches(LABEL_NAME) @MaxLength(255)
   serviceLabel?: string;
 }

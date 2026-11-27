@@ -1,6 +1,9 @@
 import {
   buildMetricExpr,
   buildStreamSelector,
+  labelFilter,
+  serviceLevelExpr,
+  withStreamMatcher,
   clusterLogLines,
   framesToLogLines,
   framesToSeries,
@@ -229,5 +232,22 @@ describe('lokiExploreUrl', () => {
     expect(url.searchParams.get('orgId')).toBe('3');
     const panes = JSON.parse(url.searchParams.get('panes')!);
     expect(panes.a).toMatchObject({ datasource: 'loki', range: { from: '1000', to: '2000' }, queries: [{ expr: '{app="shop"}' }] });
+  });
+});
+
+describe('per-application helpers', () => {
+  it('builds the lines-per-service-and-level expression', () => {
+    expect(serviceLevelExpr(shop, 'service_name', 'detected_level', 60))
+      .toBe('sum by (service_name, detected_level) (count_over_time({app="shop"} [60s]))');
+    expect(() => serviceLevelExpr(shop, 'bad-label', 'detected_level', 60)).toThrow(LokiError);
+  });
+
+  it('escapes a service name in a label filter and a stream matcher', () => {
+    expect(labelFilter('service_name', 'a"b')).toBe('| service_name="a\\"b"');
+    expect(buildStreamSelector(withStreamMatcher(shop, 'service_name', 'checkout').matchers))
+      .toBe('{app="shop", service_name="checkout"}');
+    // Replaces an existing matcher on the same label instead of AND-ing a contradiction.
+    expect(withStreamMatcher({ matchers: [{ label: 'service_name', op: '=~', value: '.+' }] }, 'service_name', 'x').matchers)
+      .toEqual([{ label: 'service_name', op: '=', value: 'x' }]);
   });
 });

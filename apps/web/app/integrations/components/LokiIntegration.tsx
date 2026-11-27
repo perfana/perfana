@@ -24,10 +24,13 @@ export interface LokiFormState {
   datasourceUid: string;
   datasourceName: string;
   levelLabel: string;
+  serviceLabel: string;
   maxConcurrentQueries: number;
 }
 
-const EMPTY: LokiFormState = { label: '', grafanaInstanceId: '', datasourceUid: '', datasourceName: '', levelLabel: 'detected_level', maxConcurrentQueries: 2 };
+const EMPTY: LokiFormState = {
+  label: '', grafanaInstanceId: '', datasourceUid: '', datasourceName: '', levelLabel: 'detected_level', serviceLabel: 'service_name', maxConcurrentQueries: 2,
+};
 
 function formFrom(c: LokiConfig): LokiFormState {
   return {
@@ -36,6 +39,7 @@ function formFrom(c: LokiConfig): LokiFormState {
     datasourceUid: c.datasourceUid,
     datasourceName: c.datasourceName ?? '',
     levelLabel: c.levelLabel,
+    serviceLabel: c.serviceLabel ?? 'service_name',
     maxConcurrentQueries: c.maxConcurrentQueries,
   };
 }
@@ -68,6 +72,7 @@ export function useLokiIntegration({
       datasourceUid: form.datasourceUid.trim(),
       datasourceName: form.datasourceName.trim() || null,
       levelLabel: form.levelLabel.trim() || 'detected_level',
+      serviceLabel: form.serviceLabel.trim() || 'service_name',
       maxConcurrentQueries: form.maxConcurrentQueries,
     };
     if (editing) await updateLokiConfig(editing.id, input);
@@ -262,6 +267,15 @@ export function LokiFormDialog({
                 helperText="The label that holds a line's level: detected_level (Loki 3), level, severity…"
               />
               <TextField
+                label="Application label"
+                fullWidth
+                value={form.serviceLabel}
+                onChange={(e) => set('serviceLabel', e.target.value)}
+                helperText="The label that names an application: service_name (Loki 3), app, container…"
+              />
+            </Box>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
                 label="Concurrent queries"
                 type="number"
                 fullWidth
@@ -322,6 +336,7 @@ export function LokiExpandedContent({ config }: { config: LokiConfig }) {
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
         <Chip size="small" variant="outlined" label={`Datasource: ${config.datasourceName ?? config.datasourceUid}`} />
         <Chip size="small" variant="outlined" label={`Level label: ${config.levelLabel}`} />
+        <Chip size="small" variant="outlined" label={`Application label: ${config.serviceLabel ?? 'service_name'}`} />
         <Chip size="small" variant="outlined" label={`${config.maxConcurrentQueries} concurrent queries`} />
       </Box>
     </Box>

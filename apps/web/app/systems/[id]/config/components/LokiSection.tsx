@@ -258,6 +258,7 @@ export default function LokiSection({ systemId, systemName, organizationId, sele
           <StarterDialog
             open={starterOpen}
             levelLabel={config.levelLabel}
+            serviceLabel={config.serviceLabel ?? 'service_name'}
             configId={configId}
             onClose={() => setStarterOpen(false)}
             onCreate={(serviceLabel) => run(async () => {
@@ -445,16 +446,16 @@ function AddStreamsDialog({ open, configId, systemId, env, workload, onClose, on
 // Starter panels
 // ---------------------------------------------------------------------------
 
-function StarterDialog({ open, levelLabel, configId, onClose, onCreate }: {
-  open: boolean; levelLabel: string; configId: string; onClose: () => void; onCreate: (serviceLabel: string) => void;
+function StarterDialog({ open, levelLabel, serviceLabel, configId, onClose, onCreate }: {
+  open: boolean; levelLabel: string; serviceLabel: string; configId: string; onClose: () => void; onCreate: (serviceLabel: string) => void;
 }) {
-  const [field, setField] = useState('service_name');
+  const [field, setField] = useState(serviceLabel);
   const [labelNames, setLabelNames] = useState<string[]>([]);
   useEffect(() => {
     if (!open) return;
-    setField('service_name');
+    setField(serviceLabel);
     fetchLokiLabels(configId).then(setLabelNames).catch(() => setLabelNames([]));
-  }, [open, configId]);
+  }, [open, configId, serviceLabel]);
   const valid = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(field);
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>

@@ -322,6 +322,16 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     ],
     "rls": true,
   },
+  "loki_run_services": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_loki_run_services_delete",
+      "INSERT:rls_loki_run_services_insert",
+      "SELECT:rls_loki_run_services_select",
+      "UPDATE:rls_loki_run_services_update",
+    ],
+    "rls": true,
+  },
   "loki_stream_mappings": {
     "force": true,
     "policies": [

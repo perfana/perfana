@@ -9,6 +9,7 @@ import {
   grafanaLokiDatasources,
   hostForLog,
   isErrorLevel,
+  labelFilter,
   lokiExploreUrl,
   lokiLabels,
   lokiLabelValues,
@@ -97,6 +98,30 @@ export function levelTotals(series: Array<{ name: string; total: number | null }
 }
 
 /**
+ * The run's error rate from the per-application snapshot, for a workload with no level panel. The
+ * baseline is pooled over the applications that have one, which is all of them once the baseline
+ * runs were snapshotted with this version.
+ */
+export function errorRateFromServices(
+  services: Array<{ totalLines: number; errorLines: number; baseline: { errorRatePct: number; runs: number } | null }>,
+) {
+  const total = services.reduce((n, s) => n + s.totalLines, 0);
+  if (total === 0) return null;
+  const errors = services.reduce((n, s) => n + s.errorLines, 0);
+  const withBaseline = services.filter((s) => s.baseline);
+  const bTotal = withBaseline.reduce((n, s) => n + s.totalLines, 0);
+  // Weight each application's baseline ratio by its lines in this run: the pooled ratio the baseline
+  // would show at this run's mix of applications.
+  const bErrors = withBaseline.reduce((n, s) => n + (s.baseline!.errorRatePct / 100) * s.totalLines, 0);
+  return {
+    totalLines: total,
+    errorLines: errors,
+    errorRatePct: (errors / total) * 100,
+    baseline: bTotal > 0 ? { errorRatePct: (bErrors / bTotal) * 100, runs: Math.max(...withBaseline.map((s) => s.baseline!.runs)) } : null,
+  };
+}
+
+/**
  * Loki connections, stream mappings and panels. Spec: docs/reference/Features/Loki Log Metrics (spec).md.
  *
  * Authorization is Splunk's: connections are org-owned (integration:loki:* capabilities) and must
@@ -162,6 +187,7 @@ export class LokiService {
       datasourceUid: dto.datasourceUid.trim(),
       datasourceName: dto.datasourceName?.trim() || null,
       levelLabel: dto.levelLabel?.trim() || 'detected_level',
+      serviceLabel: dto.serviceLabel?.trim() || 'service_name',
       maxConcurrentQueries: dto.maxConcurrentQueries ?? 2,
       organizationId: instance.organizationId,
       createdBy: userId,
@@ -181,6 +207,7 @@ export class LokiService {
     if (dto.datasourceUid !== undefined) entity.datasourceUid = dto.datasourceUid.trim();
     if (dto.datasourceName !== undefined) entity.datasourceName = dto.datasourceName?.trim() || null;
     if (dto.levelLabel !== undefined) entity.levelLabel = dto.levelLabel.trim() || 'detected_level';
+    if (dto.serviceLabel !== undefined) entity.serviceLabel = dto.serviceLabel.trim() || 'service_name';
     if (dto.maxConcurrentQueries !== undefined) entity.maxConcurrentQueries = dto.maxConcurrentQueries;
     entity.updatedBy = userId;
     const instance = entity.grafanaInstance;
@@ -398,7 +425,7 @@ export class LokiService {
     const sut = await this.loadSut(scope.systemUnderTestId, userId, roles, 'write');
     const config = await this.requireSameOrgConfig(scope.lokiConfigId, sut, userId, roles);
     const titles = new Set(existing.map((q) => q.panelTitle));
-    const service = scope.serviceLabel?.trim() || 'service_name';
+    const service = scope.serviceLabel?.trim() || config.serviceLabel || 'service_name';
     const fill = (s: string) => s.replace(/\{level\}/g, config.levelLabel).replace(/\{service\}/g, service);
     const created: LokiQuery[] = [];
     for (const p of STARTER_PANELS) {
@@ -572,13 +599,16 @@ export class LokiService {
       };
     });
 
-    const errorRate = await this.errorRate(run.testRunId, panels);
     const insights = await this.runInsights(run.testRunId, run.systemUnderTestId, run.testEnvironment, run.workload, configById, start, end, mappings);
+    // The level panel's ratio when there is one; otherwise the per-application snapshot's.
+    const errorRate = (await this.errorRate(run.testRunId, panels)) ?? errorRateFromServices(insights.services);
     const firstConfig = configById.get(queries[0]!.lokiConfigId);
 
     return {
       configured: true as const,
-      connection: firstConfig ? { id: firstConfig.id, label: firstConfig.label, levelLabel: firstConfig.levelLabel } : null,
+      connection: firstConfig
+        ? { id: firstConfig.id, label: firstConfig.label, levelLabel: firstConfig.levelLabel, serviceLabel: firstConfig.serviceLabel || 'service_name' }
+        : null,
       sources: mappings.map((m) => ({
         id: m.id, level: m.level, selector: m.selector, labels: m.labels,
         exploreUrl: explore(configById.get(m.lokiConfigId), m.selector),
@@ -629,7 +659,11 @@ export class LokiService {
     return { totalLines: totals.total, errorLines: totals.errors, errorRatePct: pct, baseline };
   }
 
-  /** The pattern and sample-line snapshots, with each pattern marked new against the baseline runs' snapshots. */
+  /**
+   * The pattern, sample-line and per-application snapshots. Each pattern is marked new against the
+   * baseline runs' snapshots of the same scope (all streams, or that application); each application
+   * gets its error rate and the same ratio pooled over the baseline runs.
+   */
   private async runInsights(
     testRunId: string,
     systemUnderTestId: string,
@@ -641,18 +675,33 @@ export class LokiService {
     mappings: LokiStreamMapping[],
   ) {
     const q = withRequestQuery(this.dataSource);
-    const present = await q.query(`SELECT to_regclass('public.loki_run_patterns') IS NOT NULL AS present`) as Array<{ present: boolean }>;
-    if (!present[0]?.present) return { patterns: [], patternsSource: null, newPatterns: null, samples: [] };
+    const present = await q.query(
+      `SELECT to_regclass('public.loki_run_patterns') IS NOT NULL AS patterns, to_regclass('public.loki_run_services') IS NOT NULL AS services`,
+    ) as Array<{ patterns: boolean; services: boolean }>;
+    if (!present[0]?.patterns) return { patterns: [], patternsSource: null, newPatterns: null, baselineRunCount: 0, samples: [], services: [] };
+    // Before migration 1839 there is no service column: every row is an all-streams row.
+    const perService = !!present[0]?.services;
+    const serviceCol = perService ? 'service' : 'NULL::varchar AS service';
 
+    type PatternRow = { loki_config_id: string | null; pattern: string; pattern_key: string; level: string | null; count: string; first_seen: Date | null; last_seen: Date | null; source: string; service: string | null };
     const patternRows = await q.query(
-      `SELECT loki_config_id, pattern, pattern_key, level, count::bigint AS count, first_seen, last_seen, source
-         FROM loki_run_patterns WHERE test_run_id = $1 ORDER BY count DESC LIMIT 100`,
+      `SELECT loki_config_id, pattern, pattern_key, level, count::bigint AS count, first_seen, last_seen, source, ${serviceCol}
+         FROM loki_run_patterns WHERE test_run_id = $1 ORDER BY count DESC LIMIT 1000`,
       [testRunId],
-    ) as Array<{ loki_config_id: string | null; pattern: string; pattern_key: string; level: string | null; count: string; first_seen: Date | null; last_seen: Date | null; source: string }>;
+    ) as PatternRow[];
     const sampleRows = await q.query(
-      `SELECT loki_config_id, "time", level, line, labels FROM loki_run_samples WHERE test_run_id = $1 ORDER BY "time" DESC LIMIT 100`,
+      `SELECT loki_config_id, "time", level, line, labels, ${serviceCol} FROM loki_run_samples WHERE test_run_id = $1 ORDER BY "time" DESC LIMIT 1000`,
       [testRunId],
-    ) as Array<{ loki_config_id: string | null; time: Date; level: string | null; line: string; labels: Record<string, string> }>;
+    ) as Array<{ loki_config_id: string | null; time: Date; level: string | null; line: string; labels: Record<string, string>; service: string | null }>;
+    type ServiceRow = { service: string; total: string; errors: string; warns: string; loki_config_id: string | null };
+    const serviceRows = perService
+      ? await q.query(
+          `SELECT service, SUM(total_lines)::bigint AS total, SUM(error_lines)::bigint AS errors, SUM(warn_lines)::bigint AS warns,
+                  MIN(loki_config_id::text) AS loki_config_id
+             FROM loki_run_services WHERE test_run_id = $1 GROUP BY service`,
+          [testRunId],
+        ) as ServiceRow[]
+      : [];
 
     // Baseline runs: the control group's, else the workload's previous completed runs.
     let baselineRuns: string[] = [];
@@ -672,23 +721,60 @@ export class LokiService {
       ) as Array<{ test_run_id: string }>;
       baselineRuns = prev.map((r) => r.test_run_id);
     }
-    let known: Set<string> | null = null;
+
+    // Known pattern keys per scope ('' = all streams). A scope with no baseline snapshot at all
+    // cannot be judged: "new" is null for it, never claimed without evidence. Per-application scopes
+    // are judged once any baseline run has per-application rows; an application missing from all of
+    // them is itself new, so all its patterns are.
+    const known = new Map<string, Set<string>>();
+    let baselineHasServices = false;
+    const baselineServices = new Map<string, { total: number; errors: number; runs: Set<string> }>();
     if (baselineRuns.length > 0) {
       const rows = await q.query(
-        `SELECT DISTINCT pattern_key FROM loki_run_patterns WHERE test_run_id = ANY($1::varchar[])`,
+        `SELECT DISTINCT ${perService ? "COALESCE(service, '')" : "''"} AS scope, pattern_key FROM loki_run_patterns WHERE test_run_id = ANY($1::varchar[])`,
         [baselineRuns],
-      ) as Array<{ pattern_key: string }>;
-      // No snapshot in any baseline run (e.g. they ran before this feature): "new" cannot be decided.
-      if (rows.length > 0) known = new Set(rows.map((r) => r.pattern_key));
+      ) as Array<{ scope: string; pattern_key: string }>;
+      for (const r of rows) {
+        if (r.scope) baselineHasServices = true;
+        const set = known.get(r.scope) ?? new Set<string>();
+        set.add(r.pattern_key);
+        known.set(r.scope, set);
+      }
+      if (perService) {
+        const svc = await q.query(
+          `SELECT test_run_id, service, total_lines::bigint AS total, error_lines::bigint AS errors
+             FROM loki_run_services WHERE test_run_id = ANY($1::varchar[])`,
+          [baselineRuns],
+        ) as Array<{ test_run_id: string; service: string; total: string; errors: string }>;
+        for (const r of svc) {
+          baselineHasServices = true;
+          const b = baselineServices.get(r.service) ?? { total: 0, errors: 0, runs: new Set<string>() };
+          b.total += Number(r.total);
+          b.errors += Number(r.errors);
+          b.runs.add(r.test_run_id);
+          baselineServices.set(r.service, b);
+        }
+      }
     }
+    const isNewIn = (scope: string, key: string): boolean | null => {
+      if (scope === '') return known.has('') ? !known.get('')!.has(key) : null;
+      if (!baselineHasServices) return null;
+      return !(known.get(scope)?.has(key) ?? false);
+    };
 
-    const explorePattern = (configId: string | null, pattern: string): string | null => {
+    const serviceLabelOf = (configId: string | null): string =>
+      (configId ? configById.get(configId)?.serviceLabel : undefined) || 'service_name';
+    const explore = (configId: string | null, service: string | null, pipeline: string): string | null => {
       const config = configId ? configById.get(configId) : undefined;
       const g = config?.grafanaInstance;
       const mapping = mappings.find((m) => m.lokiConfigId === configId);
       if (!config || !g || !start || !mapping) return null;
-      // `|>` is Loki's pattern match filter (Loki 3.1+); on older Loki Explore shows the parse error.
-      return lokiExploreUrl(g.client_url, g.orgId, config.datasourceUid, buildLogExpr(mapping, `|> ${JSON.stringify(pattern)}`), start, end);
+      try {
+        const only = service ? `${labelFilter(serviceLabelOf(configId), service)} ` : '';
+        return lokiExploreUrl(g.client_url, g.orgId, config.datasourceUid, buildLogExpr(mapping, `${only}${pipeline}`.trim()), start, end);
+      } catch {
+        return null;
+      }
     };
 
     const patterns = patternRows.map((r) => ({
@@ -698,20 +784,50 @@ export class LokiService {
       firstSeen: r.first_seen ? new Date(r.first_seen).toISOString() : null,
       lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : null,
       source: r.source,
-      isNew: known === null ? null : !known.has(r.pattern_key),
-      exploreUrl: explorePattern(r.loki_config_id, r.pattern),
+      service: r.service ?? null,
+      isNew: isNewIn(r.service ?? '', r.pattern_key),
+      // `|>` is Loki's pattern match filter (Loki 3.1+); on older Loki Explore shows the parse error.
+      exploreUrl: explore(r.loki_config_id, r.service ?? null, `|> ${JSON.stringify(r.pattern)}`),
     }));
+    const overall = patterns.filter((p) => p.service === null);
+    const newOf = (scope: string | null) => {
+      const ps = patterns.filter((p) => p.service === scope);
+      return ps.some((p) => p.isNew === null) || (scope === null ? !known.has('') : !baselineHasServices) ? null : ps.filter((p) => p.isNew).length;
+    };
+
+    const services = serviceRows
+      .map((r) => {
+        const total = Number(r.total);
+        const errors = Number(r.errors);
+        const b = baselineServices.get(r.service);
+        return {
+          service: r.service,
+          totalLines: total,
+          errorLines: errors,
+          warnLines: Number(r.warns),
+          errorRatePct: total > 0 ? (errors / total) * 100 : 0,
+          baseline: b && b.total > 0 ? { errorRatePct: (b.errors / b.total) * 100, runs: b.runs.size } : null,
+          /** Absent from every baseline run's snapshot; null when the baseline has no per-application snapshot. */
+          isNew: baselineHasServices ? !b : null,
+          newPatterns: newOf(r.service),
+          exploreUrl: explore(r.loki_config_id, r.service === '(none)' ? null : r.service, ''),
+        };
+      })
+      .sort((a, b) => b.errorLines - a.errorLines || b.totalLines - a.totalLines || a.service.localeCompare(b.service));
+
     return {
       patterns,
-      patternsSource: patternRows[0]?.source ?? null,
-      newPatterns: known === null ? null : patterns.filter((p) => p.isNew).length,
-      baselineRunCount: known === null ? 0 : baselineRuns.length,
+      patternsSource: (overall[0] ?? patternRows[0])?.source ?? null,
+      newPatterns: newOf(null),
+      baselineRunCount: known.size === 0 && baselineServices.size === 0 ? 0 : baselineRuns.length,
       samples: sampleRows.map((r) => ({
         time: new Date(r.time).toISOString(),
         level: normalizeLevel(r.level),
         line: r.line,
         labels: r.labels ?? {},
+        service: r.service ?? null,
       })),
+      services,
     };
   }
 
@@ -898,6 +1014,7 @@ export class LokiService {
       datasourceUid: c.datasourceUid,
       datasourceName: c.datasourceName ?? null,
       levelLabel: c.levelLabel,
+      serviceLabel: c.serviceLabel || 'service_name',
       maxConcurrentQueries: c.maxConcurrentQueries,
       organizationId: c.organizationId,
       createdAt: c.createdAt,

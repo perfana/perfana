@@ -301,6 +301,32 @@ export function buildLogExpr(mapping: LokiStreamMappingLike, pipeline = ''): str
   return `${buildStreamSelector(mapping.matchers)}${pipeline ? ` ${pipeline}` : ''}`;
 }
 
+/** `| label="value"`: a label filter, which matches a stream label, structured metadata or a parsed label alike. */
+export function labelFilter(label: string, value: string): string {
+  if (!LABEL_NAME_RE.test(label)) throw new LokiError(`Invalid Loki label name: ${label}`);
+  return `| ${label}=${lokiQuote(value)}`;
+}
+
+/** The mapping narrowed to one value of a STREAM label (the patterns API takes a selector only). */
+export function withStreamMatcher(mapping: LokiStreamMappingLike, label: string, value: string): LokiStreamMappingLike {
+  if (!LABEL_NAME_RE.test(label)) throw new LokiError(`Invalid Loki label name: ${label}`);
+  return { ...mapping, matchers: [...mapping.matchers.filter((m) => m.label !== label), { label, op: '=', value }] };
+}
+
+/**
+ * Lines per (service, level) over the window, one sample per `stepSeconds`: the per-application
+ * breakdown behind the card's Applications table. Both labels go into `by`, which reads stream
+ * labels, structured metadata (Loki 3's `detected_level`) and parsed labels alike.
+ */
+export function serviceLevelExpr(mapping: LokiStreamMappingLike, serviceLabel: string, levelLabel: string, stepSeconds: number): string {
+  for (const l of [serviceLabel, levelLabel]) {
+    if (!LABEL_NAME_RE.test(l)) throw new LokiError(`Invalid Loki label name: ${l}`);
+  }
+  const problem = validateMatchers(mapping.matchers);
+  if (problem) throw new LokiError(`Refusing to run the query: ${problem}`);
+  return `sum by (${serviceLabel}, ${levelLabel}) (count_over_time(${buildStreamSelector(mapping.matchers)} [${Math.max(1, Math.round(stepSeconds))}s]))`;
+}
+
 export interface LokiSeries {
   labels: Record<string, string>;
   points: Array<{ time: Date; value: number }>;
@@ -765,6 +791,10 @@ export function normalizeLevel(raw: string | null | undefined): string | null {
 
 export function isErrorLevel(raw: string | null | undefined): boolean {
   return normalizeLevel(raw) === 'error';
+}
+
+export function isWarnLevel(raw: string | null | undefined): boolean {
+  return normalizeLevel(raw) === 'warn';
 }
 
 /** A level guessed from a line's text, for lines whose stream carries no level label. */

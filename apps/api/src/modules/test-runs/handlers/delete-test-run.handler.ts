@@ -241,6 +241,9 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
     if (loki[0]?.present === true) {
       await manager.query('DELETE FROM loki_run_patterns WHERE test_run_id = $1', [testRunId]);
       await manager.query('DELETE FROM loki_run_samples WHERE test_run_id = $1', [testRunId]);
+      // Migration 1839, which may not have run yet either.
+      const apps = await manager.query(`SELECT to_regclass('public.loki_run_services') IS NOT NULL AS present`);
+      if (apps[0]?.present === true) await manager.query('DELETE FROM loki_run_services WHERE test_run_id = $1', [testRunId]);
       this.logger.log(`Deleted Loki snapshots for test_run_id: ${testRunId}`);
     }
 

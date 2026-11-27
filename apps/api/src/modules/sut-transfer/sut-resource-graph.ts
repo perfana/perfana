@@ -196,6 +196,7 @@ export const SUT_RESOURCES: SutResource[] = [
   // Loki snapshots taken at analysis (migration 1838): run history, kept with the run.
   { table: 'loki_run_patterns', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'loki_run_samples', filter: 'byTestRunVarchar', group: 'core' },
+  { table: 'loki_run_services', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_metric_statistics', filter: 'byTestRunVarchar', group: 'core' },
   // Derived raw -> group membership the statistics above were computed with (migration 1819).
   // Keyed on the varchar test_run_id with no FK to test_runs, so it travels with the selected

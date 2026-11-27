@@ -18,6 +18,8 @@ export interface LokiConfig {
   datasourceUid: string;
   datasourceName: string | null;
   levelLabel: string;
+  /** The label that names an application (default service_name), for the card's Applications view. */
+  serviceLabel: string;
   maxConcurrentQueries: number;
   organizationId: string;
 }
@@ -28,6 +30,7 @@ export interface LokiConfigInput {
   datasourceUid?: string;
   datasourceName?: string | null;
   levelLabel?: string;
+  serviceLabel?: string;
   maxConcurrentQueries?: number;
 }
 
@@ -222,9 +225,11 @@ export interface LokiRunPattern {
   firstSeen: string | null;
   lastSeen: string | null;
   source: 'patterns' | 'sampled' | string;
-  /** Absent from every baseline run's snapshot; null when no baseline run has a snapshot. */
+  /** Absent from every baseline run's snapshot of the same scope; null when that cannot be judged. */
   isNew: boolean | null;
   exploreUrl: string | null;
+  /** The application this pattern was taken for; null = over all mapped streams. */
+  service: string | null;
 }
 
 export interface LokiRunSample {
@@ -232,7 +237,27 @@ export interface LokiRunSample {
   level: string | null;
   line: string;
   labels: Record<string, string>;
+  /** The application this line was sampled for; null = sampled over all mapped streams. */
+  service: string | null;
 }
+
+/** One application (a value of the connection's service label) in the run. */
+export interface LokiRunService {
+  /** `(none)` collects the lines that carry no service label. */
+  service: string;
+  totalLines: number;
+  errorLines: number;
+  warnLines: number;
+  errorRatePct: number;
+  baseline: { errorRatePct: number; runs: number } | null;
+  /** Absent from every baseline run; null when the baseline has no per-application snapshot. */
+  isNew: boolean | null;
+  newPatterns: number | null;
+  exploreUrl: string | null;
+}
+
+/** What the API calls the lines that carry no service label. */
+export const NO_SERVICE = '(none)';
 
 export interface LokiErrorRate {
   totalLines: number;
@@ -245,7 +270,7 @@ export type LokiRunSummary =
   | { configured: false }
   | {
       configured: true;
-      connection: { id: string; label: string; levelLabel: string } | null;
+      connection: { id: string; label: string; levelLabel: string; serviceLabel?: string } | null;
       sources: Array<Pick<LokiStreamMapping, 'id' | 'level' | 'selector' | 'labels'> & { exploreUrl: string | null }>;
       window: { from: string; to: string } | null;
       errorRate: LokiErrorRate | null;
@@ -255,6 +280,8 @@ export type LokiRunSummary =
       newPatterns: number | null;
       baselineRunCount?: number;
       samples: LokiRunSample[];
+      /** Absent from an API older than the Applications view. */
+      services?: LokiRunService[];
     };
 
 export const fetchLokiRunSummary = (testRunId: string) =>

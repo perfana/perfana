@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { LokiService, levelTotals } from './loki.service';
+import { LokiService, errorRateFromServices, levelTotals } from './loki.service';
 import { Capability } from '../../constants/capabilities.constants';
 
 const ORG_A = '00000000-0000-0000-0000-00000000000a';
@@ -152,5 +152,79 @@ describe('levelTotals', () => {
 
   it('is null when no series has a total', () => {
     expect(levelTotals([{ name: 'error', total: null }])).toBeNull();
+  });
+});
+
+describe('errorRateFromServices', () => {
+  it('pools the run, and weights each application\'s baseline by its lines in this run', () => {
+    const rate = errorRateFromServices([
+      { totalLines: 900, errorLines: 90, baseline: { errorRatePct: 1, runs: 3 } },
+      { totalLines: 100, errorLines: 0, baseline: null },
+    ]);
+    expect(rate).toMatchObject({ totalLines: 1000, errorLines: 90, errorRatePct: 9 });
+    // Only the application with a baseline counts towards it: 1% of its 900 lines.
+    expect(rate!.baseline).toEqual({ errorRatePct: 1, runs: 3 });
+  });
+
+  it('is null with no lines', () => {
+    expect(errorRateFromServices([])).toBeNull();
+  });
+});
+
+describe('LokiService run insights per application', () => {
+  function insights(rows: { baselinePatterns: Array<{ scope: string; pattern_key: string }>; baselineServices: Array<{ test_run_id: string; service: string; total: string; errors: string }> }) {
+    const { service, dataSource } = build();
+    dataSource.manager.query.mockImplementation((async (sql: string) => {
+      if (sql.includes('to_regclass')) return [{ patterns: true, services: true }];
+      if (sql.includes('FROM loki_run_patterns WHERE test_run_id = $1')) {
+        return [
+          { loki_config_id: CFG, pattern: 'all <_>', pattern_key: 'all <_>', level: 'error', count: '9', first_seen: null, last_seen: null, source: 'patterns', service: null },
+          { loki_config_id: CFG, pattern: 'pay <_>', pattern_key: 'pay <_>', level: 'error', count: '4', first_seen: null, last_seen: null, source: 'patterns', service: 'payments' },
+        ];
+      }
+      if (sql.includes('FROM loki_run_samples')) return [];
+      if (sql.includes('FROM loki_run_services WHERE test_run_id = $1')) {
+        return [
+          { service: 'payments', total: '1000', errors: '50', warns: '0', loki_config_id: CFG },
+          { service: 'checkout', total: '3000', errors: '30', warns: '5', loki_config_id: CFG },
+        ];
+      }
+      if (sql.includes('control-group:for-run')) return [{ control_group_id: 'g', test_runs: ['base-1', 'base-2'], n_test_runs: 2, first_datetime: null, last_datetime: null }];
+      if (sql.includes('SELECT DISTINCT')) return rows.baselinePatterns;
+      if (sql.includes('FROM loki_run_services WHERE test_run_id = ANY')) return rows.baselineServices;
+      return [];
+    }) as never);
+    return (service as unknown as { runInsights: (...a: unknown[]) => Promise<{
+      newPatterns: number | null;
+      patterns: Array<{ service: string | null; isNew: boolean | null }>;
+      services: Array<{ service: string; errorRatePct: number; baseline: { errorRatePct: number; runs: number } | null; isNew: boolean | null; newPatterns: number | null }>;
+    }> }).runInsights('run-1', SUT, 'acc', 'load', new Map(), new Date(0), new Date(1000), []);
+  }
+
+  it('gives each application its error rate, pooled baseline and new patterns, worst first', async () => {
+    const r = await insights({
+      baselinePatterns: [{ scope: '', pattern_key: 'all <_>' }, { scope: 'checkout', pattern_key: 'x' }],
+      baselineServices: [
+        { test_run_id: 'base-1', service: 'checkout', total: '1000', errors: '5' },
+        { test_run_id: 'base-2', service: 'checkout', total: '1000', errors: '15' },
+      ],
+    });
+    expect(r.services.map((s) => s.service)).toEqual(['payments', 'checkout']);
+    const checkout = r.services.find((s) => s.service === 'checkout')!;
+    expect(checkout.errorRatePct).toBe(1);
+    expect(checkout.baseline).toEqual({ errorRatePct: 1, runs: 2 });
+    expect(checkout.isNew).toBe(false);
+    // payments is in no baseline run: the application and its patterns are new.
+    const payments = r.services.find((s) => s.service === 'payments')!;
+    expect(payments).toMatchObject({ isNew: true, baseline: null, newPatterns: 1 });
+    expect(r.patterns.find((p) => p.service === 'payments')!.isNew).toBe(true);
+    expect(r.newPatterns).toBe(0);
+  });
+
+  it('does not claim anything is new when the baseline runs have no per-application snapshot', async () => {
+    const r = await insights({ baselinePatterns: [{ scope: '', pattern_key: 'old' }], baselineServices: [] });
+    expect(r.services.every((s) => s.isNew === null && s.newPatterns === null)).toBe(true);
+    expect(r.patterns.find((p) => p.service === 'payments')!.isNew).toBeNull();
+    expect(r.newPatterns).toBe(1);
   });
 });

@@ -204,6 +204,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "datasourceUid",
     "datasourceName",
     "levelLabel",
+    "serviceLabel",
     "maxConcurrentQueries",
   ],
   "LokiQuery": [
@@ -223,6 +224,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
   ],
   "LokiRunPattern": [],
   "LokiRunSample": [],
+  "LokiRunService": [],
   "LokiStreamMapping": [
     "lokiConfigId",
     "systemUnderTestId",

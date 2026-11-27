@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../../../config/proxy-resolver.js', () => ({ resolveFetchProxyDispatcher: vi.fn(async () => undefined) }));
 
-import { mergePatterns, selectPatterns, snapshotLokiInsights, LOKI_TOP_PATTERNS } from '../../../../pipelines/helpers/loki-insights.js';
+import { mergePatterns, pickServices, selectPatterns, serviceTotalsFrom, snapshotLokiInsights, LOKI_TOP_PATTERNS } from '../../../../pipelines/helpers/loki-insights.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
 
 const CONFIG = {
-  id: 'cfg', label: 'logs', datasource_uid: 'loki-uid', level_label: 'detected_level', max_concurrent_queries: 2,
+  id: 'cfg', label: 'logs', datasource_uid: 'loki-uid', level_label: 'detected_level', service_label: 'service_name', max_concurrent_queries: 2,
   organization_id: 'org', grafana_label: 'grafana', base_url: 'https://grafana.internal', grafana_org_id: '1',
   api_key: 'k', username: null, password: null, use_proxy: false, grafana_organization_id: 'org',
 };
@@ -16,11 +16,11 @@ const run = {
   startTime: new Date('2026-11-27T10:00:00Z'), endTime: new Date('2026-11-27T11:00:00Z'), organizationId: 'org', teamId: null,
 };
 
-function makeDb() {
+function makeDb(opts: { services?: boolean } = {}) {
   const tx = { query: vi.fn(async () => []) };
   const db = {
     query: vi.fn(async (sql: string) => {
-      if (sql.includes('to_regclass')) return [{ present: true }];
+      if (sql.includes('to_regclass')) return [{ patterns: true, services: opts.services ?? false }];
       if (sql.includes('FROM loki_queries')) return [{ loki_config_id: 'cfg' }];
       if (sql.includes('FROM loki_stream_mappings')) return [{ loki_config_id: 'cfg', matchers: [{ label: 'app', op: '=', value: 'shop' }], labels: [] }];
       if (sql.includes('FROM loki_configs')) return [CONFIG];
@@ -103,5 +103,64 @@ describe('snapshotLokiInsights', () => {
     const result = await snapshotLokiInsights(db as never, logger, run);
     expect(result.source).toBe('sampled');
     expect(result.patterns).toBeGreaterThan(0);
+  });
+});
+
+describe('per-application snapshot', () => {
+  const t = run.startTime.getTime();
+  const svcFrames = (rows: Array<{ svc: string; level: string; n: number }>) => json({ results: { A: { frames: rows.map((r) => ({
+    schema: { fields: [{ name: 'Time', type: 'time' }, { name: 'Value', type: 'number', labels: { service_name: r.svc, detected_level: r.level } }] },
+    data: { values: [[t + 60_000], [r.n]] },
+  })) } } });
+
+  it('sums lines per service and level, and picks the applications with most errors first', () => {
+    const totals = serviceTotalsFrom([
+      { labels: { service_name: 'a', detected_level: 'error' }, points: [{ value: 2 }, { value: 3 }] },
+      { labels: { service_name: 'a', detected_level: 'info' }, points: [{ value: 95 }] },
+      { labels: { service_name: 'b', detected_level: 'info' }, points: [{ value: 500 }] },
+      { labels: { detected_level: 'error' }, points: [{ value: 9 }] },
+    ], 'service_name', 'detected_level');
+    expect(totals.get('a')).toEqual({ service: 'a', total: 100, errors: 5, warns: 0 });
+    expect(pickServices([...totals.values()]).map((s) => s.service)).toEqual(['a', 'b']);
+  });
+
+  it('stores lines per application, and its own patterns and lines', async () => {
+    fetchMock.mockImplementation(async (url: string, init: { body?: string }) => {
+      if (url.includes('/resources/patterns')) {
+        const scoped = decodeURIComponent(url).includes('service_name="checkout"');
+        return json({ status: 'success', data: [{ pattern: scoped ? 'checkout boom <_>' : 'all boom <_>', level: 'error', samples: [[t / 1000 + 60, 3]] }] });
+      }
+      const expr = JSON.parse(init.body ?? '{}').queries?.[0]?.expr ?? '';
+      if (expr.startsWith('sum by (service_name, detected_level)')) return svcFrames([{ svc: 'checkout', level: 'error', n: 4 }, { svc: 'checkout', level: 'info', n: 96 }]);
+      if (expr.includes('service_name="checkout"') && expr.includes('error|err')) {
+        return json({ results: { A: { frames: [{
+          schema: { fields: [{ name: 'Time', type: 'time' }, { name: 'Line', type: 'string' }] },
+          data: { values: [[t + 5000], ['checkout boom 1']] },
+        }] } } });
+      }
+      return emptyLogs();
+    });
+    const { db, tx } = makeDb({ services: true });
+    const result = await snapshotLokiInsights(db as never, logger, run);
+    expect(result).toMatchObject({ services: 1, errors: [] });
+    const calls = tx.query.mock.calls.map((c) => [String(c[0]), c[1] as unknown[]]);
+    expect(calls.some(([sql]) => (sql as string).includes('DELETE FROM loki_run_services'))).toBe(true);
+    const svc = calls.find(([sql]) => (sql as string).includes('INSERT INTO loki_run_services'))!;
+    expect(svc[1]).toEqual(expect.arrayContaining(['checkout', 100, 4, 0]));
+    const patterns = calls.filter(([sql]) => (sql as string).includes('INSERT INTO loki_run_patterns')).map(([, v]) => v as unknown[]);
+    expect(patterns.map((v) => [v[3], v.at(-1)])).toEqual([['all boom <_>', null], ['checkout boom <_>', 'checkout']]);
+    const samples = calls.filter(([sql]) => (sql as string).includes('INSERT INTO loki_run_samples')).map(([, v]) => v as unknown[]);
+    expect(samples.map((v) => [v[5], v.at(-1)])).toEqual([['checkout boom 1', 'checkout']]);
+  });
+
+  it('writes no service column before migration 1839', async () => {
+    fetchMock.mockImplementation(async (url: string) => (url.includes('/resources/patterns')
+      ? json({ status: 'success', data: [{ pattern: 'x <_>', level: 'error', samples: [[t / 1000 + 60, 1]] }] })
+      : emptyLogs()));
+    const { db, tx } = makeDb({ services: false });
+    await snapshotLokiInsights(db as never, logger, run);
+    const sqls = tx.query.mock.calls.map((c) => String(c[0]));
+    expect(sqls.some((q) => q.includes('loki_run_services'))).toBe(false);
+    expect(sqls.filter((q) => q.includes('INSERT INTO loki_run_patterns')).every((q) => !q.includes('service'))).toBe(true);
   });
 });

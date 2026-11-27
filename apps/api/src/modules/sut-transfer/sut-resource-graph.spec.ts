@@ -29,7 +29,7 @@ describe('SUT_RESOURCES', () => {
       'ds_tracked_differences', 'test_run_transaction_stats',
       'series_grouping_rules', 'ds_metric_series_groups',
       'splunk_configs', 'splunk_entity_mappings', 'splunk_queries',
-      'loki_configs', 'loki_stream_mappings', 'loki_queries', 'loki_run_patterns', 'loki_run_samples',
+      'loki_configs', 'loki_stream_mappings', 'loki_queries', 'loki_run_patterns', 'loki_run_samples', 'loki_run_services',
     ].sort();
     expect([...tables].sort()).toEqual(expected);
   });

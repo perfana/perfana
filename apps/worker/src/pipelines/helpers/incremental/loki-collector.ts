@@ -74,6 +74,8 @@ export interface LokiConfigRow {
   label: string;
   datasource_uid: string;
   level_label: string;
+  /** NULL-safe before migration 1839, which adds the column: read through to_jsonb. */
+  service_label: string;
   max_concurrent_queries: number;
   organization_id: string;
   grafana_label: string;
@@ -95,7 +97,9 @@ export interface LokiMappingRow {
 /** A connection row with the Grafana instance it queries through, credentials decrypted. */
 export async function loadLokiConfig(db: WorkerDatabaseService, id: string): Promise<LokiConfigRow | null> {
   const rows = await db.query<LokiConfigRow>(
-    `SELECT c.id, c.label, c.datasource_uid, c.level_label, c.max_concurrent_queries, c.organization_id,
+    `SELECT c.id, c.label, c.datasource_uid, c.level_label,
+            COALESCE(to_jsonb(c)->>'service_label', 'service_name') AS service_label,
+            c.max_concurrent_queries, c.organization_id,
             g.label AS grafana_label, COALESCE(NULLIF(g.server_url, ''), g.client_url) AS base_url,
             g.org_id AS grafana_org_id, g.api_key, g.username, g.password, g.use_proxy,
             g.organization_id AS grafana_organization_id
