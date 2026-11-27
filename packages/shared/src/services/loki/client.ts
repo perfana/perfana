@@ -313,6 +313,46 @@ export function withStreamMatcher(mapping: LokiStreamMappingLike, label: string,
   return { ...mapping, matchers: [...mapping.matchers.filter((m) => m.label !== label), { label, op: '=', value }] };
 }
 
+/** A literal for a regex matcher or line filter (RE2 metacharacters escaped). */
+const regexLiteral = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Several mappings as one stream selector, for an Explore link (which takes exactly one): possible
+ * when they differ in a single label that each names with `=`, which becomes `label=~"a|b"`.
+ * Null when they cannot be combined; the caller then falls back to one mapping.
+ */
+export function mergeMappings(mappings: LokiStreamMappingLike[]): LokiStreamMappingLike | null {
+  if (mappings.length <= 1) return mappings[0] ?? null;
+  const rest = (m: LokiStreamMappingLike, label: string) =>
+    JSON.stringify(m.matchers.filter((x) => x.label !== label).map((x) => `${x.label}${x.op}${x.value}`).sort());
+  for (const label of new Set(mappings.flatMap((m) => m.matchers.map((x) => x.label)))) {
+    const own = mappings.map((m) => m.matchers.filter((x) => x.label === label));
+    if (!own.every((x) => x.length === 1 && x[0]!.op === '=')) continue;
+    const base = rest(mappings[0]!, label);
+    if (mappings.some((m) => rest(m, label) !== base)) continue;
+    const values = [...new Set(own.map((x) => x[0]!.value))];
+    return {
+      matchers: [
+        ...mappings[0]!.matchers.filter((x) => x.label !== label),
+        values.length === 1 ? { label, op: '=', value: values[0]! } : { label, op: '=~', value: values.map(regexLiteral).join('|') },
+      ],
+    };
+  }
+  return null;
+}
+
+/**
+ * The line filter that finds a pattern's lines. A pattern from Loki's patterns API is matched with
+ * `|>`. A `sampled` one is Perfana's `lineShape` of a line (cut at 1000 characters, whitespace
+ * collapsed, separators around placeholders dropped), which `|>` can never match: it becomes an
+ * unanchored regex of its literal parts, whitespace as `\s+`, anything between them.
+ */
+export function patternLineFilter(pattern: string, source: string | null | undefined): string {
+  if (source !== 'sampled') return `|> ${lokiQuote(pattern)}`;
+  const parts = pattern.split('<_>').map((p) => p.trim()).filter(Boolean).map((p) => regexLiteral(p).replace(/\s+/g, '\\s+'));
+  return parts.length > 0 ? `|~ ${lokiQuote(`(?s)${parts.join('.*?')}`)}` : '';
+}
+
 /**
  * Lines per (service, level) over the window, one sample per `stepSeconds`: the per-application
  * breakdown behind the card's Applications table. Both labels go into `by`, which reads stream
