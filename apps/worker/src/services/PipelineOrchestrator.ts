@@ -465,7 +465,7 @@ export class PipelineOrchestrator {
     let snapshot: Awaited<ReturnType<typeof snapshotLokiInsights>> | null = null;
     try {
       snapshot = await snapshotLokiInsights(this.databaseService, this.logger, testRun);
-      if (snapshot.errors.length > 0) this.logger.warn(`Loki snapshot for ${testRunId} had errors: ${snapshot.errors.join(' | ')}`);
+      if (snapshot.errors.length > 0) {this.logger.warn(`Loki snapshot for ${testRunId} had errors: ${snapshot.errors.join(' | ')}`);}
     } catch (err) {
       this.logger.warn(`Loki snapshot for ${testRunId} failed, continuing the analysis: ${err instanceof Error ? err.message : err}`);
     }

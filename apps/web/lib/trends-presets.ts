@@ -11,7 +11,7 @@ export interface TrendsSeriesConfig {
   panelId: number;
   panelTitle: string;
   metricName: string;
-  source: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
+  source: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk' | 'loki';
   yAxisFormat?: string;
   metricsSourceId?: string;
   /** True when the series is the run-wide "All aggregated" pseudo-metric. */

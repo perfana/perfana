@@ -84,9 +84,12 @@ export class BenchmarkProcessorService {
       // from its own collection), never a monitored combination's: the run's own pass covers them.
       if (
         target &&
-        [PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE, SPLUNK_PROFILE_SOURCE, LOKI_PROFILE_SOURCE].includes(
-          profileBenchmark.source,
-        )
+        [
+          PERF_TEST_PROFILE_SOURCE,
+          DYNATRACE_HOSTS_PROFILE_SOURCE,
+          SPLUNK_PROFILE_SOURCE,
+          LOKI_PROFILE_SOURCE,
+        ].includes(profileBenchmark.source)
       ) {
         return;
       }

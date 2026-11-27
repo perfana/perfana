@@ -73,9 +73,9 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
     const scopes = [getTestRunScope(testRun)];
     const sources = await fetchAvailableSources(scopes);
 
-    if (!sources.grafana && !sources.dynatrace && !sources.splunk) {
+    if (!sources.grafana && !sources.dynatrace && !sources.splunk && !sources.loki) {
       // Only performance metrics — skip dialog, refresh immediately
-      handleRefreshConfirm({ grafana: false, dynatrace: false, splunk: false, performanceMetrics: true });
+      handleRefreshConfirm({ grafana: false, dynatrace: false, splunk: false, loki: false, performanceMetrics: true });
       return;
     }
 

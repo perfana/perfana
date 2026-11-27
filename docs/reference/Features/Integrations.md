@@ -169,6 +169,33 @@ Perfana owns the time range and the bucketing: the run window is sent as the exp
 filter whose search terms carry their own time modifier. The Splunk role behind the token is the
 boundary for what can be read.
 
+## Loki
+
+Loki logs turned into time series per test run, stored in `ds_metrics` like a Splunk panel, plus a
+per-run snapshot of the top log patterns and latest error lines. Reached through a Grafana
+instance's Loki datasource, never directly. Full design: [[Loki Log Metrics (spec)]]; operator
+guide: `docs-user/docs/integrations/connect-loki.md`.
+
+### Capabilities
+- **Log metrics** — line counts, bytes, or `sum`/`avg`/`max`/`min`/`pNN` of an unwrapped field per
+  bucket, split by a label, per panel
+- **Starter panels** — log lines by level, error lines by service, log volume by service
+- **Run card** — *Loki Logs* in Root Cause Analysis: error rate vs the control group, top log
+  patterns flagged new against the baseline runs' snapshots, latest error/warning lines, panel
+  totals, Grafana Explore links
+
+### Configuration
+```
+Settings → Integrations → Loki (loki_configs, org-owned)
+  ├── Grafana instance (grafana_instance_id): same organization; its credentials are used
+  ├── Loki datasource uid on that instance
+  ├── Level label (default detected_level) and concurrent queries
+System config → Loki tab (per environment/workload)
+  ├── Streams (loki_stream_mappings): label matchers, at system, environment or workload level,
+  │     optional tags
+  └── Panels (loki_queries): $entities + pipeline stages, value, split label
+```
+
 ## Pyroscope
 
 Continuous profiling integration.
@@ -229,6 +256,7 @@ unchanged.
 - [[Data Flow]] — Data collection pipeline
 - [[Worker Overview]] — Metric collection pipelines
 - [[Splunk Log Metrics (spec)]] — Splunk log metrics design
+- [[Loki Log Metrics (spec)]] — Loki log metrics design
 
 ## Confluence
 

@@ -7,6 +7,8 @@ import {
   DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
   SPLUNK_PROFILE_SOURCE,
   SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT,
+  LOKI_PROFILE_SOURCE,
+  LOKI_DASHBOARD_UID_PATTERN_DEFAULT,
 } from '@perfana/shared/constants';
 
 /**
@@ -66,14 +68,34 @@ export const SPLUNK_PROFILE_DASHBOARD: ProfileDashboard = {
 export const isSplunkProfileDashboard = (d: ProfileDashboard | null): boolean =>
   d?.id === SPLUNK_PROFILE_DASHBOARD.id;
 
+/** The Loki twin of SPLUNK_PROFILE_DASHBOARD: `source = 'loki-panels'`, keyed on the panel title. */
+export const LOKI_PROFILE_DASHBOARD: ProfileDashboard = {
+  id: LOKI_PROFILE_SOURCE,
+  profile: '',
+  dashboardName: 'Loki — all panels',
+  dashboardUid: LOKI_DASHBOARD_UID_PATTERN_DEFAULT,
+  grafanaLabel: 'Loki',
+  createdAt: '',
+  updatedAt: '',
+};
+
+export const isLokiProfileDashboard = (d: ProfileDashboard | null): boolean =>
+  d?.id === LOKI_PROFILE_DASHBOARD.id;
+
+/** A pseudo-dashboard whose panels are user-authored per workload, so its SLO is keyed on the panel title. */
+export const isTitleKeyedProfileDashboard = (d: ProfileDashboard | null): boolean =>
+  isSplunkProfileDashboard(d) || isLokiProfileDashboard(d);
+
 /** Any pseudo-dashboard: a uid regex over generated dashboards, no Grafana template behind it. */
 export const isPatternProfileDashboard = (d: ProfileDashboard | null): boolean =>
-  isPerfTestProfileDashboard(d) || isDynatraceHostsProfileDashboard(d) || isSplunkProfileDashboard(d);
+  isPerfTestProfileDashboard(d) || isDynatraceHostsProfileDashboard(d) || isTitleKeyedProfileDashboard(d);
 
 /** Which integrations are configured, for offering the pseudo-dashboards that depend on one. */
 export interface ConfiguredIntegrations {
   dynatrace: boolean;
   splunk: boolean;
+  /** Absent means not configured. */
+  loki?: boolean;
 }
 
 /**
@@ -89,6 +111,7 @@ export function availablePseudoDashboards(
     PERF_TEST_PROFILE_DASHBOARD,
     ...(integrations.dynatrace || isDynatraceHostsProfileDashboard(selected ?? null) ? [DYNATRACE_HOSTS_PROFILE_DASHBOARD] : []),
     ...(integrations.splunk || isSplunkProfileDashboard(selected ?? null) ? [SPLUNK_PROFILE_DASHBOARD] : []),
+    ...(integrations.loki || isLokiProfileDashboard(selected ?? null) ? [LOKI_PROFILE_DASHBOARD] : []),
   ];
 }
 

@@ -30,6 +30,9 @@ This lets you go from "a run regressed" to "here is where it went wrong" by digg
 6. Use the **Splunk Logs** card to see what the run's logs did, per panel: error and warning counts, exceptions by type, or any value your logs carry.
    Each panel has an **Open in Splunk** link for the run's time window. A panel with data also has a **⋮** menu with **Open in Graphs**, **Open in Compare** and **Open in Trends**, which adds every series on that panel to the chosen card; the icon at the end of each item opens it in a new tab. Appears only when Splunk is configured for the system — see [Connect Splunk](../integrations/connect-splunk.md).
 
+7. Use the **Loki Logs** card to see what the run's logs did: the error rate against the baseline, the top log patterns with the ones new since the baseline marked **NEW**, the latest error and warning lines, and each panel's series.
+   Each panel and pattern links to Grafana Explore for the run's time window, and a panel with data has a **⋮** menu with **Open in Graphs**, **Open in Compare** and **Open in Trends**. Appears only when Loki is configured for the system — see [Connect Loki](../integrations/connect-loki.md).
+
 **Result**
 You have pinpointed where the regression comes from — application, a downstream service, code hot spots, or the database — instead of just knowing that the run was slow.
 

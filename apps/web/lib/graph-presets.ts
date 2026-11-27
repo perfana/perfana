@@ -14,7 +14,7 @@ export interface SeriesConfig {
   /** Optional series name filter/search text */
   metricName?: string;
   /** Data source type */
-  source?: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
+  source?: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk' | 'loki';
   /** Dashboard label for display purposes */
   dashboardLabel?: string;
   /** Y-axis format */

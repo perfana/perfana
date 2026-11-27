@@ -81,8 +81,8 @@ export function mergePatterns(lists: LokiPattern[][]): LokiPattern[] {
       }
       prev.count += p.count;
       prev.level = prev.level ?? p.level;
-      if (p.firstSeen && (!prev.firstSeen || p.firstSeen < prev.firstSeen)) prev.firstSeen = p.firstSeen;
-      if (p.lastSeen && (!prev.lastSeen || p.lastSeen > prev.lastSeen)) prev.lastSeen = p.lastSeen;
+      if (p.firstSeen && (!prev.firstSeen || p.firstSeen < prev.firstSeen)) {prev.firstSeen = p.firstSeen;}
+      if (p.lastSeen && (!prev.lastSeen || p.lastSeen > prev.lastSeen)) {prev.lastSeen = p.lastSeen;}
     }
   }
   return [...byKey.values()].sort((a, b) => b.count - a.count);
@@ -112,14 +112,14 @@ export async function snapshotLokiInsights(
   run: RunForInsights,
 ): Promise<LokiInsightsResult> {
   const result: LokiInsightsResult = { patterns: 0, samples: 0, source: null, errors: [] };
-  if (!run.startTime || !run.endTime) return result;
+  if (!run.startTime || !run.endTime) {return result;}
   const from = new Date(run.startTime);
   const to = new Date(run.endTime);
   const present = await db.query<{ present: boolean }>(`SELECT to_regclass('public.loki_run_patterns') IS NOT NULL AS present`);
-  if (!present[0]?.present) return result;
+  if (!present[0]?.present) {return result;}
 
   const configIds = await getCollectableLokiConfigIds(db, run);
-  if (configIds.length === 0) return result;
+  if (configIds.length === 0) {return result;}
   const allMappings = await loadLokiMappings(db, run);
 
   const patternRows: Array<LokiPattern & { configId: string; source: 'patterns' | 'sampled' }> = [];
@@ -128,7 +128,7 @@ export async function snapshotLokiInsights(
 
   for (const configId of configIds) {
     const config = await loadLokiConfig(db, configId);
-    if (!config) continue;
+    if (!config) {continue;}
     if (!lokiConfigBelongsTo(config, run.organizationId)) {
       result.errors.push(`Loki connection ${config.label} belongs to another organization than this run`);
       continue;
@@ -137,7 +137,7 @@ export async function snapshotLokiInsights(
     const dispatcher = await resolveFetchProxyDispatcher(config.organization_id, config.use_proxy);
     const opts = { dispatcher, timeoutMs: 60_000 };
     const mappings = allMappings.filter((m) => m.loki_config_id === configId).map((m) => ({ matchers: m.matchers, labels: m.labels }));
-    if (mappings.length === 0) continue;
+    if (mappings.length === 0) {continue;}
     const level = config.level_label;
 
     // 1. Newest error and warning lines per mapping. A stream without the level label matches no
@@ -147,7 +147,7 @@ export async function snapshotLokiInsights(
     for (const m of mappings) {
       try {
         let lines = await lokiLogLines(conn, buildLogExpr(m, `| ${level}=~"${ERROR_RE}"`), from, to, LOKI_SAMPLE_ERRORS, opts);
-        if (lines.length === 0) lines = await lokiLogLines(conn, buildLogExpr(m, ERROR_LINE_FILTER), from, to, LOKI_SAMPLE_ERRORS, opts);
+        if (lines.length === 0) {lines = await lokiLogLines(conn, buildLogExpr(m, ERROR_LINE_FILTER), from, to, LOKI_SAMPLE_ERRORS, opts);}
         errors.push(...lines);
         warns.push(...await lokiLogLines(conn, buildLogExpr(m, `| ${level}=~"${WARN_RE}"`), from, to, LOKI_SAMPLE_WARNINGS, opts));
       } catch (err) {
@@ -155,8 +155,8 @@ export async function snapshotLokiInsights(
       }
     }
     const byTime = (a: LokiLogLine, b: LokiLogLine) => b.time.getTime() - a.time.getTime();
-    for (const l of errors.sort(byTime).slice(0, LOKI_SAMPLE_ERRORS)) sampleRows.push({ ...l, configId, level: lineLevel(l, level) ?? 'error' });
-    for (const l of warns.sort(byTime).slice(0, LOKI_SAMPLE_WARNINGS)) sampleRows.push({ ...l, configId, level: lineLevel(l, level) ?? 'warn' });
+    for (const l of errors.sort(byTime).slice(0, LOKI_SAMPLE_ERRORS)) {sampleRows.push({ ...l, configId, level: lineLevel(l, level) ?? 'error' });}
+    for (const l of warns.sort(byTime).slice(0, LOKI_SAMPLE_WARNINGS)) {sampleRows.push({ ...l, configId, level: lineLevel(l, level) ?? 'warn' });}
 
     // 2. Patterns: Loki's patterns API over every line, else lines clustered by shape.
     const fromApi: LokiPattern[][] = [];
@@ -174,24 +174,24 @@ export async function snapshotLokiInsights(
     }
     const apiPatterns = apiAvailable ? mergePatterns(fromApi) : [];
     if (apiPatterns.length > 0) {
-      for (const p of selectPatterns(apiPatterns)) patternRows.push({ ...p, configId, source: 'patterns' });
+      for (const p of selectPatterns(apiPatterns)) {patternRows.push({ ...p, configId, source: 'patterns' });}
       continue;
     }
     const sampled: LokiLogLine[] = [];
     for (const m of mappings) {
       try {
         let lines = await lokiLogLines(conn, buildLogExpr(m, `| ${level}=~"${ERROR_RE.slice(0, -1)}|warn|warning)"`), from, to, FALLBACK_SAMPLE_LINES, opts);
-        if (lines.length === 0) lines = await lokiLogLines(conn, buildLogExpr(m, ERROR_LINE_FILTER), from, to, FALLBACK_SAMPLE_LINES, opts);
+        if (lines.length === 0) {lines = await lokiLogLines(conn, buildLogExpr(m, ERROR_LINE_FILTER), from, to, FALLBACK_SAMPLE_LINES, opts);}
         sampled.push(...lines);
       } catch (err) {
         result.errors.push(`Loki pattern sample for ${buildStreamSelector(m.matchers)}: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
     }
-    for (const p of selectPatterns(clusterLogLines(sampled, level))) patternRows.push({ ...p, configId, source: 'sampled' });
+    for (const p of selectPatterns(clusterLogLines(sampled, level))) {patternRows.push({ ...p, configId, source: 'sampled' });}
   }
 
   if (patternRows.length === 0 && sampleRows.length === 0) {
-    if (result.errors.length === 0) logger.info(`Loki snapshot for ${run.testRunId}: nothing in the run window, stored snapshot left as it was`);
+    if (result.errors.length === 0) {logger.info(`Loki snapshot for ${run.testRunId}: nothing in the run window, stored snapshot left as it was`);}
     return result;
   }
 

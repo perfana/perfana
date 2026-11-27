@@ -406,6 +406,30 @@ back to zero counts.
   strip; the decorator spec lacks the "existing fields unchanged" row and the delete spec a
   global-admin row.
 
+## Loki integration
+
+Spec: `docs/reference/Features/Loki Log Metrics (spec).md`. Built against mocked Grafana responses only.
+
+### Verify against the client's Grafana Enterprise + Loki (P1)
+
+Nothing here has met a real Grafana Loki datasource. Check, on the client's stack: `/api/frontend/settings`
+lists the Loki datasource for the service account; `/api/ds/query` accepts `step: "<n>s"` with the
+`sum by () (...)` / `<fn>_over_time(...) by ()` shapes `buildMetricExpr` emits; the frames are one per
+series with labels on the value field; the `resources/patterns` call is proxied (Grafana 11+) and
+returns `samples` as `[epochSeconds, count]`; log frames carry `labels` / `Time` / `Line`.
+
+### Overlapping stream mappings double-count (P3)
+
+LogQL cannot OR two selectors, so each mapping is queried separately and same-named series are summed
+for count/bytes/sum. Two mappings selecting overlapping streams count those lines twice. The UI does
+not warn. A merge of mappings that differ in one label into a single `=~` selector would cover the
+common case.
+
+### The Loki host-equivalent SSRF caveat is the Grafana instance's (P3)
+
+Loki calls go to the Grafana instance's `server_url`/`client_url`, with that instance's existing
+validation. Nothing Loki-specific is added, so whatever applies to Grafana instances applies here.
+
 ## Splunk integration
 
 Filed from the PR #742 review (v0.2.97.72). The review's real bugs were fixed on the branch; these

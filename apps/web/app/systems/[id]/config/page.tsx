@@ -40,6 +40,7 @@ import DynatraceSection from './components/DynatraceSection';
 import DistributedTracingSection from './components/DistributedTracingSection';
 import PyroscopeSection from './components/PyroscopeSection';
 import SplunkSection from './components/SplunkSection';
+import LokiSection from './components/LokiSection';
 import ConfluenceSection from './components/ConfluenceSection';
 import NotificationsSection from './components/NotificationsSection';
 import ReportingTemplatesSection from './components/ReportingTemplatesSection';
@@ -216,6 +217,7 @@ export default function SystemConfigurationPage() {
             {systemData.hasTracing && <Tab value="tracing" icon={<TimelineIcon />} label="Distributed Tracing" />}
             {systemData.hasPyroscope && <Tab value="pyroscope" icon={<MemoryIcon />} label="Pyroscope" />}
             {systemData.hasSplunk && <Tab value="splunk" icon={<ArticleIcon />} label="Splunk" />}
+            {systemData.hasLoki && <Tab value="loki" icon={<ArticleIcon />} label="Loki" />}
             {systemData.hasConfluence && <Tab value="confluence" icon={<MenuBookIcon />} label="Confluence" />}
             <Tab value="notifications" icon={<NotificationsIcon />} label="Notifications" />
             <Tab value="templates" icon={<DescriptionIcon />} label="Reporting Templates" />
@@ -316,6 +318,15 @@ export default function SystemConfigurationPage() {
           )}
           {activeTab === 'splunk' && systemData.hasSplunk && (
             <SplunkSection
+              systemId={systemId}
+              systemName={system.name}
+              organizationId={system.organization_id ?? undefined}
+              selectedEnvironment={selectedEnvironment}
+              selectedWorkload={selectedWorkload}
+            />
+          )}
+          {activeTab === 'loki' && systemData.hasLoki && (
+            <LokiSection
               systemId={systemId}
               systemName={system.name}
               organizationId={system.organization_id ?? undefined}

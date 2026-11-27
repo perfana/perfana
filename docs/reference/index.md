@@ -49,6 +49,7 @@ Perfana collects metrics from performance tests and compares them against histor
 - [[Multi-tenancy]] — Organizations and teams
 - [[Integrations]] — Grafana, Dynatrace, Splunk, Pyroscope, Tempo
 - [[Splunk Log Metrics (spec)]] - Splunk log events as per-run metrics in `ds_metrics`
+- [[Loki Log Metrics (spec)]] - Loki logs through a Grafana Loki datasource: per-run metrics, patterns and error lines
 - [[Templates]] — Standardized checks, reports, and dashboards
 - [[AWR Reports]] — Oracle AWR report analysis
 - [[Reports in CI-CD]] — Generating and downloading HTML reports from a pipeline

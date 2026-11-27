@@ -16,7 +16,7 @@ import {
 
 // Types
 import { BenchmarkFormDialogProps } from './types';
-import { isSplunkProfileDashboard } from '@/lib/profile-benchmarks';
+import { isTitleKeyedProfileDashboard } from '@/lib/profile-benchmarks';
 
 // Hooks
 import { useBenchmarkForm, useConfiguredIntegrations } from './hooks';
@@ -109,7 +109,7 @@ export default function BenchmarkFormDialog({
                 loading={panelsLoading}
                 error={validationErrors.selectedPanel}
                 dashboardName={formData.selectedDashboard.dashboardName}
-                matchByTitle={isSplunkProfileDashboard(formData.selectedDashboard)}
+                matchByTitle={isTitleKeyedProfileDashboard(formData.selectedDashboard)}
               />
             )}
 

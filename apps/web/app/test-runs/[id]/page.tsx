@@ -28,6 +28,7 @@ import DynatraceCard from './components/dynatrace/DynatraceCard';
 import DistributedTracingCard from './components/distributed-tracing/DistributedTracingCard';
 import PyroscopeCard from './components/pyroscope/PyroscopeCard';
 import SplunkCard from './components/splunk/SplunkCard';
+import LokiCard from './components/loki/LokiCard';
 import TestRunHeader from './components/header/TestRunHeader';
 import TestRunDetailsCard from './components/test-run-details/TestRunDetailsCard';
 import ConfigurationComparisonSection from './components/configuration-comparison/ConfigurationComparisonSection';
@@ -435,6 +436,7 @@ export default function TestRunDetailsPage() {
                 <CardComments card="pyroscopeExpanded" expanded={expansionState.pyroscopeExpanded}><PyroscopeCard testRun={testRun as unknown as Parameters<typeof PyroscopeCard>[0]['testRun']} expanded={expansionState.pyroscopeExpanded} onExpand={() => { const wasCollapsed = !expansionState.pyroscopeExpanded; toggleExpansion('pyroscopeExpanded'); if (wasCollapsed) scrollToCard('pyroscope-card-expanded'); }} /></CardComments>
               )}
               <CardComments card="splunkExpanded" expanded={expansionState.splunkExpanded}><SplunkCard testRun={testRun} expanded={expansionState.splunkExpanded} onExpand={() => { const wasCollapsed = !expansionState.splunkExpanded; toggleExpansion('splunkExpanded'); if (wasCollapsed) scrollToCard('splunk-card-expanded'); }} /></CardComments>
+              <CardComments card="lokiExpanded" expanded={expansionState.lokiExpanded}><LokiCard testRun={testRun} expanded={expansionState.lokiExpanded} onExpand={() => { const wasCollapsed = !expansionState.lokiExpanded; toggleExpansion('lokiExpanded'); if (wasCollapsed) scrollToCard('loki-card-expanded'); }} /></CardComments>
               <CardComments card="awrExpanded" expanded={expansionState.awrExpanded}>
                 <AwrReportCard testRun={testRun} expanded={expansionState.awrExpanded} onExpand={() => { const wasCollapsed = !expansionState.awrExpanded; toggleExpansion('awrExpanded'); if (wasCollapsed) scrollToCard('awr-report-card-expanded'); }} />
               </CardComments>

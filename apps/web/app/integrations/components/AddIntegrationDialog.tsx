@@ -71,6 +71,15 @@ export const INTEGRATION_TYPES: IntegrationTypeDefinition[] = [
     features: ['Log levels over time', 'Errors by host', 'Exceptions by type', 'SPL filters'],
   },
   {
+    id: 'loki',
+    name: 'Loki',
+    description: 'Turn Loki logs into metrics per test run through the Loki datasource on your Grafana: lines by level, errors by service, log volume, or any value your logs carry. The run page shows top log patterns, new ones since the baseline, and the latest error lines.',
+    category: 'Logs',
+    icon: <Article />,
+    color: '#F2A900',
+    features: ['Through your Grafana', 'Errors by service', 'Top log patterns', 'LogQL pipelines'],
+  },
+  {
     id: 'confluence',
     name: 'Confluence',
     description: 'Publish generated reports as Confluence pages, with tables, status lozenges and charts as images. Publishing a report again updates its page.',

@@ -29,7 +29,7 @@ import {
   type ControlGroup,
 } from '@/lib/control-group-baseline';
 import { TestRun } from '@/types/test-runs';
-import { isGrafana, isPerformanceTest, isSplunk } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest, isSplunk, isLoki } from '@/lib/metrics-source-utils';
 import { getAggregateSpec, fetchAggregatedStatistics } from '@/lib/aggregated-perf-series';
 import {
   isUrlPanel,
@@ -398,6 +398,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     const grafanaOnly = dashboards.filter(d => isGrafana(d));
     const perfTestOnly = dashboards.filter(d => isPerformanceTest(d));
     const splunkOnly = dashboards.filter(d => isSplunk(d));
+    const lokiOnly = dashboards.filter(d => isLoki(d));
     const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
       id: `dynatrace-${index}`,
       dashboard_label: d.dashboardLabel,
@@ -406,7 +407,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       source_type: 'dynatrace',
       hostLabels: d.hostLabels,
     } as ApplicationDashboard));
-    return [...grafanaOnly, ...perfTestOnly, ...splunkOnly, ...dynatraceAsDashboards];
+    return [...grafanaOnly, ...perfTestOnly, ...splunkOnly, ...lokiOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
 
   // Get dashboards filtered by selected source (kept for backward compatibility)

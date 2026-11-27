@@ -29,6 +29,7 @@ import { GrafanaInstance } from '@/lib/grafana-instances';
 import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
 import { SplunkConfig } from '@/lib/splunk';
+import { LokiConfig } from '@/lib/loki';
 import { ConfluenceConfig } from '@/lib/confluence';
 import { TracingInstance } from '@/lib/distributed-tracing';
 
@@ -64,6 +65,9 @@ import {
   useSplunkIntegration,
   SplunkFormDialog,
   SplunkDeleteDialog,
+  useLokiIntegration,
+  LokiFormDialog,
+  LokiDeleteDialog,
   useConfluenceIntegration,
   ConfluenceFormDialog,
   ConfluenceDeleteDialog,
@@ -89,6 +93,7 @@ export default function IntegrationsPage() {
   const pyroscope = usePyroscopeIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
   const tracing = useTracingIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
   const splunk = useSplunkIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
+  const loki = useLokiIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
   const confluence = useConfluenceIntegration({ onSnackbar: handleSnackbar, organizationId: currentOrganizationId });
 
   // Load all data on mount and when organization changes
@@ -102,6 +107,7 @@ export default function IntegrationsPage() {
         pyroscope.loadInstances(),
         tracing.loadInstances(),
         splunk.loadConfigs(),
+        loki.loadConfigs(),
         confluence.loadConfigs(),
         authenticatedFetch('/proxy').then(r => r.ok ? r.json() : null).then(data => {
           setProxyConfigured(data != null);
@@ -245,6 +251,21 @@ export default function IntegrationsPage() {
       });
     });
 
+    // Loki connections (a Loki datasource on a Grafana instance)
+    loki.configs.forEach((config) => {
+      cards.push({
+        id: `loki-${config.id}`,
+        integrationType: 'loki',
+        name: config.label,
+        tldr: `via ${config.grafanaInstanceLabel ?? 'Grafana'} • ${config.datasourceName ?? config.datasourceUid}`,
+        category: INTEGRATION_CATEGORIES.loki,
+        status: 'connected',
+        icon: <Article />,
+        color: INTEGRATION_COLORS.loki,
+        instanceData: config,
+      });
+    });
+
     // Confluence connections
     confluence.configs.forEach((config) => {
       const hostname = (() => {
@@ -305,6 +326,8 @@ export default function IntegrationsPage() {
       tracing.openEditDialog(card.instanceData as TracingInstance);
     } else if (card.integrationType === 'splunk' && card.instanceData) {
       splunk.openEdit(card.instanceData as SplunkConfig);
+    } else if (card.integrationType === 'loki' && card.instanceData) {
+      loki.openEdit(card.instanceData as LokiConfig);
     } else if (card.integrationType === 'confluence' && card.instanceData) {
       confluence.openEdit(card.instanceData as ConfluenceConfig);
     }
@@ -321,6 +344,8 @@ export default function IntegrationsPage() {
       tracing.openDeleteDialog(card.instanceData as TracingInstance);
     } else if (card.integrationType === 'splunk' && card.instanceData) {
       splunk.openDelete(card.instanceData as SplunkConfig);
+    } else if (card.integrationType === 'loki' && card.instanceData) {
+      loki.openDelete(card.instanceData as LokiConfig);
     } else if (card.integrationType === 'confluence' && card.instanceData) {
       confluence.openDelete(card.instanceData as ConfluenceConfig);
     }
@@ -337,6 +362,8 @@ export default function IntegrationsPage() {
       tracing.setCreateDialogOpen(true);
     } else if (integrationType === 'splunk') {
       splunk.openCreate();
+    } else if (integrationType === 'loki') {
+      loki.openCreate();
     } else if (integrationType === 'confluence') {
       confluence.openCreate();
     }
@@ -534,6 +561,16 @@ export default function IntegrationsPage() {
         onSave={splunk.save}
       />
       <SplunkDeleteDialog config={splunk.deleting} onClose={splunk.closeDelete} onConfirm={splunk.confirmDelete} />
+
+      {/* Loki Dialogs */}
+      <LokiFormDialog
+        open={loki.dialogOpen}
+        editing={loki.editing}
+        grafanaInstances={grafana.instances}
+        onClose={loki.closeDialog}
+        onSave={loki.save}
+      />
+      <LokiDeleteDialog config={loki.deleting} onClose={loki.closeDelete} onConfirm={loki.confirmDelete} />
 
       {/* Confluence Dialogs */}
       <ConfluenceFormDialog

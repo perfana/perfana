@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.108] - 2026-11-27
+
+### Added
+- **Loki integration.** Loki logs become metrics per test run, reached through the Loki datasource on a Grafana instance Perfana already has: no Loki address or credentials, and a Viewer service account is enough. A connection is added on the Integrations page by picking the Grafana instance and its Loki datasource; each system maps its streams with label matchers at system, environment or workload level and collects panels written as `$entities` plus LogQL pipeline stages (count, bytes, or sum/avg/max/min/pNN of an unwrapped field, split by a label). Starter panels count lines by level, error lines by service and log volume by service. The series are stored in `ds_metrics` like any other metric, so they take part in ADAPT, SLOs, Graphs, Trends, Compare and reports, and a profile can add an SLO on a Loki panel to every workload through **Loki — all panels**. Collection runs live, at analysis, on gap fill and on force refetch, and the refresh dialog has a Loki checkbox.
+- **Loki Logs card in Root Cause Analysis.** Shows the run's error rate against its baseline, the top log patterns with the ones not seen in the baseline runs marked NEW, the latest error and warning lines with their labels, and each panel's series with Grafana Explore links and Open in Graphs / Compare / Trends. Patterns and lines are snapshotted when the run is analysed, so the card keeps them after Loki's retention has dropped the window. Patterns need Loki 3 with the pattern ingester and Grafana 11; without them Perfana groups sampled error lines itself and says so.
+- Migration 1838 adds `loki_configs`, `loki_stream_mappings`, `loki_queries`, `loki_run_patterns` and `loki_run_samples`. Run it before the API reaches this version.
+
 ## [0.2.97.107] - 2026-11-26
 
 ### Fixed

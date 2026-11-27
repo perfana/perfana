@@ -20,6 +20,7 @@ export interface RefreshSources {
   grafana: boolean;
   dynatrace: boolean;
   splunk: boolean;
+  loki: boolean;
   performanceMetrics: boolean;
   forceRefetch?: boolean;
 }
@@ -38,6 +39,7 @@ function initialSources(availableSources?: AvailableSources): RefreshSources {
     grafana: availableSources?.grafana ?? true,
     dynatrace: availableSources?.dynatrace ?? true,
     splunk: availableSources?.splunk ?? true,
+    loki: availableSources?.loki ?? true,
     performanceMetrics: true,
   };
 }
@@ -65,12 +67,13 @@ export function RefreshMissingDataDialog({
   const showGrafana = availableSources?.grafana ?? true;
   const showDynatrace = availableSources?.dynatrace ?? true;
   const showSplunk = availableSources?.splunk ?? true;
+  const showLoki = availableSources?.loki ?? true;
 
   const handleToggle = (key: keyof RefreshSources) => {
     setSources(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const noneSelected = !sources.grafana && !sources.dynatrace && !sources.splunk && !sources.performanceMetrics;
+  const noneSelected = !sources.grafana && !sources.dynatrace && !sources.splunk && !sources.loki && !sources.performanceMetrics;
 
   const handleConfirm = () => {
     onConfirm({ ...sources, forceRefetch });
@@ -121,6 +124,17 @@ export function RefreshMissingDataDialog({
                 />
               }
               label="Splunk log metrics"
+            />
+          )}
+          {showLoki && (
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={sources.loki}
+                  onChange={() => handleToggle('loki')}
+                />
+              }
+              label="Loki log metrics"
             />
           )}
           <FormControlLabel

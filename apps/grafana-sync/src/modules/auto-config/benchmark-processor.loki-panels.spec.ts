@@ -21,9 +21,17 @@ function build(panels: Array<{ applicationDashboard: { id: string }; panelId: nu
     findSplunkPanelsByUidPattern: jest.fn(),
     findLokiPanelsByUidPattern: jest.fn().mockResolvedValue(panels),
   };
-  const testRunFinder = { findBenchmarkForApplicationDashboardOrNull: jest.fn().mockResolvedValue(null) };
-  const updates = { insertBenchmarkBasedOnProfileBenchmark: jest.fn().mockResolvedValue({ insertedId: 'b' }) };
-  const service = new BenchmarkProcessorService(testRunFinder as any, finder as any, updates as any);
+  const testRunFinder = {
+    findBenchmarkForApplicationDashboardOrNull: jest.fn().mockResolvedValue(null),
+  };
+  const updates = {
+    insertBenchmarkBasedOnProfileBenchmark: jest.fn().mockResolvedValue({ insertedId: 'b' }),
+  };
+  const service = new BenchmarkProcessorService(
+    testRunFinder as any,
+    finder as any,
+    updates as any,
+  );
   return { service, finder, updates };
 }
 
@@ -45,9 +53,18 @@ it("fans out over every Loki dashboard, each SLO on that workload's own panel id
 
   await service.processProfileBenchmarks(testRun, ['loki'], [pb()]);
 
-  expect(finder.findLokiPanelsByUidPattern).toHaveBeenCalledWith('^loki-', 'Error lines by service', 'SHOP', 'acceptatie', 'loadtest', 'org-1');
+  expect(finder.findLokiPanelsByUidPattern).toHaveBeenCalledWith(
+    '^loki-',
+    'Error lines by service',
+    'SHOP',
+    'acceptatie',
+    'loadtest',
+    'org-1',
+  );
   expect(finder.findSplunkPanelsByUidPattern).not.toHaveBeenCalled();
-  const panelArgs = updates.insertBenchmarkBasedOnProfileBenchmark.mock.calls.map((c: any[]) => c[c.length - 1]);
+  const panelArgs = updates.insertBenchmarkBasedOnProfileBenchmark.mock.calls.map(
+    (c: any[]) => c[c.length - 1],
+  );
   expect(panelArgs).toEqual([
     { panelId: 2, panelTitle: 'Error lines by service' },
     { panelId: 5, panelTitle: 'Error lines by service' },
