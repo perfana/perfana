@@ -97,6 +97,9 @@ export class LokiController {
     @Query('hours') hours?: string,
     @Query('matchers') matchers?: string,
   ) {
+    // A label name, like every other label input: anything else (`..`, `/`) would reach another
+    // resource path on the datasource.
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(label)) throw new BadRequestException('label must be a Loki label name');
     let parsed: LokiMatcher[] | undefined;
     if (matchers) {
       try {

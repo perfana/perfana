@@ -354,14 +354,28 @@ export async function snapshotLokiInsights(
     result.errors.push('Run has no organization; Loki snapshot not stored');
     return result;
   }
+  // A partial failure (one connection or query errored) must not replace what an earlier analysis
+  // stored: the window may have aged out of Loki since, so the old rows can be the only copy.
+  if (result.errors.length > 0) {
+    const stored = await db.query<{ present: boolean }>(
+      'SELECT EXISTS (SELECT 1 FROM loki_run_patterns WHERE test_run_id = $1) OR EXISTS (SELECT 1 FROM loki_run_samples WHERE test_run_id = $1) AS present',
+      [run.testRunId],
+    );
+    if (stored[0]?.present) {
+      logger.warn(`Loki snapshot for ${run.testRunId}: ${result.errors.length} part(s) failed, stored snapshot kept rather than replaced with a partial one`);
+      return result;
+    }
+  }
   const cut = (v: string, n: number) => jsonbSafeText(v).slice(0, n);
+  // A parsed level is free text from the line (json/logfmt), and the column is varchar(50).
+  const levelOf = (v: string | null) => (v === null ? null : cut(v, 50));
   await db.transaction(async (em) => {
     await em.query('DELETE FROM loki_run_patterns WHERE test_run_id = $1', [run.testRunId]);
     await em.query('DELETE FROM loki_run_samples WHERE test_run_id = $1', [run.testRunId]);
     if (perService) {await em.query('DELETE FROM loki_run_services WHERE test_run_id = $1', [run.testRunId]);}
     for (const p of patternRows) {
       const values = [run.testRunId, run.systemUnderTestId, p.configId, cut(p.pattern, MAX_LINE_LENGTH), patternKey(p.pattern).slice(0, MAX_LINE_LENGTH),
-        p.level, Math.round(p.count), p.firstSeen, p.lastSeen, p.source, org, run.teamId ?? null];
+        levelOf(p.level), Math.round(p.count), p.firstSeen, p.lastSeen, p.source, org, run.teamId ?? null];
       await em.query(
         perService
           ? `INSERT INTO loki_run_patterns (test_run_id, system_under_test_id, loki_config_id, pattern, pattern_key, level, count, first_seen, last_seen, source, organization_id, team_id, created_by, service)
@@ -373,7 +387,7 @@ export async function snapshotLokiInsights(
     }
     for (const s of sampleRows) {
       const labels = Object.fromEntries(Object.entries(s.labels).slice(0, 30).map(([k, v]) => [cut(k, 100), cut(String(v), 300)]));
-      const values = [run.testRunId, run.systemUnderTestId, s.configId, s.time, s.level, cut(s.line, MAX_LINE_LENGTH), JSON.stringify(labels), org, run.teamId ?? null];
+      const values = [run.testRunId, run.systemUnderTestId, s.configId, s.time, levelOf(s.level), cut(s.line, MAX_LINE_LENGTH), JSON.stringify(labels), org, run.teamId ?? null];
       await em.query(
         perService
           ? `INSERT INTO loki_run_samples (test_run_id, system_under_test_id, loki_config_id, "time", level, line, labels, organization_id, team_id, created_by, service)

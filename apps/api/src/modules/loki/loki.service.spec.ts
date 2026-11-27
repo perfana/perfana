@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { LokiService, describeLevelProbe, errorRateFromServices, levelLabelMissing, levelTotals } from './loki.service';
 import { validateLogqlPipeline } from '@perfana/shared/services/loki/client';
 import { Capability } from '../../constants/capabilities.constants';
@@ -116,6 +116,16 @@ describe('LokiService mappings and panels', () => {
     await expect(service.createQuery({ ...base, logql: '{app="other"}' }, 'u', [])).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.createQuery({ ...base, logql: '$entities | json [5m]' }, 'u', [])).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.createQuery({ ...base, logql: '$entities', aggregation: 'stddev(x)' }, 'u', [])).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('refuses a taken panel id before it writes any dashboard row', async () => {
+    // Value: protects=a 409 on createQuery leaves no orphan dashboard rows; fails_when=the conflict check moves after ensureArtificialDashboard; why_new=review fix; seam=none; no_claim=the unique index race (saveUnique still backstops it)
+    const { service, queryRepo, dataSource } = build();
+    queryRepo.findOne.mockResolvedValue({ id: 'existing' });
+    await expect(service.createQuery({
+      lokiConfigId: CFG, systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load', panelTitle: 'x', panelId: 1, logql: '$entities',
+    }, 'u', [])).rejects.toBeInstanceOf(ConflictException);
+    expect(dataSource.manager.query.mock.calls.some((c) => String(c[0]).includes('INSERT INTO'))).toBe(false);
   });
 
   it('needs write access on the system to preview, since a preview runs LogQL with the org credentials', async () => {

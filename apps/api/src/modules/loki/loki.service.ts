@@ -444,6 +444,13 @@ export class LokiService {
     this.checkQuery(dto.logql, dto.aggregation);
     const dashboardLabel = dto.dashboardLabel?.trim() || 'Loki logs';
     const panelId = dto.panelId ?? (await this.nextPanelId(dto, dashboardLabel));
+    const conflict = `Panel ${panelId} already exists on "${dashboardLabel}" for this workload`;
+    // Refuse before the dashboard rows are written, so a taken panel id leaves nothing behind
+    // (without the RLS transaction nothing would roll them back). saveUnique stays the race backstop.
+    const taken = await withRequestEm(this.queryRepo).findOne({
+      where: { systemUnderTestId: sut.id, testEnvironment: dto.testEnvironment, workload: dto.workload, dashboardLabel, panelId },
+    });
+    if (taken) throw new ConflictException(conflict);
     const { applicationDashboardId, metricsSourceId } = await this.ensureArtificialDashboard(sut, dto, dashboardLabel, config);
     const entity = this.queryRepo.create({
       lokiConfigId: dto.lokiConfigId,
@@ -466,7 +473,7 @@ export class LokiService {
       createdBy: userId,
       updatedBy: userId,
     });
-    const saved = await this.saveUnique(this.queryRepo, entity, `Panel ${panelId} already exists on "${dashboardLabel}" for this workload`);
+    const saved = await this.saveUnique(this.queryRepo, entity, conflict);
     this.auditService.logCreate(saved as unknown as OwnedResource, { organizationIdOverride: saved.organizationId });
     return saved;
   }

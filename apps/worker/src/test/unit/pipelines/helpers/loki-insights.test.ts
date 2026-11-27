@@ -16,7 +16,7 @@ const run = {
   startTime: new Date('2026-11-27T10:00:00Z'), endTime: new Date('2026-11-27T11:00:00Z'), organizationId: 'org', teamId: null,
 };
 
-function makeDb(opts: { services?: boolean; config?: Partial<typeof CONFIG> } = {}) {
+function makeDb(opts: { services?: boolean; config?: Partial<typeof CONFIG>; stored?: boolean } = {}) {
   const tx = { query: vi.fn(async () => []) };
   const db = {
     query: vi.fn(async (sql: string) => {
@@ -24,6 +24,7 @@ function makeDb(opts: { services?: boolean; config?: Partial<typeof CONFIG> } = 
       if (sql.includes('FROM loki_queries')) return [{ loki_config_id: 'cfg' }];
       if (sql.includes('FROM loki_stream_mappings')) return [{ loki_config_id: 'cfg', matchers: [{ label: 'app', op: '=', value: 'shop' }], labels: [] }];
       if (sql.includes('FROM loki_configs')) return [{ ...CONFIG, ...opts.config }];
+      if (sql.includes('AS present')) return [{ present: opts.stored ?? false }];
       return [];
     }),
     dataSource: { query: vi.fn(async (sql: string) => (sql.includes('to_regclass') ? [{ present: true }] : [{ loki_config_id: 'cfg' }])) },
@@ -79,6 +80,35 @@ describe('snapshotLokiInsights', () => {
     expect(sqls[0]).toContain('DELETE FROM loki_run_patterns');
     expect(sqls.some((s) => s.includes('INSERT INTO loki_run_patterns'))).toBe(true);
     expect(sqls.some((s) => s.includes('INSERT INTO loki_run_samples'))).toBe(true);
+  });
+
+  it('keeps the stored snapshot when part of a re-analysis fails, and cuts a parsed level to the column', async () => {
+    // Value: protects=a partial Loki failure never replaces an earlier snapshot, and a long free-text level cannot fail the write; fails_when=the replace runs with errors present, or level is written uncut; why_new=both are review fixes; seam=none; no_claim=the SQL against Postgres (mocked db)
+    const t = run.startTime.getTime();
+    const longLevel = 'x'.repeat(80);
+    fetchMock.mockImplementation(async (url: string, init: { body?: string }) => {
+      // The error-line query answers; every other query fails.
+      if (url.includes('/resources/patterns')) return json({ status: 'success', data: [] });
+      const expr = JSON.parse(init.body ?? '{}').queries?.[0]?.expr ?? '';
+      if (expr.includes('error|err')) {
+        return json({ results: { A: { frames: [{
+          schema: { fields: [{ name: 'labels', type: 'other' }, { name: 'Time', type: 'time' }, { name: 'Line', type: 'string' }] },
+          data: { values: [[{ detected_level: longLevel }], [t + 5000], ['db timeout']] },
+        }] } } });
+      }
+      return new Response('boom', { status: 500 });
+    });
+    const kept = makeDb({ stored: true });
+    const partial = await snapshotLokiInsights(kept.db as never, logger, run);
+    expect(partial.errors.length).toBeGreaterThan(0);
+    expect(kept.db.transaction).not.toHaveBeenCalled();
+
+    // Nothing stored yet: the partial snapshot is written, its level cut to varchar(50).
+    const fresh = makeDb({ stored: false });
+    await snapshotLokiInsights(fresh.db as never, logger, run);
+    const sample = fresh.tx.query.mock.calls.find((c) => String(c[0]).includes('INSERT INTO loki_run_samples')) as unknown as [string, unknown[]] | undefined;
+    expect(sample).toBeDefined();
+    expect(String(sample![1][4]).length).toBeLessThanOrEqual(50);
   });
 
   it('leaves the stored snapshot alone when Loki no longer holds the window', async () => {
