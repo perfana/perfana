@@ -70,8 +70,8 @@ interface BaselineTestRunSelectProps {
   onChange: (testRun: RelatedTestRun | null) => void;
   label?: string;
   size?: 'small' | 'medium';
-  /** Replaces the default "N comparable runs" helper text. */
-  helperText?: string;
+  /** Replaces the default "N comparable runs" helper text; null shows none. */
+  helperText?: string | null;
   /** False hides the caption naming the selected baseline. */
   showCaption?: boolean;
   disableClearable?: boolean;
@@ -109,7 +109,7 @@ export function BaselineTestRunSelect({
             label={label}
             variant="outlined"
             fullWidth
-            helperText={helperText ?? (controlGroup ? `${runCount}, or the control group` : runCount)}
+            helperText={helperText === null ? undefined : helperText ?? (controlGroup ? `${runCount}, or the control group` : runCount)}
           />
         )}
         renderOption={(props, option) => {

@@ -308,22 +308,23 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                       ))}
                     </Box>
                   </Box>
-                  {configured.sources[0]?.exploreUrl && (
-                    <Button size="small" variant="outlined" endIcon={<OpenInNew fontSize="small" />} href={configured.sources[0].exploreUrl} target="_blank" rel="noopener noreferrer">
-                      Open in Grafana Explore
-                    </Button>
-                  )}
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <BaselinePicker
+                      summary={configured}
+                      options={baselineOptions}
+                      onPick={setBaselinePick}
+                      reloading={reloading}
+                      error={baselineError}
+                    />
+                    {configured.sources[0]?.exploreUrl && (
+                      <Button size="small" variant="outlined" endIcon={<OpenInNew fontSize="small" />} href={configured.sources[0].exploreUrl} target="_blank" rel="noopener noreferrer" sx={{ height: 40, whiteSpace: 'nowrap' }}>
+                        Open in Grafana Explore
+                      </Button>
+                    )}
+                  </Box>
                 </Box>
 
                 {configured.levelLabelMissing && <LevelMissingAlert connection={configured.connection} />}
-
-                <BaselinePicker
-                  summary={configured}
-                  options={baselineOptions}
-                  onPick={setBaselinePick}
-                  reloading={reloading}
-                  error={baselineError}
-                />
 
                 {services.length > 0 && (
                   <ApplicationTabs services={services} serviceLabel={serviceLabel} selected={scope?.app ?? null} onSelect={setApp} />
@@ -885,14 +886,24 @@ function useBaselineOptions(testRun: LokiCardProps['testRun'], enabled: boolean)
   return options;
 }
 
-/** What "previous-runs" and "none" say, since neither is an option in the list. */
-export function defaultBaselineText(baseline: LokiRunBaseline | undefined): string | null {
+/**
+ * One line saying what the card compared with. The picker shows the choice; this says what that
+ * resolved to, since the control group pools differently per figure and the default can fall back.
+ */
+export function baselineSummary(baseline: LokiRunBaseline | undefined, controlGroupRuns: number | null): string | null {
   if (!baseline) return null;
-  if (baseline.kind === 'previous-runs') {
-    return `No control group: comparing with the ${baseline.testRunIds.length} previous run${baseline.testRunIds.length === 1 ? '' : 's'} (${baseline.testRunIds.join(', ')})`;
+  const n = baseline.testRunIds.length;
+  const runs = (k: number) => `${k} run${k === 1 ? '' : 's'}`;
+  switch (baseline.kind) {
+    case 'control-group':
+      return `Error rates vs the whole control group${controlGroupRuns ? ` (${runs(controlGroupRuns)})` : ''}; new patterns vs its newest ${runs(n)}`;
+    case 'run':
+      return null; // the picker already names the run
+    case 'previous-runs':
+      return `No control group: compared with the ${runs(n)} before this one`;
+    default:
+      return 'Nothing to compare with: no control group and no earlier run';
   }
-  if (baseline.kind === 'none') return 'Nothing to compare with: no control group and no earlier run';
-  return null;
 }
 
 function BaselinePicker({ summary, options, onPick, reloading, error }: {
@@ -910,11 +921,10 @@ function BaselinePicker({ summary, options, onPick, reloading, error }: {
   else if (b.kind === 'run' && b.testRunIds[0]) {
     value = options?.runs.find((r) => r.test_run_id === b.testRunIds[0]) ?? { test_run_id: b.testRunIds[0], created_at: '', completed: true };
   }
-  const patternsNote = b.kind === 'control-group' && b.testRunIds.length > 0
-    ? `Error rates use the whole group; new patterns and applications its newest ${b.testRunIds.length} run${b.testRunIds.length === 1 ? '' : 's'} (${b.testRunIds.join(', ')}).`
-    : null;
+  const line = reloading ? 'Comparing…' : baselineSummary(b, options?.controlGroup?.n_test_runs ?? null);
+  const detail = b.testRunIds.length > 0 ? `Compared with: ${b.testRunIds.join(', ')}` : undefined;
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 2, maxWidth: 640 }}>
+    <Box sx={{ width: { xs: '100%', sm: 380 } }}>
       <BaselineTestRunSelect
         relatedTestRuns={options?.runs ?? []}
         controlGroup={options?.controlGroup ?? null}
@@ -922,11 +932,15 @@ function BaselinePicker({ summary, options, onPick, reloading, error }: {
         onChange={(picked) => onPick(picked?.test_run_id ?? null)}
         label="Baseline"
         size="small"
-        helperText={options ? (value ? undefined : defaultBaselineText(b) ?? undefined) : 'Loading baselines…'}
+        helperText={null}
+        showCaption={false}
       />
-      {patternsNote && <Typography variant="caption" color="text.secondary">{patternsNote}</Typography>}
-      {reloading && <Typography variant="caption" color="text.secondary" role="status">Comparing…</Typography>}
-      {error && <Alert severity="warning">Could not compare with that baseline: {error}</Alert>}
+      {line && (
+        <Typography variant="caption" color="text.secondary" title={detail} role={reloading ? 'status' : undefined} sx={{ display: 'block', mt: 0.5, lineHeight: 1.3 }}>
+          {line}
+        </Typography>
+      )}
+      {error && <Alert severity="warning" sx={{ mt: 1 }}>Could not compare with that baseline: {error}</Alert>}
     </Box>
   );
 }

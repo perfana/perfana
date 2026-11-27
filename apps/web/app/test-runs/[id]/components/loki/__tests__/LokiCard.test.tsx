@@ -194,7 +194,7 @@ describe('baseline picker', () => {
     render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
     const input = await screen.findByLabelText('Baseline');
     await waitFor(() => expect(input).toHaveValue('Control group (2 runs)'));
-    expect(screen.getByText(/new patterns and applications its newest 2 runs \(run-a, run-b\)/)).toBeInTheDocument();
+    expect(screen.getByText('Error rates vs the whole control group (2 runs); new patterns vs its newest 2 runs')).toHaveAttribute('title', 'Compared with: run-a, run-b');
 
     fireEvent.mouseDown(input);
     fireEvent.click(await screen.findByText('run-0'));
@@ -206,6 +206,6 @@ describe('baseline picker', () => {
     mockSummary.mockReset();
     mockSummary.mockResolvedValue({ ...configured, baseline: { kind: 'previous-runs', testRunIds: ['p1', 'p2'] } } as LokiRunSummary);
     render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
-    expect(await screen.findByText(/comparing with the 2 previous runs \(p1, p2\)/)).toBeInTheDocument();
+    expect(await screen.findByText('No control group: compared with the 2 runs before this one')).toHaveAttribute('title', 'Compared with: p1, p2');
   });
 });
