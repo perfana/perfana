@@ -19,6 +19,7 @@ import {
   fetchLokiRunSummary, LokiErrorRate, LokiRunPanel, LokiRunPattern, LokiRunSample, LokiRunService, LokiRunSummary, NO_SERVICE,
 } from '@/lib/loki';
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 import KPIDisplay from '../shared/KPIDisplay';
 import SoftBadge from '../shared/SoftBadge';
 import { OpenInCardMenuItems } from '../shared/metric-card-links';
@@ -44,7 +45,7 @@ const WORSE_RATIO = 1.5;
 const MIN_PCT_POINTS = 0.1;
 
 interface LokiCardProps {
-  testRun: { test_run_id: string };
+  testRun: { test_run_id: string; system_under_test_id?: string; test_environment?: string | null; workload?: string | null };
   expanded: boolean;
   onExpand: () => void;
 }
@@ -191,7 +192,18 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
         }}
       >
         <CardContent sx={{ display: 'flex', flexDirection: 'column', height: '100%', p: 3.5, pt: 4, '&:last-child': { pb: 3.5 } }}>
-          <ExpandableCardHeader title="Loki Logs" expanded={expanded} onToggle={onExpand} />
+          <ExpandableCardHeader
+            title="Loki Logs"
+            expanded={expanded}
+            onToggle={onExpand}
+            settingsUrl={testRun.system_under_test_id ? buildSystemConfigUrl({
+              systemId: testRun.system_under_test_id,
+              tab: 'loki',
+              environment: testRun.test_environment,
+              workload: testRun.workload,
+              fromTestRun: testRun.test_run_id,
+            }) : undefined}
+          />
 
           {!summary && (
             <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

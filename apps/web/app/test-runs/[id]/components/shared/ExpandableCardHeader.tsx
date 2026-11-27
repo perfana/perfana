@@ -2,13 +2,15 @@
 
 import React from 'react';
 import { Box, Typography, IconButton, Tooltip, alpha } from '@mui/material';
-import { ExpandMore, ExpandLess } from '@mui/icons-material';
+import { ExpandMore, ExpandLess, Settings } from '@mui/icons-material';
 
 interface ExpandableCardHeaderProps {
   /** Card title, also used to build the icon button's aria-label. */
   title: string;
   expanded: boolean;
   onToggle: () => void;
+  /** System-under-test config URL (`buildSystemConfigUrl`); renders a cog that opens it in a new tab. */
+  settingsUrl?: string;
 }
 
 /**
@@ -25,12 +27,33 @@ export default function ExpandableCardHeader({
   title,
   expanded,
   onToggle,
+  settingsUrl,
 }: ExpandableCardHeaderProps) {
   const lowerTitle = title.toLowerCase();
   const toggleFromButton = (e: React.MouseEvent) => {
     e.stopPropagation();
     onToggle();
   };
+  const settingsButton = settingsUrl && (
+    <Tooltip title={`Configure ${title}`}>
+      <IconButton
+        aria-label={`Configure ${lowerTitle}`}
+        onClick={(e) => { e.stopPropagation(); window.open(settingsUrl, '_blank'); }}
+        size="small"
+        sx={{
+          position: 'absolute',
+          right: 40,
+          width: 32,
+          height: 32,
+          color: 'text.secondary',
+          '&:hover': { backgroundColor: 'action.selected', color: 'primary.main' },
+          transition: 'all 0.2s ease',
+        }}
+      >
+        <Settings fontSize="small" />
+      </IconButton>
+    </Tooltip>
+  );
 
   if (!expanded) {
     return (
@@ -49,6 +72,7 @@ export default function ExpandableCardHeader({
         >
           {title}
         </Typography>
+        {settingsButton}
         <Tooltip title="Expand">
           <IconButton
             aria-label={`Expand ${lowerTitle}`}
@@ -105,6 +129,7 @@ export default function ExpandableCardHeader({
       >
         {title}
       </Typography>
+      {settingsButton}
       <Tooltip title="Collapse">
         <IconButton
           aria-label={`Collapse ${lowerTitle}`}

@@ -140,3 +140,12 @@ it('scopes the KPIs to an application, falling back to all-streams lines carryin
   expect(all.patterns.every((p) => p.service === null)).toBe(true);
   expect(all.newPatterns).toBe(1);
 });
+
+it('opens the system config on the Loki tab, scoped to the run', async () => {
+  mockSummary.mockResolvedValue(configured);
+  const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+  render(<LokiCard testRun={{ test_run_id: 'run-1', system_under_test_id: 'sut-1', test_environment: 'acc', workload: 'load' }} expanded onExpand={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Configure loki logs' }));
+  expect(open).toHaveBeenCalledWith('/systems/sut-1/config?tab=loki&environment=acc&workload=load&fromTestRun=run-1', '_blank');
+  open.mockRestore();
+});
