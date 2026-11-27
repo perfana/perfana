@@ -190,7 +190,7 @@ export async function seedLokiCompareConfigs(
   queries: Array<Pick<LokiQueryRow, 'panel_title' | 'panel_id' | 'application_dashboard_id'>>,
 ): Promise<void> {
   const targets = queries.filter((q) => q.panel_title === LOKI_ERROR_PANEL_TITLE && q.application_dashboard_id);
-  if (targets.length === 0) return;
+  if (targets.length === 0) {return;}
   try {
     await db.query(
       `INSERT INTO ds_compare_config (
