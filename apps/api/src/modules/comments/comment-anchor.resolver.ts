@@ -394,6 +394,8 @@ export function seriesSource(sourceType: string | null): string {
       return 'dynatrace';
     case 'splunk':
       return 'splunk';
+    case 'loki':
+      return 'loki';
     default:
       return 'grafana';
   }

@@ -28,7 +28,7 @@ export class CompareSeriesConfig {
   @IsString()
   metricName!: string;
 
-  @ApiProperty({ description: 'Data source type', enum: ['grafana', 'dynatrace', 'performance-metrics', 'splunk'] })
+  @ApiProperty({ description: 'Data source type', enum: ['grafana', 'dynatrace', 'performance-metrics', 'splunk', 'loki'] })
   @IsString()
   source!: string;
 

@@ -1,0 +1,973 @@
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
+import { OwnedResource } from '@perfana/shared';
+import {
+  buildMetricExpr,
+  buildLogExpr,
+  buildStreamSelector,
+  grafanaLokiDatasources,
+  hostForLog,
+  isErrorLevel,
+  lokiExploreUrl,
+  lokiLabels,
+  lokiLabelValues,
+  lokiPanelPoints,
+  lokiTestConnection,
+  LokiConnection,
+  LokiError,
+  LokiMatcher,
+  LokiRequestOptions,
+  normalizeLevel,
+  parseAggregation,
+  selectMappings,
+  validateLogqlPipeline,
+  validateMatchers,
+} from '@perfana/shared/services/loki/client';
+import { LOKI_STARTER_PANEL_TITLES } from '@perfana/shared/constants';
+import {
+  GrafanaInstance,
+  LokiConfig,
+  LokiQuery,
+  LokiStreamMapping,
+  MetricsSource,
+  SystemUnderTest,
+  TestRun,
+} from '../../entities';
+import { withRequestEm, withRequestQuery } from '../../common/db/request-em';
+import { generateDeterministicUuid } from '../../utils/uuid-generator';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
+import { Capability } from '../../constants/capabilities.constants';
+import { AuditService } from '../audit/audit.service';
+import { ProxyResolverService } from '../proxy/proxy-resolver.service';
+import { loadControlGroupForRun, loadControlGroupStatistics } from '../metrics/control-group-baseline';
+import {
+  CopyLokiStreamMappingsDto,
+  CreateLokiConfigDto,
+  CreateLokiQueryDto,
+  CreateLokiStreamMappingDto,
+  PreviewLokiQueryDto,
+  StarterLokiQueriesDto,
+  TestLokiConnectionDto,
+  UpdateLokiConfigDto,
+  UpdateLokiQueryDto,
+} from './dto/loki.dto';
+
+const LABELS_TTL_MS = 10 * 60 * 1000;
+/** How many baseline runs' pattern snapshots decide whether a pattern is new. */
+const NEW_PATTERN_BASELINE_RUNS = 5;
+
+/**
+ * The starter panels, created per scope by POST /loki/queries/starter. `{level}` and `{service}`
+ * are replaced with the connection's level label and the chosen service label.
+ */
+export const STARTER_PANELS = [
+  { panelTitle: LOKI_STARTER_PANEL_TITLES[0], logql: '$entities', splitBy: '{level}', aggregation: 'count' },
+  {
+    panelTitle: LOKI_STARTER_PANEL_TITLES[1],
+    logql: '$entities | {level}=~"(?i)(error|err|fatal|critical|crit|panic|emerg|alert|severe)"',
+    splitBy: '{service}',
+    aggregation: 'count',
+  },
+  { panelTitle: LOKI_STARTER_PANEL_TITLES[2], logql: '$entities', splitBy: '{service}', aggregation: 'bytes', metricUnit: 'bytes' },
+] as const;
+
+export interface ScopeRef {
+  systemUnderTestId: string;
+  testEnvironment: string;
+  workload: string;
+}
+
+const errMsg = (err: unknown): string =>
+  err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
+
+/** `{ totalLines, errorLines }` from a level panel's series totals. */
+export function levelTotals(series: Array<{ name: string; total: number | null }>): { total: number; errors: number } | null {
+  let total = 0;
+  let errors = 0;
+  let any = false;
+  for (const s of series) {
+    if (s.total === null) continue;
+    any = true;
+    total += s.total;
+    if (isErrorLevel(s.name)) errors += s.total;
+  }
+  return any ? { total, errors } : null;
+}
+
+/**
+ * Loki connections, stream mappings and panels. Spec: docs/reference/Features/Loki Log Metrics (spec).md.
+ *
+ * Authorization is Splunk's: connections are org-owned (integration:loki:* capabilities) and must
+ * sit in the same organization as the Grafana instance they query through; mappings and panels
+ * belong to a system and inherit its organization, and the connection they use must be in that
+ * same organization, so one tenant can never point its system at another tenant's Grafana
+ * credentials. Every resource outside the caller's organizations is a 404, never a 403.
+ */
+@Injectable()
+export class LokiService {
+  private readonly logger = new Logger(LokiService.name);
+  // ponytail: per-process cache, like Splunk discovery; labels are cheap to re-read.
+  private readonly labelCache = new Map<string, { at: number; values: string[] }>();
+
+  constructor(
+    @InjectRepository(LokiConfig) private readonly configRepo: Repository<LokiConfig>,
+    @InjectRepository(LokiStreamMapping) private readonly mappingRepo: Repository<LokiStreamMapping>,
+    @InjectRepository(LokiQuery) private readonly queryRepo: Repository<LokiQuery>,
+    @InjectRepository(GrafanaInstance) private readonly grafanaRepo: Repository<GrafanaInstance>,
+    @InjectRepository(SystemUnderTest) private readonly sutRepo: Repository<SystemUnderTest>,
+    @InjectRepository(MetricsSource) private readonly metricsSourceRepo: Repository<MetricsSource>,
+    @InjectRepository(TestRun) private readonly testRunRepo: Repository<TestRun>,
+    private readonly dataSource: DataSource,
+    private readonly authzService: AuthorizationService,
+    private readonly auditService: AuditService,
+    private readonly proxyResolver: ProxyResolverService,
+  ) {}
+
+  // ---------------------------------------------------------------------------
+  // Connections
+  // ---------------------------------------------------------------------------
+
+  async listConfigs(userId: string, roles: string[]) {
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    if (orgIds !== null && orgIds.length === 0) return [];
+    const qb = withRequestEm(this.configRepo).createQueryBuilder('c').leftJoinAndSelect('c.grafanaInstance', 'g').orderBy('c.label', 'ASC');
+    if (orgIds !== null) qb.where('c.organization_id IN (:...orgIds)', { orgIds });
+    return (await qb.getMany()).map((c) => this.present(c));
+  }
+
+  async getConfig(id: string, userId: string, roles: string[]) {
+    return this.present(await this.loadConfig(id, userId, roles));
+  }
+
+  /** Loki datasources on a Grafana instance, for the connection dialog. */
+  async listDatasources(grafanaInstanceId: string, userId: string, roles: string[]) {
+    const instance = await this.loadGrafanaInstance(grafanaInstanceId, userId, roles);
+    await this.requireCapability(userId, roles, instance.organizationId, Capability.IntegrationLokiCreate);
+    try {
+      return await grafanaLokiDatasources(this.grafanaConnection(instance), await this.requestOptions(instance));
+    } catch (err) {
+      throw this.toHttp(err);
+    }
+  }
+
+  async createConfig(dto: CreateLokiConfigDto, userId: string, roles: string[]) {
+    const instance = await this.loadGrafanaInstance(dto.grafanaInstanceId, userId, roles);
+    // The organization is the Grafana instance's: a connection may only use its own tenant's credentials.
+    await this.requireCapability(userId, roles, instance.organizationId, Capability.IntegrationLokiCreate);
+    const entity = this.configRepo.create({
+      label: dto.label.trim(),
+      grafanaInstanceId: instance.id,
+      datasourceUid: dto.datasourceUid.trim(),
+      datasourceName: dto.datasourceName?.trim() || null,
+      levelLabel: dto.levelLabel?.trim() || 'detected_level',
+      maxConcurrentQueries: dto.maxConcurrentQueries ?? 2,
+      organizationId: instance.organizationId,
+      createdBy: userId,
+      updatedBy: userId,
+    });
+    const saved = await this.saveUnique(this.configRepo, entity, 'That Loki datasource is already connected for this Grafana instance');
+    this.auditService.logCreate(saved as unknown as OwnedResource, { organizationIdOverride: saved.organizationId });
+    saved.grafanaInstance = instance;
+    return this.present(saved);
+  }
+
+  async updateConfig(id: string, dto: UpdateLokiConfigDto, userId: string, roles: string[]) {
+    const entity = await this.loadConfig(id, userId, roles);
+    await this.requireCapability(userId, roles, entity.organizationId, Capability.IntegrationLokiUpdate);
+    const before = Object.assign(new LokiConfig(), entity);
+    if (dto.label !== undefined) entity.label = dto.label.trim();
+    if (dto.datasourceUid !== undefined) entity.datasourceUid = dto.datasourceUid.trim();
+    if (dto.datasourceName !== undefined) entity.datasourceName = dto.datasourceName?.trim() || null;
+    if (dto.levelLabel !== undefined) entity.levelLabel = dto.levelLabel.trim() || 'detected_level';
+    if (dto.maxConcurrentQueries !== undefined) entity.maxConcurrentQueries = dto.maxConcurrentQueries;
+    entity.updatedBy = userId;
+    const instance = entity.grafanaInstance;
+    delete entity.grafanaInstance;
+    const saved = await this.saveUnique(this.configRepo, entity, 'That Loki datasource is already connected for this Grafana instance');
+    this.clearLabelCache(id);
+    this.auditService.logUpdate(before as unknown as OwnedResource, saved as unknown as OwnedResource, { organizationIdOverride: saved.organizationId });
+    saved.grafanaInstance = instance;
+    return this.present(saved);
+  }
+
+  /** Cascades to the connection's mappings and panels (FK ON DELETE CASCADE). */
+  async deleteConfig(id: string, userId: string, roles: string[]): Promise<void> {
+    const entity = await this.loadConfig(id, userId, roles);
+    await this.requireCapability(userId, roles, entity.organizationId, Capability.IntegrationLokiDelete);
+    await withRequestEm(this.configRepo).delete({ id });
+    this.clearLabelCache(id);
+    this.auditService.logDelete(entity as unknown as OwnedResource, { organizationIdOverride: entity.organizationId });
+  }
+
+  async testConnection(dto: TestLokiConnectionDto, userId: string, roles: string[]) {
+    const instance = await this.loadGrafanaInstance(dto.grafanaInstanceId, userId, roles);
+    await this.requireCapability(userId, roles, instance.organizationId, Capability.IntegrationLokiCreate);
+    return this.probe({ ...this.grafanaConnection(instance), datasourceUid: dto.datasourceUid }, await this.requestOptions(instance));
+  }
+
+  async testSavedConnection(id: string, userId: string, roles: string[]) {
+    const config = await this.loadConfig(id, userId, roles);
+    await this.requireCapability(userId, roles, config.organizationId, Capability.IntegrationLokiUpdate);
+    const instance = config.grafanaInstance!;
+    return this.probe(this.connectionOf(config, instance), await this.requestOptions(instance));
+  }
+
+  /** Label names, for the mapping editor. Lists what the token can see: a configuration action. */
+  async listLabels(id: string, userId: string, roles: string[], hours = 24, refresh = false): Promise<string[]> {
+    const config = await this.loadConfig(id, userId, roles);
+    await this.requireCapability(userId, roles, config.organizationId, Capability.IntegrationLokiUpdate);
+    return this.cached(`${id}:labels:${hours}`, refresh, async () => {
+      const to = new Date();
+      return lokiLabels(this.connectionOf(config, config.grafanaInstance!), new Date(to.getTime() - hours * 3600_000), to,
+        await this.requestOptions(config.grafanaInstance!));
+    });
+  }
+
+  /** Values of one label, optionally narrowed by matchers already chosen. */
+  async listLabelValues(id: string, label: string, userId: string, roles: string[], hours = 24, matchers?: LokiMatcher[]): Promise<string[]> {
+    const config = await this.loadConfig(id, userId, roles);
+    await this.requireCapability(userId, roles, config.organizationId, Capability.IntegrationLokiUpdate);
+    let selector: string | undefined;
+    if (matchers && matchers.length > 0) {
+      const problem = validateMatchers(matchers);
+      if (problem) throw new BadRequestException(problem);
+      selector = buildStreamSelector(matchers);
+    }
+    return this.cached(`${id}:values:${label}:${hours}:${selector ?? ''}`, false, async () => {
+      const to = new Date();
+      return lokiLabelValues(this.connectionOf(config, config.grafanaInstance!), label, new Date(to.getTime() - hours * 3600_000), to, selector,
+        await this.requestOptions(config.grafanaInstance!));
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stream mappings
+  // ---------------------------------------------------------------------------
+
+  async listMappings(systemUnderTestId: string, userId: string, roles: string[], testEnvironment?: string, workload?: string) {
+    await this.loadSut(systemUnderTestId, userId, roles, 'read');
+    return this.mappingsInScope(systemUnderTestId, testEnvironment, workload);
+  }
+
+  async createMapping(dto: CreateLokiStreamMappingDto, userId: string, roles: string[]): Promise<LokiStreamMapping> {
+    const sut = await this.loadSut(dto.systemUnderTestId, userId, roles, 'write');
+    await this.requireSameOrgConfig(dto.lokiConfigId, sut, userId, roles);
+    const matchers: LokiMatcher[] = dto.matchers.map((m) => ({ label: m.label.trim(), op: m.op, value: m.value }));
+    const problem = validateMatchers(matchers);
+    if (problem) throw new BadRequestException(problem);
+    const scope = this.levelScope(dto.level, dto.testEnvironment, dto.workload);
+    const entity = this.mappingRepo.create({
+      lokiConfigId: dto.lokiConfigId,
+      systemUnderTestId: sut.id,
+      level: dto.level,
+      ...scope,
+      matchers,
+      selector: buildStreamSelector(matchers),
+      labels: dto.labels ?? [],
+      organizationId: sut.organization_id,
+      teamId: sut.team_id,
+      createdBy: userId,
+      updatedBy: userId,
+    });
+    const saved = await this.saveUnique(this.mappingRepo, entity, 'These streams are already mapped at that level');
+    this.auditService.logCreate(saved as unknown as OwnedResource, { organizationIdOverride: saved.organizationId });
+    return saved;
+  }
+
+  async deleteMapping(id: string, userId: string, roles: string[]): Promise<void> {
+    const mapping = await withRequestEm(this.mappingRepo).findOne({ where: { id } });
+    if (!mapping) throw new NotFoundException('Loki stream mapping not found');
+    await this.loadSut(mapping.systemUnderTestId, userId, roles, 'write', 'Loki stream mapping not found');
+    await withRequestEm(this.mappingRepo).delete({ id });
+    this.auditService.logDelete(mapping as unknown as OwnedResource, { organizationIdOverride: mapping.organizationId });
+  }
+
+  /** Copy mappings to another environment/workload of the SAME system, each keeping its level. */
+  async copyMappings(dto: CopyLokiStreamMappingsDto, userId: string, roles: string[]) {
+    let copied = 0;
+    let skipped = 0;
+    for (const id of dto.mappingIds) {
+      const source = await withRequestEm(this.mappingRepo).findOne({ where: { id } });
+      if (!source) throw new NotFoundException('Loki stream mapping not found');
+      // Authorize before any skip branch, or another tenant's id answers {skipped:1} instead of a 404.
+      await this.loadSut(source.systemUnderTestId, userId, roles, 'write', 'Loki stream mapping not found');
+      if (source.level === 'sut') {
+        skipped++;
+        continue;
+      }
+      const workload = source.level === 'workload' ? dto.targetWorkload ?? source.workload ?? null : null;
+      // Probe instead of catching 23505: a unique violation aborts the request's RLS transaction.
+      const exists = await withRequestEm(this.mappingRepo).findOne({
+        where: {
+          systemUnderTestId: source.systemUnderTestId,
+          lokiConfigId: source.lokiConfigId,
+          testEnvironment: dto.targetEnvironment,
+          workload: workload ?? IsNull(),
+          selector: source.selector,
+        },
+      });
+      if (exists) {
+        skipped++;
+        continue;
+      }
+      await this.createMapping(
+        {
+          lokiConfigId: source.lokiConfigId,
+          systemUnderTestId: source.systemUnderTestId,
+          level: source.level,
+          testEnvironment: dto.targetEnvironment,
+          workload,
+          matchers: source.matchers,
+          labels: source.labels,
+        },
+        userId,
+        roles,
+      );
+      copied++;
+    }
+    return { copied, skipped };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Panels
+  // ---------------------------------------------------------------------------
+
+  /** Panel titles a profile's "Loki — all panels" SLO can target: the starter panels plus every title in use. */
+  async listPanelTitles(userId: string, roles: string[]): Promise<Array<{ panelTitle: string; metricUnit: string }>> {
+    const byTitle = new Map<string, string>(STARTER_PANELS.map((p) => [p.panelTitle, 'metricUnit' in p ? p.metricUnit : 'short']));
+    const orgIds = await withOrgFilter(userId, roles, this.authzService);
+    if (orgIds === null || orgIds.length > 0) {
+      const qb = withRequestEm(this.queryRepo)
+        .createQueryBuilder('q')
+        .select('DISTINCT ON (q.panel_title) q.panel_title', 'panelTitle')
+        .addSelect('q.metric_unit', 'metricUnit')
+        .orderBy('q.panel_title', 'ASC')
+        .addOrderBy('q.updated_at', 'DESC');
+      if (orgIds !== null) qb.where('q.organization_id IN (:...orgIds)', { orgIds });
+      for (const row of await qb.getRawMany<{ panelTitle: string; metricUnit: string }>()) byTitle.set(row.panelTitle, row.metricUnit);
+    }
+    return [...byTitle.entries()].map(([panelTitle, metricUnit]) => ({ panelTitle, metricUnit })).sort((a, b) => a.panelTitle.localeCompare(b.panelTitle));
+  }
+
+  async listQueries(scope: ScopeRef, userId: string, roles: string[]): Promise<LokiQuery[]> {
+    await this.loadSut(scope.systemUnderTestId, userId, roles, 'read');
+    return withRequestEm(this.queryRepo).find({
+      where: { systemUnderTestId: scope.systemUnderTestId, testEnvironment: scope.testEnvironment, workload: scope.workload },
+      order: { dashboardLabel: 'ASC', panelId: 'ASC' },
+    });
+  }
+
+  async createQuery(dto: CreateLokiQueryDto, userId: string, roles: string[]): Promise<LokiQuery> {
+    const sut = await this.loadSut(dto.systemUnderTestId, userId, roles, 'write');
+    const config = await this.requireSameOrgConfig(dto.lokiConfigId, sut, userId, roles);
+    this.checkQuery(dto.logql, dto.aggregation);
+    const dashboardLabel = dto.dashboardLabel?.trim() || 'Loki logs';
+    const panelId = dto.panelId ?? (await this.nextPanelId(dto, dashboardLabel));
+    const { applicationDashboardId, metricsSourceId } = await this.ensureArtificialDashboard(sut, dto, dashboardLabel, config);
+    const entity = this.queryRepo.create({
+      lokiConfigId: dto.lokiConfigId,
+      systemUnderTestId: sut.id,
+      testEnvironment: dto.testEnvironment,
+      workload: dto.workload,
+      dashboardLabel,
+      applicationDashboardId,
+      metricsSourceId,
+      panelTitle: dto.panelTitle,
+      panelId,
+      logql: dto.logql,
+      splitBy: dto.splitBy || null,
+      aggregation: dto.aggregation?.trim() || 'count',
+      metricUnit: dto.metricUnit || 'short',
+      maxSeries: dto.maxSeries ?? 20,
+      enabled: dto.enabled ?? true,
+      organizationId: sut.organization_id,
+      teamId: sut.team_id,
+      createdBy: userId,
+      updatedBy: userId,
+    });
+    const saved = await this.saveUnique(this.queryRepo, entity, `Panel ${panelId} already exists on "${dashboardLabel}" for this workload`);
+    this.auditService.logCreate(saved as unknown as OwnedResource, { organizationIdOverride: saved.organizationId });
+    return saved;
+  }
+
+  /** The starter panels for a scope; an existing panel title is left alone. */
+  async createStarterQueries(scope: StarterLokiQueriesDto, userId: string, roles: string[]) {
+    const existing = await this.listQueries(scope, userId, roles);
+    const sut = await this.loadSut(scope.systemUnderTestId, userId, roles, 'write');
+    const config = await this.requireSameOrgConfig(scope.lokiConfigId, sut, userId, roles);
+    const titles = new Set(existing.map((q) => q.panelTitle));
+    const service = scope.serviceLabel?.trim() || 'service_name';
+    const fill = (s: string) => s.replace(/\{level\}/g, config.levelLabel).replace(/\{service\}/g, service);
+    const created: LokiQuery[] = [];
+    for (const p of STARTER_PANELS) {
+      if (titles.has(p.panelTitle)) continue;
+      created.push(await this.createQuery({
+        lokiConfigId: scope.lokiConfigId,
+        systemUnderTestId: scope.systemUnderTestId,
+        testEnvironment: scope.testEnvironment,
+        workload: scope.workload,
+        panelTitle: p.panelTitle,
+        logql: fill(p.logql),
+        splitBy: fill(p.splitBy),
+        aggregation: p.aggregation,
+        metricUnit: 'metricUnit' in p ? p.metricUnit : 'short',
+      }, userId, roles));
+    }
+    return created;
+  }
+
+  async updateQuery(id: string, dto: UpdateLokiQueryDto, userId: string, roles: string[]): Promise<LokiQuery> {
+    const entity = await this.loadQuery(id, userId, roles);
+    const before = Object.assign(new LokiQuery(), entity);
+    this.checkQuery(dto.logql ?? entity.logql, dto.aggregation ?? entity.aggregation);
+    if (dto.logql !== undefined) entity.logql = dto.logql;
+    if (dto.panelTitle !== undefined) entity.panelTitle = dto.panelTitle;
+    if (dto.panelId !== undefined) entity.panelId = dto.panelId;
+    if (dto.splitBy !== undefined) entity.splitBy = dto.splitBy || null;
+    if (dto.aggregation !== undefined) entity.aggregation = dto.aggregation.trim() || 'count';
+    if (dto.metricUnit !== undefined) entity.metricUnit = dto.metricUnit || 'short';
+    if (dto.maxSeries !== undefined) entity.maxSeries = dto.maxSeries;
+    if (dto.enabled !== undefined) entity.enabled = dto.enabled;
+    entity.updatedBy = userId;
+    const saved = await this.saveUnique(this.queryRepo, entity, `Panel ${entity.panelId} already exists on "${entity.dashboardLabel}" for this workload`);
+    this.auditService.logUpdate(before as unknown as OwnedResource, saved as unknown as OwnedResource, { organizationIdOverride: saved.organizationId });
+    return saved;
+  }
+
+  async deleteQuery(id: string, userId: string, roles: string[]): Promise<void> {
+    const entity = await this.loadQuery(id, userId, roles);
+    await withRequestEm(this.queryRepo).delete({ id });
+    this.auditService.logDelete(entity as unknown as OwnedResource, { organizationIdOverride: entity.organizationId });
+  }
+
+  /** Run an unsaved panel over the last N minutes: series, totals, the LogQL sent, and label names to split on. */
+  async previewQuery(dto: PreviewLokiQueryDto, userId: string, roles: string[]) {
+    // Write, not read: a preview runs caller-chosen LogQL with the organization's Grafana credentials.
+    const sut = await this.loadSut(dto.systemUnderTestId, userId, roles, 'write');
+    const config = await this.requireSameOrgConfig(dto.lokiConfigId, sut, userId, roles);
+    this.checkQuery(dto.logql, dto.aggregation);
+    const mappings = await this.mappingsInScope(sut.id, dto.testEnvironment, dto.workload, dto.lokiConfigId);
+    if (selectMappings(dto.logql, mappings).length === 0) {
+      return { exprs: [], series: [], labels: [], message: 'No Loki streams are mapped for this scope (or none carries that $entities tag), so there is nothing to query.' };
+    }
+    const minutes = dto.minutes ?? 60;
+    const to = new Date();
+    const from = new Date(to.getTime() - minutes * 60_000);
+    const bucketSeconds = Math.max(5, Math.ceil((minutes * 60) / 120));
+    const instance = config.grafanaInstance!;
+    const conn = this.connectionOf(config, instance);
+    const opts = await this.requestOptions(instance);
+    try {
+      const [result, labels] = await Promise.all([
+        lokiPanelPoints(conn, { logql: dto.logql, aggregation: dto.aggregation, splitBy: dto.splitBy, maxSeries: dto.maxSeries, panelTitle: 'value' },
+          mappings, from, to, bucketSeconds, undefined, {
+            ...opts,
+            onQuery: (expr, info) => this.logger.debug(`Loki preview query (${info.ms}ms, ${info.frames} frames): ${expr}`),
+          }),
+        lokiLabels(conn, from, to, opts).catch(() => [] as string[]),
+      ]);
+      const totals = new Map<string, number>();
+      for (const p of result.points) totals.set(p.series, (totals.get(p.series) ?? 0) + p.value);
+      const nonZero = result.points.some((p) => p.value !== 0);
+      return {
+        exprs: result.exprs,
+        bucketSeconds,
+        series: [...totals.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total),
+        points: result.points.length,
+        seriesBeforeCap: result.seriesBeforeCap,
+        labels,
+        ...(!nonZero
+          ? { message: dto.splitBy && totals.size === 1 && totals.has('(none)')
+              ? `No line in the window carries the label "${dto.splitBy}". Pick one of the labels listed below, or add a parser stage (| json, | logfmt) that extracts it.`
+              : 'Loki returned no lines for this query in the window.' }
+          : {}),
+      };
+    } catch (err) {
+      throw this.toHttp(err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Test run summary
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Everything the test run page's Loki card shows, in one request, none of it asked of Loki:
+   * the streams in effect for the run, each panel's series totals (from the analysis'
+   * statistics), the error rate against the control group's, and the pattern and error-line
+   * snapshots the worker took at analysis. `configured` is false when the workload has no
+   * enabled Loki panel, so the card hides.
+   */
+  async runSummary(testRunId: string, userId: string, roles: string[]) {
+    const run = await withRequestEm(this.testRunRepo).findOne({ where: { testRunId } });
+    if (!run) throw new NotFoundException('Test run not found');
+    await this.loadSut(run.systemUnderTestId, userId, roles, 'read', 'Test run not found');
+
+    const scope = { systemUnderTestId: run.systemUnderTestId, testEnvironment: run.testEnvironment, workload: run.workload };
+    const queries = (await withRequestEm(this.queryRepo).find({ where: scope, order: { panelId: 'ASC' } })).filter((q) => q.enabled);
+    if (queries.length === 0) return { configured: false as const };
+
+    const mappings = await this.mappingsInScope(scope.systemUnderTestId, scope.testEnvironment, scope.workload);
+    const configIds = [...new Set(queries.map((q) => q.lokiConfigId))];
+    const configs = await withRequestEm(this.configRepo).find({ where: configIds.map((id) => ({ id })), relations: { grafanaInstance: true } });
+    const configById = new Map(configs.map((c) => [c.id, c]));
+    const q = withRequestQuery(this.dataSource);
+
+    const dashboardIds = [...new Set(queries.map((x) => x.applicationDashboardId).filter((id): id is string => !!id))];
+    type StatRow = { application_dashboard_id: string; panel_id: number; metric_name: string; mean: number | null; max_value: number | null; count: number | null };
+    const stats: StatRow[] = dashboardIds.length === 0 ? [] : await q.query(
+      `SELECT application_dashboard_id, panel_id, metric_name, mean, max_value, count
+         FROM ds_metric_statistics
+        WHERE test_run_id = $1 AND application_dashboard_id = ANY($2::uuid[])`,
+      [run.testRunId, dashboardIds],
+    );
+
+    const start = run.startTime ? new Date(run.startTime) : null;
+    const end = run.endTime ? new Date(run.endTime) : new Date();
+    const explore = (config: LokiConfig | undefined, expr: string): string | null => {
+      const g = config?.grafanaInstance;
+      if (!config || !g || !start) return null;
+      return lokiExploreUrl(g.client_url, g.orgId, config.datasourceUid, expr, start, end);
+    };
+    const bucketSeconds = 60;
+
+    const panels = queries.map((query) => {
+      const config = configById.get(query.lokiConfigId);
+      const selected = selectMappings(query.logql, mappings.filter((m) => m.lokiConfigId === query.lokiConfigId));
+      let link: string | null = null;
+      if (selected[0]) {
+        try {
+          link = explore(config, buildMetricExpr(selected[0], {
+            logql: query.logql, aggregation: query.aggregation, splitBy: query.splitBy, bucketSeconds, testRunId: run.testRunId,
+          }));
+        } catch {
+          link = null;
+        }
+      }
+      const additive = (() => { try { return parseAggregation(query.aggregation).combine === 'sum'; } catch { return false; } })();
+      const series = stats
+        .filter((st) => st.application_dashboard_id === query.applicationDashboardId && st.panel_id === query.panelId)
+        .map((st) => ({
+          name: st.metric_name,
+          mean: st.mean,
+          peak: st.max_value,
+          // A count/bytes/sum panel's mean per bucket times its buckets is the window's total.
+          total: additive && st.mean !== null && st.count !== null ? Math.round(st.mean * st.count) : null,
+        }))
+        .sort((a, b) => (b.total ?? b.mean ?? 0) - (a.total ?? a.mean ?? 0));
+      return {
+        panelId: query.panelId,
+        applicationDashboardId: query.applicationDashboardId ?? null,
+        metricsSourceId: query.metricsSourceId ?? null,
+        dashboardLabel: query.dashboardLabel,
+        title: query.panelTitle,
+        aggregation: query.aggregation,
+        splitBy: query.splitBy,
+        unit: query.metricUnit,
+        isLevelPanel: !!config && query.splitBy === config.levelLabel && /^count$/i.test(query.aggregation.trim()),
+        series,
+        link,
+      };
+    });
+
+    const errorRate = await this.errorRate(run.testRunId, panels);
+    const insights = await this.runInsights(run.testRunId, run.systemUnderTestId, run.testEnvironment, run.workload, configById, start, end, mappings);
+    const firstConfig = configById.get(queries[0]!.lokiConfigId);
+
+    return {
+      configured: true as const,
+      connection: firstConfig ? { id: firstConfig.id, label: firstConfig.label, levelLabel: firstConfig.levelLabel } : null,
+      sources: mappings.map((m) => ({
+        id: m.id, level: m.level, selector: m.selector, labels: m.labels,
+        exploreUrl: explore(configById.get(m.lokiConfigId), m.selector),
+      })),
+      window: start ? { from: start.toISOString(), to: end.toISOString() } : null,
+      errorRate,
+      panels: panels.map(({ applicationDashboardId: _a, metricsSourceId: _m, ...p }) => p),
+      ...insights,
+    };
+  }
+
+  /**
+   * Error lines and their share of all lines, from the level panel (split by the connection's level
+   * label, aggregation count), against the same ratio in the run's control group. A ratio, so it is
+   * comparable across runs with different bucket sizes, which raw counts per bucket are not.
+   */
+  private async errorRate(
+    testRunId: string,
+    panels: Array<{ isLevelPanel: boolean; panelId: number; applicationDashboardId: string | null; metricsSourceId: string | null; series: Array<{ name: string; total: number | null; mean: number | null }> }>,
+  ) {
+    const levelPanel = panels.find((p) => p.isLevelPanel && p.series.length > 0);
+    if (!levelPanel) return null;
+    const totals = levelTotals(levelPanel.series);
+    if (!totals) return null;
+    const pct = totals.total > 0 ? (totals.errors / totals.total) * 100 : 0;
+    let baseline: { errorRatePct: number; runs: number } | null = null;
+    try {
+      // The run is authorized by the caller; ds_control_groups has no RLS of its own.
+      const q = withRequestQuery(this.dataSource);
+      const group = await loadControlGroupForRun(q, testRunId);
+      if (group && levelPanel.applicationDashboardId) {
+        const rows = await loadControlGroupStatistics(q, group.id, {
+          applicationDashboardId: levelPanel.applicationDashboardId,
+          panelId: levelPanel.panelId,
+        });
+        let all = 0;
+        let err = 0;
+        for (const r of rows) {
+          if (r.mean === null || r.metric_name === null) continue;
+          all += r.mean;
+          if (isErrorLevel(r.metric_name)) err += r.mean;
+        }
+        if (all > 0) baseline = { errorRatePct: (err / all) * 100, runs: group.nTestRuns };
+      }
+    } catch (err) {
+      this.logger.warn(`Loki baseline error rate for ${testRunId} unavailable: ${errMsg(err)}`);
+    }
+    return { totalLines: totals.total, errorLines: totals.errors, errorRatePct: pct, baseline };
+  }
+
+  /** The pattern and sample-line snapshots, with each pattern marked new against the baseline runs' snapshots. */
+  private async runInsights(
+    testRunId: string,
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workload: string,
+    configById: Map<string, LokiConfig>,
+    start: Date | null,
+    end: Date,
+    mappings: LokiStreamMapping[],
+  ) {
+    const q = withRequestQuery(this.dataSource);
+    const present = await q.query(`SELECT to_regclass('public.loki_run_patterns') IS NOT NULL AS present`) as Array<{ present: boolean }>;
+    if (!present[0]?.present) return { patterns: [], patternsSource: null, newPatterns: null, samples: [] };
+
+    const patternRows = await q.query(
+      `SELECT loki_config_id, pattern, pattern_key, level, count::bigint AS count, first_seen, last_seen, source
+         FROM loki_run_patterns WHERE test_run_id = $1 ORDER BY count DESC LIMIT 100`,
+      [testRunId],
+    ) as Array<{ loki_config_id: string | null; pattern: string; pattern_key: string; level: string | null; count: string; first_seen: Date | null; last_seen: Date | null; source: string }>;
+    const sampleRows = await q.query(
+      `SELECT loki_config_id, "time", level, line, labels FROM loki_run_samples WHERE test_run_id = $1 ORDER BY "time" DESC LIMIT 100`,
+      [testRunId],
+    ) as Array<{ loki_config_id: string | null; time: Date; level: string | null; line: string; labels: Record<string, string> }>;
+
+    // Baseline runs: the control group's, else the workload's previous completed runs.
+    let baselineRuns: string[] = [];
+    try {
+      const group = await loadControlGroupForRun(q, testRunId);
+      baselineRuns = (group?.testRuns ?? []).filter((id) => id !== testRunId).slice(-NEW_PATTERN_BASELINE_RUNS);
+    } catch {
+      baselineRuns = [];
+    }
+    if (baselineRuns.length === 0 && start) {
+      const prev = await q.query(
+        `SELECT test_run_id FROM test_runs
+          WHERE system_under_test_id = $1 AND test_environment = $2 AND workload = $3
+            AND completed = true AND test_run_id <> $4 AND start_time < $5
+          ORDER BY start_time DESC LIMIT $6`,
+        [systemUnderTestId, testEnvironment, workload, testRunId, start, NEW_PATTERN_BASELINE_RUNS],
+      ) as Array<{ test_run_id: string }>;
+      baselineRuns = prev.map((r) => r.test_run_id);
+    }
+    let known: Set<string> | null = null;
+    if (baselineRuns.length > 0) {
+      const rows = await q.query(
+        `SELECT DISTINCT pattern_key FROM loki_run_patterns WHERE test_run_id = ANY($1::varchar[])`,
+        [baselineRuns],
+      ) as Array<{ pattern_key: string }>;
+      // No snapshot in any baseline run (e.g. they ran before this feature): "new" cannot be decided.
+      if (rows.length > 0) known = new Set(rows.map((r) => r.pattern_key));
+    }
+
+    const explorePattern = (configId: string | null, pattern: string): string | null => {
+      const config = configId ? configById.get(configId) : undefined;
+      const g = config?.grafanaInstance;
+      const mapping = mappings.find((m) => m.lokiConfigId === configId);
+      if (!config || !g || !start || !mapping) return null;
+      // `|>` is Loki's pattern match filter (Loki 3.1+); on older Loki Explore shows the parse error.
+      return lokiExploreUrl(g.client_url, g.orgId, config.datasourceUid, buildLogExpr(mapping, `|> ${JSON.stringify(pattern)}`), start, end);
+    };
+
+    const patterns = patternRows.map((r) => ({
+      pattern: r.pattern,
+      level: normalizeLevel(r.level),
+      count: Number(r.count),
+      firstSeen: r.first_seen ? new Date(r.first_seen).toISOString() : null,
+      lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : null,
+      source: r.source,
+      isNew: known === null ? null : !known.has(r.pattern_key),
+      exploreUrl: explorePattern(r.loki_config_id, r.pattern),
+    }));
+    return {
+      patterns,
+      patternsSource: patternRows[0]?.source ?? null,
+      newPatterns: known === null ? null : patterns.filter((p) => p.isNew).length,
+      baselineRunCount: known === null ? 0 : baselineRuns.length,
+      samples: sampleRows.map((r) => ({
+        time: new Date(r.time).toISOString(),
+        level: normalizeLevel(r.level),
+        line: r.line,
+        labels: r.labels ?? {},
+      })),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  private async mappingsInScope(systemUnderTestId: string, testEnvironment?: string, workload?: string, lokiConfigId?: string) {
+    const qb = withRequestEm(this.mappingRepo)
+      .createQueryBuilder('m')
+      .where('m.system_under_test_id = :systemUnderTestId', { systemUnderTestId })
+      .orderBy('m.selector', 'ASC');
+    if (lokiConfigId) qb.andWhere('m.loki_config_id = :lokiConfigId', { lokiConfigId });
+    if (testEnvironment !== undefined) {
+      qb.andWhere(
+        `(m.level = 'sut'
+          OR (m.level = 'environment' AND m.test_environment = :testEnvironment)
+          OR (m.level = 'workload' AND m.test_environment = :testEnvironment AND m.workload = :workload))`,
+        { testEnvironment, workload: workload ?? '' },
+      );
+    }
+    return qb.getMany();
+  }
+
+  private levelScope(level: string, testEnvironment?: string | null, workload?: string | null) {
+    const env = testEnvironment?.trim() || null;
+    const wl = workload?.trim() || null;
+    if (level === 'sut') return { testEnvironment: null, workload: null };
+    if (!env) throw new BadRequestException(`A ${level}-level mapping needs a test environment`);
+    if (level === 'environment') return { testEnvironment: env, workload: null };
+    if (!wl) throw new BadRequestException('A workload-level mapping needs a workload');
+    return { testEnvironment: env, workload: wl };
+  }
+
+  private async nextPanelId(scope: ScopeRef, dashboardLabel: string): Promise<number> {
+    const row = await withRequestEm(this.queryRepo)
+      .createQueryBuilder('q')
+      .select('COALESCE(MAX(q.panel_id), 0)', 'max')
+      .where('q.system_under_test_id = :s AND q.test_environment = :e AND q.workload = :w AND q.dashboard_label = :d', {
+        s: scope.systemUnderTestId, e: scope.testEnvironment, w: scope.workload, d: dashboardLabel,
+      })
+      .getRawOne<{ max: string | number }>();
+    return Number(row?.max ?? 0) + 1;
+  }
+
+  /**
+   * The rows a Loki panel's ds_metrics hang off, exactly as Splunk's (see SplunkService): a
+   * synthetic grafana_dashboards row with grafana_json NULL, an application_dashboards row with
+   * grafana_instance_id NULL and a deterministic id over (system, environment, workload, label),
+   * and a metrics_sources row with source_type 'loki'. The synthetic row hangs off the Grafana
+   * instance the connection queries through, which is in the system's organization by construction.
+   */
+  private async ensureArtificialDashboard(
+    sut: SystemUnderTest,
+    scope: ScopeRef,
+    dashboardLabel: string,
+    config: LokiConfig,
+  ): Promise<{ applicationDashboardId: string; metricsSourceId: string }> {
+    const em = withRequestQuery(this.dataSource);
+    const applicationDashboardId = generateDeterministicUuid(
+      `${scope.systemUnderTestId}-${scope.testEnvironment}-${scope.workload}-loki-${dashboardLabel}`,
+    );
+    const slug = dashboardLabel.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const dashboardUid = `loki-${slug || applicationDashboardId.slice(0, 8)}`;
+
+    const existing = await em.query<Array<{ id: string }>>('SELECT id FROM application_dashboards WHERE id = $1', [applicationDashboardId]);
+    if (existing.length === 0) {
+      const grafanaInstanceId = config.grafanaInstanceId;
+      const gd = await em.query<Array<{ id: string }>>(
+        'SELECT id FROM grafana_dashboards WHERE uid = $1 AND grafana_instance_id = $2',
+        [dashboardUid, grafanaInstanceId],
+      );
+      let grafanaDashboardId = gd[0]?.id;
+      if (!grafanaDashboardId) {
+        const inserted = await em.query<Array<{ id: string }>>(
+          `INSERT INTO grafana_dashboards (grafana_instance_id, grafana_id, uid, name, panels, organization_id)
+           VALUES ($1, $2, $3, $4, '[]', $5) RETURNING id`,
+          [grafanaInstanceId, 600000 + Math.floor(Math.random() * 100000), dashboardUid, dashboardLabel, sut.organization_id],
+        );
+        grafanaDashboardId = inserted[0]!.id;
+      }
+      await em.query(
+        `INSERT INTO application_dashboards (
+           id, system_under_test_id, test_environment, grafana_dashboard_id,
+           dashboard_name, dashboard_uid, dashboard_label, organization_id, team_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO NOTHING`,
+        [applicationDashboardId, sut.id, scope.testEnvironment, grafanaDashboardId, dashboardLabel, dashboardUid, dashboardLabel, sut.organization_id, sut.team_id ?? null],
+      );
+    }
+
+    const conflictPaths = ['systemUnderTestId', 'testEnvironment', 'sourceType', 'externalRef', 'displayName', 'displayLabel'];
+    await withRequestEm(this.metricsSourceRepo).upsert(
+      {
+        systemUnderTestId: sut.id,
+        testEnvironment: scope.testEnvironment,
+        workload: scope.workload,
+        sourceType: 'loki',
+        sourceConfigId: config.id,
+        externalRef: config.id,
+        displayName: config.label,
+        displayLabel: scope.workload,
+        organizationId: sut.organization_id,
+      },
+      { conflictPaths, skipUpdateIfNoValuesChanged: true },
+    );
+    const source = await withRequestEm(this.metricsSourceRepo).findOneOrFail({
+      where: { systemUnderTestId: sut.id, testEnvironment: scope.testEnvironment, sourceType: 'loki', externalRef: config.id, displayLabel: scope.workload },
+    });
+    return { applicationDashboardId, metricsSourceId: source.id };
+  }
+
+  private checkQuery(logql: string, aggregation?: string | null): void {
+    const problem = validateLogqlPipeline(logql);
+    if (problem) throw new BadRequestException(problem);
+    try {
+      parseAggregation(aggregation);
+    } catch (err) {
+      throw new BadRequestException(errMsg(err));
+    }
+  }
+
+  private async probe(conn: LokiConnection, opts: LokiRequestOptions) {
+    try {
+      const { labels } = await lokiTestConnection(conn, opts);
+      return {
+        success: true,
+        message: labels.length > 0
+          ? `Connected. Loki has ${labels.length} label${labels.length === 1 ? '' : 's'} in the last hour: ${labels.slice(0, 8).join(', ')}${labels.length > 8 ? ', …' : ''}`
+          : 'Connected, but Loki reported no labels in the last hour. Check the datasource uid and that logs are flowing.',
+        labels,
+      };
+    } catch (err) {
+      this.logger.warn(`Loki connection test via ${hostForLog(conn.baseUrl)} failed: ${errMsg(err)}${err instanceof LokiError && err.detail ? ` | cause: ${err.detail}` : ''}`);
+      return { success: false, message: errMsg(err) };
+    }
+  }
+
+  private grafanaConnection(g: GrafanaInstance): Omit<LokiConnection, 'datasourceUid'> {
+    return { baseUrl: g.server_url || g.client_url, grafanaOrgId: g.orgId, apiKey: g.apiKey, username: g.username, password: g.password, label: g.label };
+  }
+
+  private connectionOf(c: LokiConfig, g: GrafanaInstance): LokiConnection {
+    return { ...this.grafanaConnection(g), datasourceUid: c.datasourceUid, label: `${g.label} / ${c.label}` };
+  }
+
+  private async requestOptions(g: GrafanaInstance): Promise<LokiRequestOptions> {
+    const agents = await this.proxyResolver.resolve(g.organizationId, !!g.useProxy);
+    return agents ? { dispatcher: agents.dispatcher } : {};
+  }
+
+  private async cached(key: string, refresh: boolean, load: () => Promise<string[]>): Promise<string[]> {
+    const hit = this.labelCache.get(key);
+    if (!refresh && hit && Date.now() - hit.at < LABELS_TTL_MS) return hit.values;
+    try {
+      const values = await load();
+      this.labelCache.set(key, { at: Date.now(), values });
+      return values;
+    } catch (err) {
+      throw this.toHttp(err);
+    }
+  }
+
+  private clearLabelCache(id: string): void {
+    for (const key of this.labelCache.keys()) if (key.startsWith(`${id}:`)) this.labelCache.delete(key);
+  }
+
+  private toHttp(err: unknown): Error {
+    if (err instanceof LokiError) {
+      this.logger.warn(`Loki request failed: ${err.message}${err.detail ? ` | cause: ${err.detail}` : ''}`);
+      return new BadRequestException(`Loki: ${err.message}`);
+    }
+    return err as Error;
+  }
+
+  private present(c: LokiConfig) {
+    const g = c.grafanaInstance;
+    return {
+      id: c.id,
+      label: c.label,
+      grafanaInstanceId: c.grafanaInstanceId,
+      grafanaInstanceLabel: g?.label ?? null,
+      grafanaClientUrl: g?.client_url ?? null,
+      datasourceUid: c.datasourceUid,
+      datasourceName: c.datasourceName ?? null,
+      levelLabel: c.levelLabel,
+      maxConcurrentQueries: c.maxConcurrentQueries,
+      organizationId: c.organizationId,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    };
+  }
+
+  private async loadGrafanaInstance(id: string, userId: string, roles: string[]): Promise<GrafanaInstance> {
+    const instance = await withRequestEm(this.grafanaRepo).findOne({ where: { id } });
+    if (!instance) throw new NotFoundException('Grafana instance not found');
+    const access = await this.authzService.canAccessResource(userId, roles, { organization_id: instance.organizationId, created_by: '' } as OwnedResource);
+    if (!access.allowed) throw new NotFoundException('Grafana instance not found');
+    return instance;
+  }
+
+  private async loadConfig(id: string, userId: string, roles: string[]): Promise<LokiConfig> {
+    const config = await withRequestEm(this.configRepo).findOne({ where: { id }, relations: { grafanaInstance: true } });
+    if (!config || !config.grafanaInstance) throw new NotFoundException('Loki connection not found');
+    const access = await this.authzService.canAccessResource(userId, roles, { organization_id: config.organizationId, created_by: '' } as OwnedResource);
+    if (!access.allowed) throw new NotFoundException('Loki connection not found');
+    return config;
+  }
+
+  private async requireSameOrgConfig(configId: string, sut: SystemUnderTest, userId: string, roles: string[]): Promise<LokiConfig> {
+    const config = await this.loadConfig(configId, userId, roles);
+    if (config.organizationId !== sut.organization_id) {
+      throw new BadRequestException('That Loki connection belongs to another organization than this system');
+    }
+    return config;
+  }
+
+  private async loadSut(id: string, userId: string, roles: string[], mode: 'read' | 'write', notFound = 'System under test not found') {
+    const sut = await withRequestEm(this.sutRepo).findOne({ where: { id, deletion_status: IsNull() } });
+    if (!sut) throw new NotFoundException(notFound);
+    const resource = sut as unknown as OwnedResource;
+    const allowed = mode === 'read'
+      ? (await this.authzService.canAccessResource(userId, roles, resource)).allowed
+      : (await this.authzService.canModifyResource(userId, roles, resource)).allowed;
+    if (!allowed) {
+      if (mode === 'write' && (await this.authzService.canAccessResource(userId, roles, resource)).allowed) {
+        throw new ForbiddenException('You cannot change this system');
+      }
+      throw new NotFoundException(notFound);
+    }
+    return sut;
+  }
+
+  private async loadQuery(id: string, userId: string, roles: string[]): Promise<LokiQuery> {
+    const query = await withRequestEm(this.queryRepo).findOne({ where: { id } });
+    if (!query) throw new NotFoundException('Loki panel not found');
+    await this.loadSut(query.systemUnderTestId, userId, roles, 'write', 'Loki panel not found');
+    return query;
+  }
+
+  private async requireCapability(userId: string, roles: string[], organizationId: string, capability: string): Promise<void> {
+    const caps = await this.authzService.getCapabilities(userId, roles, organizationId);
+    if (!caps.includes(capability as (typeof caps)[number])) {
+      throw new ForbiddenException('You do not have permission to manage Loki connections in this organization');
+    }
+  }
+
+  /** A unique violation is a 409 the user can act on, not a 500. No work follows it, so no SAVEPOINT. */
+  // audit-skip: helper; every caller audits the saved row itself
+  private async saveUnique<T extends object>(repo: Repository<T>, entity: T, conflictMessage: string): Promise<T> {
+    try {
+      return await withRequestEm(repo).save(entity);
+    } catch (err) {
+      if (err && typeof err === 'object' && (err as { code?: string }).code === '23505') throw new ConflictException(conflictMessage);
+      throw err;
+    }
+  }
+}
+

@@ -282,6 +282,56 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     ],
     "rls": true,
   },
+  "loki_configs": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_loki_configs_delete",
+      "INSERT:rls_loki_configs_insert",
+      "SELECT:rls_loki_configs_select",
+      "UPDATE:rls_loki_configs_update",
+    ],
+    "rls": true,
+  },
+  "loki_queries": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_loki_queries_delete",
+      "INSERT:rls_loki_queries_insert",
+      "SELECT:rls_loki_queries_select",
+      "UPDATE:rls_loki_queries_update",
+    ],
+    "rls": true,
+  },
+  "loki_run_patterns": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_loki_run_patterns_delete",
+      "INSERT:rls_loki_run_patterns_insert",
+      "SELECT:rls_loki_run_patterns_select",
+      "UPDATE:rls_loki_run_patterns_update",
+    ],
+    "rls": true,
+  },
+  "loki_run_samples": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_loki_run_samples_delete",
+      "INSERT:rls_loki_run_samples_insert",
+      "SELECT:rls_loki_run_samples_select",
+      "UPDATE:rls_loki_run_samples_update",
+    ],
+    "rls": true,
+  },
+  "loki_stream_mappings": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_loki_stream_mappings_delete",
+      "INSERT:rls_loki_stream_mappings_insert",
+      "SELECT:rls_loki_stream_mappings_select",
+      "UPDATE:rls_loki_stream_mappings_update",
+    ],
+    "rls": true,
+  },
   "metrics_sources": {
     "force": false,
     "policies": [],

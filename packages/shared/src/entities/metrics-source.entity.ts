@@ -106,4 +106,5 @@ export type MetricsSourceType =
   | 'prometheus'
   | 'influxdb'
   | 'performance_test'
-  | 'splunk';
+  | 'splunk'
+  | 'loki';

@@ -19,6 +19,8 @@ import {
   dynatraceHostPanelTitle,
   SPLUNK_PROFILE_SOURCE,
   SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT,
+  LOKI_PROFILE_SOURCE,
+  LOKI_DASHBOARD_UID_PATTERN_DEFAULT,
   PROVISIONED_SLO_AUTO_DISABLED_KEY,
 } from '@perfana/shared/constants';
 
@@ -82,7 +84,7 @@ export class BenchmarkProcessorService {
       // from its own collection), never a monitored combination's: the run's own pass covers them.
       if (
         target &&
-        [PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE, SPLUNK_PROFILE_SOURCE].includes(
+        [PERF_TEST_PROFILE_SOURCE, DYNATRACE_HOSTS_PROFILE_SOURCE, SPLUNK_PROFILE_SOURCE, LOKI_PROFILE_SOURCE].includes(
           profileBenchmark.source,
         )
       ) {
@@ -98,7 +100,8 @@ export class BenchmarkProcessorService {
 
       if (
         profileBenchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE ||
-        profileBenchmark.source === SPLUNK_PROFILE_SOURCE
+        profileBenchmark.source === SPLUNK_PROFILE_SOURCE ||
+        profileBenchmark.source === LOKI_PROFILE_SOURCE
       ) {
         await this.processQueryPanelBenchmark(testRun, profileBenchmark, systemUnderTestName);
         return;
@@ -177,12 +180,16 @@ export class BenchmarkProcessorService {
     systemUnderTestName: string,
   ): Promise<void> {
     const isSplunk = profileBenchmark.source === SPLUNK_PROFILE_SOURCE;
-    const kind = isSplunk ? 'Splunk' : 'Dynatrace host';
+    const isLoki = profileBenchmark.source === LOKI_PROFILE_SOURCE;
+    const isTitleKeyed = isSplunk || isLoki;
+    const kind = isSplunk ? 'Splunk' : isLoki ? 'Loki' : 'Dynatrace host';
     const lookup =
       profileBenchmark.dashboard_uid ||
       (isSplunk
         ? SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT
-        : DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT);
+        : isLoki
+          ? LOKI_DASHBOARD_UID_PATTERN_DEFAULT
+          : DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT);
     // The API validates on write; rows written before it did (or by SQL) reach Postgres `~` here.
     const check = validateRegexPattern(lookup, { maxLength: 255 });
     if (!check.safe) {
@@ -191,8 +198,8 @@ export class BenchmarkProcessorService {
       );
       return;
     }
-    // A Splunk panel SLO is keyed on its title alone: Splunk panel ids are assigned per workload.
-    const panelTitle = isSplunk
+    // A Splunk / Loki panel SLO is keyed on its title alone: their panel ids are assigned per workload.
+    const panelTitle = isTitleKeyed
       ? profileBenchmark.panel_title
       : (dynatraceHostPanelTitle(profileBenchmark.panel_id) ?? profileBenchmark.panel_title);
     if (!panelTitle) {
@@ -212,7 +219,9 @@ export class BenchmarkProcessorService {
     ] as const;
     const panels = isSplunk
       ? await this.dashboardFinderService.findSplunkPanelsByUidPattern(...finderArgs)
-      : await this.dashboardFinderService.findDynatraceHostPanelsByUidPattern(...finderArgs);
+      : isLoki
+        ? await this.dashboardFinderService.findLokiPanelsByUidPattern(...finderArgs)
+        : await this.dashboardFinderService.findDynatraceHostPanelsByUidPattern(...finderArgs);
     this.logger.log(
       `Found ${panels.length} ${kind} dashboards with panel '${panelTitle}' for uid pattern ${lookup}`,
     );

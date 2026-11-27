@@ -146,6 +146,7 @@ export function analyzeTestWorker() {
       const orchestratedStages: OrchestratedStage[] = [
         'dynatrace-collection',       // External data collection (DQL metrics)
         'splunk-collection',          // Splunk log metrics (full path only; skipped after gap fill)
+        'loki-collection',            // Loki log metrics + pattern / error-line snapshot
         'panels-processing',          // Panel document creation
         'performance-test-metrics',   // Performance test metrics extraction (raw test data)
         'transaction-stats-rollup',   // Per-test-run transaction/sampler stats rollup (#150, #151)

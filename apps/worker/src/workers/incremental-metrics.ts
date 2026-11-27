@@ -124,6 +124,15 @@ export function incrementalMetricsWorker() {
           );
           break;
 
+        case 'loki':
+          result = await collectLokiMetrics(
+            testRunId,
+            sourceId!,
+            new Date(fromTime),
+            new Date(toTime)
+          );
+          break;
+
         case 'performance_test':
           result = await collectPerformanceTestMetrics(
             testRunId,
@@ -577,6 +586,49 @@ async function collectSplunkMetrics(
     };
   } catch (error) {
     logger.error({ testRunId, splunkConfigId, error: error instanceof Error ? error.message : String(error) }, 'Splunk metrics collection error');
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Collect Loki log metrics for one connection. Same shape as collectSplunkMetrics; the collector
+ * re-queries LOKI_INGEST_LOOKBACK_MS behind the window while the run is live.
+ */
+async function collectLokiMetrics(
+  testRunId: string,
+  lokiConfigId: string,
+  fromTime: Date,
+  toTime: Date
+): Promise<CollectionResult> {
+  try {
+    const pipeline = new IncrementalMetricsPipeline(logger);
+    const result = await pipeline.execute({
+      testRunId,
+      fromTime,
+      toTime,
+      lokiConfigId,
+      collectGrafanaMetrics: false,
+      collectDynatraceMetrics: false,
+      collectSplunkMetrics: false,
+      collectLokiMetrics: true,
+      collectPerformanceTestMetrics: false,
+    });
+
+    if (!result.success) {
+      const errorMessage = result.error
+        ? (typeof result.error === 'string' ? result.error : result.error.message)
+        : 'Loki metrics collection failed';
+      return { success: false, error: errorMessage };
+    }
+
+    const data = result.data as { loki?: { dataPoints?: number; maxDataTimestamp?: string } } | undefined;
+    return {
+      success: true,
+      dataPoints: data?.loki?.dataPoints ?? 0,
+      maxDataTimestamp: data?.loki?.maxDataTimestamp ? new Date(data.loki.maxDataTimestamp) : undefined,
+    };
+  } catch (error) {
+    logger.error({ testRunId, lokiConfigId, error: error instanceof Error ? error.message : String(error) }, 'Loki metrics collection error');
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

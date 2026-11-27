@@ -356,9 +356,32 @@ export class DashboardFinderService {
     );
   }
 
-  /** `source` is one of the two constants above; it is interpolated, never caller input. */
+  /** The Loki twin of findSplunkPanelsByUidPattern, over `loki_queries` and the `loki-` uids. */
+  async findLokiPanelsByUidPattern(
+    uidPattern: string,
+    panelTitle: string,
+    application: string,
+    testEnvironment: string,
+    workload: string,
+    organizationId: string | undefined,
+  ): Promise<Array<{ applicationDashboard: ApplicationDashboard; panelId: number }>> {
+    return this.findQueryPanelsByUidPattern(
+      { table: 'loki_queries', uidLike: 'loki-%' },
+      uidPattern,
+      panelTitle,
+      application,
+      testEnvironment,
+      workload,
+      organizationId,
+    );
+  }
+
+  /** `source` is one of the constants above; it is interpolated, never caller input. */
   private async findQueryPanelsByUidPattern(
-    source: { table: 'dynatrace_queries' | 'splunk_queries'; uidLike: 'dynatrace-%' | 'splunk-%' },
+    source: {
+      table: 'dynatrace_queries' | 'splunk_queries' | 'loki_queries';
+      uidLike: 'dynatrace-%' | 'splunk-%' | 'loki-%';
+    },
     uidPattern: string,
     panelTitle: string,
     application: string,

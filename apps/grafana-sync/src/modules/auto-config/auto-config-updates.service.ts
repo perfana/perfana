@@ -26,6 +26,8 @@ import {
   DYNATRACE_BENCHMARK_SOURCE,
   SPLUNK_PROFILE_SOURCE,
   SPLUNK_BENCHMARK_SOURCE,
+  LOKI_PROFILE_SOURCE,
+  LOKI_BENCHMARK_SOURCE,
   PROVISIONED_SLO_AUTO_DISABLED_KEY,
 } from '@perfana/shared/constants';
 import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
@@ -415,13 +417,16 @@ export class AutoConfigUpdatesService {
 
       const isDynatraceHosts = profileBenchmark.source === DYNATRACE_HOSTS_PROFILE_SOURCE;
       const isSplunk = profileBenchmark.source === SPLUNK_PROFILE_SOURCE;
+      const isLoki = profileBenchmark.source === LOKI_PROFILE_SOURCE;
       // The `benchmarks.source` a provisioned SLO is stored with, when it differs from the
-      // profile row's: a host / Splunk SLO is an ordinary Dynatrace / Splunk SLO from here on.
+      // profile row's: a host / Splunk / Loki SLO is an ordinary one of its kind from here on.
       const provisionedSource = isDynatraceHosts
         ? DYNATRACE_BENCHMARK_SOURCE
         : isSplunk
           ? SPLUNK_BENCHMARK_SOURCE
-          : undefined;
+          : isLoki
+            ? LOKI_BENCHMARK_SOURCE
+            : undefined;
       const panelId = panel?.panelId ?? profileBenchmark.panel_id;
       const panelTitle = panel?.panelTitle ?? profileBenchmark.panel_title;
 
@@ -432,6 +437,8 @@ export class AutoConfigUpdatesService {
         grafanaInstanceValue = 'Dynatrace';
       } else if (isSplunk) {
         grafanaInstanceValue = 'Splunk';
+      } else if (isLoki) {
+        grafanaInstanceValue = 'Loki';
       } else if (typeof applicationDashboard.grafanaInstance === 'string') {
         grafanaInstanceValue = applicationDashboard.grafanaInstance;
       } else if (applicationDashboard.grafanaInstance) {

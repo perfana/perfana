@@ -76,6 +76,11 @@
       "development": "./src/services/grafana/auth.ts",
       "default": "./dist/services/grafana/auth.js"
     },
+    "./services/loki/client": {
+      "types": "./dist/services/loki/client.d.ts",
+      "development": "./src/services/loki/client.ts",
+      "default": "./dist/services/loki/client.js"
+    },
     "./services/splunk/client": {
       "types": "./dist/services/splunk/client.d.ts",
       "development": "./src/services/splunk/client.ts",

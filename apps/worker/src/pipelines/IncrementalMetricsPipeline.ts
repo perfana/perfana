@@ -11,6 +11,7 @@ import {
   GrafanaCollector,
   DynatraceCollector,
   SplunkCollector,
+  LokiCollector,
   PerformanceTestCollector,
 } from './helpers/incremental/index.js';
 
@@ -32,6 +33,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
   private grafanaCollector: GrafanaCollector;
   private dynatraceCollector: DynatraceCollector;
   private splunkCollector: SplunkCollector;
+  private lokiCollector: LokiCollector;
   private perfTestCollector: PerformanceTestCollector;
 
   constructor(logger: Logger) {
@@ -44,6 +46,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
     this.grafanaCollector = new GrafanaCollector(logger, this.db, batchProcessor);
     this.dynatraceCollector = new DynatraceCollector(logger, this.db, metricProcessor, batchProcessor);
     this.splunkCollector = new SplunkCollector(logger, this.db, batchProcessor);
+    this.lokiCollector = new LokiCollector(logger, this.db, batchProcessor);
     this.perfTestCollector = new PerformanceTestCollector(logger);
   }
 
@@ -72,6 +75,8 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
       collectDynatraceMetrics = true,
       collectSplunkMetrics = false,
       splunkConfigId,
+      collectLokiMetrics = false,
+      lokiConfigId,
     } = validationResult.input!;
 
     try {
@@ -90,6 +95,7 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
         grafana: this.validator.createDefaultCollectionResult(),
         dynatrace: this.validator.createDefaultCollectionResult(),
         splunk: this.validator.createDefaultCollectionResult(),
+        loki: this.validator.createDefaultCollectionResult(),
         performanceTest: this.validator.createDefaultCollectionResult(),
         totalDataPoints: 0,
         totalErrors: 0,
@@ -126,6 +132,11 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
         results.splunk = await this.splunkCollector.collect(testRunId, testRun, splunkConfigId, fromTime, toTime);
       }
 
+      // Collect Loki log metrics
+      if (collectLokiMetrics) {
+        results.loki = await this.lokiCollector.collect(testRunId, testRun, lokiConfigId, fromTime, toTime);
+      }
+
       // Collect performance test metrics
       if (collectPerformanceTestMetrics) {
         results.performanceTest = await this.perfTestCollector.collect(testRunId, fromTime, toTime);
@@ -133,9 +144,10 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
 
       // Calculate totals
       results.totalDataPoints =
-        results.grafana.dataPoints + results.dynatrace.dataPoints + results.splunk.dataPoints + results.performanceTest.dataPoints;
+        results.grafana.dataPoints + results.dynatrace.dataPoints + results.splunk.dataPoints + results.loki.dataPoints +
+        results.performanceTest.dataPoints;
       results.totalErrors =
-        results.grafana.errors.length + results.dynatrace.errors.length + results.splunk.errors.length +
+        results.grafana.errors.length + results.dynatrace.errors.length + results.splunk.errors.length + results.loki.errors.length +
         results.performanceTest.errors.length;
 
       const duration = Date.now() - startTime;
@@ -157,6 +169,9 @@ export class IncrementalMetricsPipeline extends BasePipelineTypeORM {
       }
       if (collectSplunkMetrics && !results.splunk.success) {
         failedSources.push(`splunk (${results.splunk.errors.join('; ') || 'unspecified failure'})`);
+      }
+      if (collectLokiMetrics && !results.loki.success) {
+        failedSources.push(`loki (${results.loki.errors.join('; ') || 'unspecified failure'})`);
       }
       if (collectPerformanceTestMetrics && !results.performanceTest.success) {
         failedSources.push(
