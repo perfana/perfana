@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import { fetchDynatraceConfigs } from '@/lib/dynatrace';
 import { fetchSplunkConfigs } from '@/lib/splunk';
+import { fetchLokiConfigs } from '@/lib/loki';
 import { ConfiguredIntegrations } from '@/lib/profile-benchmarks';
 
-const NONE: ConfiguredIntegrations = { dynatrace: false, splunk: false };
+const NONE: ConfiguredIntegrations = { dynatrace: false, splunk: false, loki: false };
 
 /**
  * Whether a Dynatrace and a Splunk connection exist, looked up each time the dialog opens: the
@@ -21,11 +22,13 @@ export function useConfiguredIntegrations(open: boolean): ConfiguredIntegrations
     Promise.all([
       fetchDynatraceConfigs().catch(() => []),
       fetchSplunkConfigs().catch(() => []),
-    ]).then(([dynatraceConfigs, splunkConfigs]) => {
+      fetchLokiConfigs().catch(() => []),
+    ]).then(([dynatraceConfigs, splunkConfigs, lokiConfigs]) => {
       if (cancelled) return;
       setIntegrations({
         dynatrace: (dynatraceConfigs ?? []).length > 0,
         splunk: (splunkConfigs ?? []).length > 0,
+        loki: (lokiConfigs ?? []).length > 0,
       });
     });
     return () => {

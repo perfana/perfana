@@ -8,9 +8,10 @@ import { fetchDynatraceConfigs } from '@/lib/dynatrace';
 import { fetchTracingInstances } from '@/lib/distributed-tracing';
 import { fetchPyroscopeInstances } from '@/lib/pyroscope';
 import { fetchSplunkConfigs } from '@/lib/splunk';
+import { fetchLokiConfigs } from '@/lib/loki';
 import { fetchConfluenceConfigs } from '@/lib/confluence';
 
-const TAB_IDS = ['grafana', 'slo', 'deep-links', 'dynatrace', 'tracing', 'pyroscope', 'splunk', 'confluence', 'notifications', 'templates', 'adapt-settings'] as const;
+const TAB_IDS = ['grafana', 'slo', 'deep-links', 'dynatrace', 'tracing', 'pyroscope', 'splunk', 'loki', 'confluence', 'notifications', 'templates', 'adapt-settings'] as const;
 export type TabId = (typeof TAB_IDS)[number];
 
 interface UseSystemDataProps {
@@ -39,6 +40,7 @@ interface UseSystemDataReturn {
   hasTracing: boolean;
   hasPyroscope: boolean;
   hasSplunk: boolean;
+  hasLoki: boolean;
   hasConfluence: boolean;
 
   // Handlers
@@ -58,6 +60,7 @@ const TAB_NAME_MAPPING: { [key: string]: TabId } = {
   'Distributed Tracing': 'tracing',
   'Pyroscope': 'pyroscope',
   'Splunk': 'splunk',
+  'Loki': 'loki',
   'Confluence': 'confluence',
   'Notifications': 'notifications',
   'Reporting Templates': 'templates',
@@ -95,18 +98,21 @@ export function useSystemData({
   const [hasTracing, setHasTracing] = useState(false);
   const [hasPyroscope, setHasPyroscope] = useState(false);
   const [hasSplunk, setHasSplunk] = useState(false);
+  const [hasLoki, setHasLoki] = useState(false);
   const [hasConfluence, setHasConfluence] = useState(false);
 
   // Fetch integration availability
   const fetchIntegrations = useCallback(async () => {
     try {
-      const [dynatraceConfigs, tracingInstances, pyroscopeInstances, splunkConfigs, confluenceConfigs] = await Promise.all([
+      const [dynatraceConfigs, tracingInstances, pyroscopeInstances, splunkConfigs, confluenceConfigs, lokiConfigs] = await Promise.all([
         fetchDynatraceConfigs().catch(() => []),
         fetchTracingInstances().catch(() => []),
         fetchPyroscopeInstances().catch(() => []),
         fetchSplunkConfigs().catch(() => []),
         fetchConfluenceConfigs().catch(() => []),
+        fetchLokiConfigs().catch(() => []),
       ]);
+      setHasLoki(lokiConfigs.length > 0);
       setHasConfluence(confluenceConfigs.length > 0);
       setHasSplunk(splunkConfigs.length > 0);
       setHasDynatrace(dynatraceConfigs.length > 0);
@@ -287,6 +293,7 @@ export function useSystemData({
     hasTracing,
     hasPyroscope,
     hasSplunk,
+    hasLoki,
     hasConfluence,
     handleEnvironmentChange,
     handleWorkloadChange,

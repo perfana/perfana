@@ -109,7 +109,7 @@ export interface GraphData {
   metricName: string | null;
 }
 
-export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
+export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk' | 'loki';
 
 /**
  * Represents a series added for comparison (matching TrendsCard pattern)

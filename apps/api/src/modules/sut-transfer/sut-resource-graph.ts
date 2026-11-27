@@ -43,6 +43,15 @@ export const SUT_RESOURCES: SutResource[] = [
                   SELECT gd.grafana_instance_id FROM grafana_dashboards gd
                   JOIN application_dashboards ad ON ad.grafana_dashboard_id = gd.id
                   WHERE ad.system_under_test_id = $1
+                  UNION
+                  -- A Loki connection queries through a Grafana instance (NOT NULL FK), and a
+                  -- system can map Loki streams before it has a panel on that instance.
+                  SELECT lc.grafana_instance_id FROM loki_configs lc
+                  WHERE lc.id IN (
+                    SELECT loki_config_id FROM loki_stream_mappings WHERE system_under_test_id = $1
+                    UNION
+                    SELECT loki_config_id FROM loki_queries WHERE system_under_test_id = $1
+                  )
                 )` },
   { table: 'grafana_dashboards', filter: 'byReference', group: 'shared',
     customSql: `SELECT row_to_json(t) AS r FROM (
@@ -68,6 +77,15 @@ export const SUT_RESOURCES: SutResource[] = [
                   SELECT splunk_config_id FROM splunk_entity_mappings WHERE system_under_test_id = $1
                   UNION
                   SELECT splunk_config_id FROM splunk_queries WHERE system_under_test_id = $1
+                )` },
+  // Loki: both children FK into loki_configs, which FKs into grafana_instances (exported above).
+  // A loki config holds no credentials of its own.
+  { table: 'loki_configs', filter: 'byReference', group: 'shared',
+    customSql: `SELECT row_to_json(t) AS r FROM loki_configs t
+                WHERE t.id IN (
+                  SELECT loki_config_id FROM loki_stream_mappings WHERE system_under_test_id = $1
+                  UNION
+                  SELECT loki_config_id FROM loki_queries WHERE system_under_test_id = $1
                 )` },
   // generated_reports.template_id → report_templates(id): a report that still has its
   // template needs it in the bundle or the import FK-violates (NULL once the template
@@ -108,6 +126,8 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'dynatrace_queries', filter: 'bySut', group: 'optional' },
   { table: 'splunk_entity_mappings', filter: 'bySut', group: 'optional' },
   { table: 'splunk_queries', filter: 'bySut', group: 'optional' },
+  { table: 'loki_stream_mappings', filter: 'bySut', group: 'optional' },
+  { table: 'loki_queries', filter: 'bySut', group: 'optional' },
   { table: 'workload_apdex_thresholds', filter: 'bySut', group: 'optional' },
   { table: 'workload_transaction_apdex_thresholds', filter: 'bySut', group: 'optional' },
   { table: 'system_under_test_test_environments', filter: 'bySut', group: 'optional' },
@@ -173,6 +193,10 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'ds_adapt_tracked_results', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_change_points', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'check_results', filter: 'byTestRunVarchar', group: 'core' },
+  // Loki snapshots taken at analysis (migration 1838): run history, kept with the run.
+  { table: 'loki_run_patterns', filter: 'byTestRunVarchar', group: 'core' },
+  { table: 'loki_run_samples', filter: 'byTestRunVarchar', group: 'core' },
+  { table: 'loki_run_services', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_metric_statistics', filter: 'byTestRunVarchar', group: 'core' },
   // Derived raw -> group membership the statistics above were computed with (migration 1819).
   // Keyed on the varchar test_run_id with no FK to test_runs, so it travels with the selected

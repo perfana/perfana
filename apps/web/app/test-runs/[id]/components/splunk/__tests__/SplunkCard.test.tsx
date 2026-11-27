@@ -83,3 +83,12 @@ it('offers no Open-in menu for a panel with no series', async () => {
   expect(await screen.findByText('No data for this run.')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Actions for Log events by level' })).not.toBeInTheDocument();
 });
+
+it('opens the system config on the Splunk tab, scoped to the run', async () => {
+  mockSummary.mockResolvedValue(configured);
+  const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+  render(<SplunkCard testRun={{ test_run_id: 'run-1', system_under_test_id: 'sut-1', test_environment: 'acc', workload: 'load' }} expanded={false} onExpand={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Configure splunk logs' }));
+  expect(open).toHaveBeenCalledWith('/systems/sut-1/config?tab=splunk&environment=acc&workload=load&fromTestRun=run-1', '_blank');
+  open.mockRestore();
+});

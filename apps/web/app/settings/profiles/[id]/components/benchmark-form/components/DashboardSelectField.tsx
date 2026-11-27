@@ -14,6 +14,7 @@ import {
   isPerfTestProfileDashboard,
   isDynatraceHostsProfileDashboard,
   isSplunkProfileDashboard,
+  isLokiProfileDashboard,
   isPatternProfileDashboard,
   availablePseudoDashboards,
   ConfiguredIntegrations,
@@ -26,7 +27,9 @@ const pseudoDashboardDescription = (option: ProfileDashboard): string | null =>
       ? 'Applies to every mapped Dynatrace host, including hosts mapped later'
       : isSplunkProfileDashboard(option)
         ? "Applies to the panel with this title on every workload's Splunk dashboards, including panels added later"
-        : null;
+        : isLokiProfileDashboard(option)
+          ? "Applies to the panel with this title on every workload's Loki dashboards, including panels added later"
+          : null;
 
 interface DashboardSelectFieldProps {
   profileDashboards: ProfileDashboard[];

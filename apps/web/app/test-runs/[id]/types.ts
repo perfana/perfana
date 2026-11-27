@@ -34,6 +34,7 @@ export interface ExpansionState {
   distributedTracingExpanded: boolean;
   pyroscopeExpanded: boolean;
   splunkExpanded: boolean;
+  lokiExpanded: boolean;
   compareExpanded: boolean;
   performanceExpanded: boolean;
   graphsExpanded: boolean;

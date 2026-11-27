@@ -234,6 +234,19 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
       this.logger.log(`Deleted ${label} for test_run_id: ${testRunId}`);
     }
 
+    // Loki snapshots (migration 1838): varchar test_run_id with no FK to test_runs. Probed first,
+    // because the API can start before the migration runs and a statement on a missing table
+    // aborts this transaction.
+    const loki = await manager.query(`SELECT to_regclass('public.loki_run_patterns') IS NOT NULL AS present`);
+    if (loki[0]?.present === true) {
+      await manager.query('DELETE FROM loki_run_patterns WHERE test_run_id = $1', [testRunId]);
+      await manager.query('DELETE FROM loki_run_samples WHERE test_run_id = $1', [testRunId]);
+      // Migration 1839, which may not have run yet either.
+      const apps = await manager.query(`SELECT to_regclass('public.loki_run_services') IS NOT NULL AS present`);
+      if (apps[0]?.present === true) await manager.query('DELETE FROM loki_run_services WHERE test_run_id = $1', [testRunId]);
+      this.logger.log(`Deleted Loki snapshots for test_run_id: ${testRunId}`);
+    }
+
     // Delete control group where control_group_id equals test_run_id
     await manager.query('DELETE FROM ds_control_groups WHERE control_group_id = $1', [testRunId]);
     this.logger.log(`Deleted control group with control_group_id: ${testRunId}`);

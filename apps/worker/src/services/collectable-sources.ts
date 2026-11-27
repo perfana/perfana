@@ -180,6 +180,51 @@ export async function getCollectableSplunkConfigIds(
   }
 }
 
+/**
+ * Loki connections that can collect for a run's scope: the same rule as Splunk's — an ENABLED panel
+ * in the workload AND a stream mapping in scope for that connection (root CLAUDE.md #21).
+ * Params: system, environment, workload.
+ */
+export const COLLECTABLE_LOKI_CONFIGS_SQL = `
+  SELECT DISTINCT q.loki_config_id
+    FROM loki_queries q
+   WHERE q.system_under_test_id = $1 AND q.test_environment = $2 AND q.workload = $3
+     AND q.enabled
+     AND EXISTS (
+       SELECT 1 FROM loki_stream_mappings m
+        WHERE m.loki_config_id = q.loki_config_id
+          AND m.system_under_test_id = q.system_under_test_id
+          AND (m.level = 'sut'
+               OR (m.level = 'environment' AND m.test_environment = $2)
+               OR (m.level = 'workload' AND m.test_environment = $2 AND m.workload = $3)))`;
+
+/** As loadCollectableSplunkConfigIds: [] only when the tables are missing (before migration 1838); throws otherwise. */
+export async function loadCollectableLokiConfigIds(
+  db: { dataSource: { query: (sql: string, params?: unknown[]) => Promise<unknown> } },
+  testRun: { systemUnderTestId: string; testEnvironment: string; workload: string },
+): Promise<string[]> {
+  const present = (await db.dataSource.query(
+    `SELECT to_regclass('public.loki_queries') IS NOT NULL AS present`,
+  )) as Array<{ present: boolean }>;
+  if (!present[0]?.present) {return [];}
+  const rows = (await db.dataSource.query(COLLECTABLE_LOKI_CONFIGS_SQL, [
+    testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload,
+  ])) as Array<{ loki_config_id: string }>;
+  return rows.map((r) => r.loki_config_id);
+}
+
+/** Never throws, like getCollectableSplunkConfigIds. */
+export async function getCollectableLokiConfigIds(
+  db: { dataSource: { query: (sql: string, params?: unknown[]) => Promise<unknown> } },
+  testRun: { systemUnderTestId: string; testEnvironment: string; workload: string },
+): Promise<string[]> {
+  try {
+    return await loadCollectableLokiConfigIds(db, testRun);
+  } catch {
+    return [];
+  }
+}
+
 export function collectionSourceKey(sourceType: string, sourceId: string | null | undefined): string {
   return `${sourceType}::${sourceId ?? ''}`;
 }
@@ -229,6 +274,10 @@ export async function getConfiguredSourceKeys(
 
   for (const id of await loadCollectableSplunkConfigIds(db, testRun)) {
     configured.add(collectionSourceKey('splunk', id));
+  }
+
+  for (const id of await loadCollectableLokiConfigIds(db, testRun)) {
+    configured.add(collectionSourceKey('loki', id));
   }
 
   return configured;

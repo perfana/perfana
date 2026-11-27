@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.110] - 2026-11-27
+
+### Added
+- **A Loki connection can take its log level from the line itself.** A new **Level parser** setting (None, json or logfmt) sits beside the level label. With json or logfmt, Perfana extracts the level field from each line before counting or filtering on it. That covers JSON or logfmt logs on a Loki that does not attach `detected_level`. The starter panels, the card's error rate, the per-application error rates and the error and warning lines all apply it.
+- **Test connection finds where the level is.** It checks the last hour of lines: the configured label first, then `detected_level`, then `| json` and `| logfmt` with that field or `level`. It names the first source on which most lines carry a level, and **Use it** fills in the parser and label. A label carried only by the newest lines, as on a Loki that has just turned on level discovery, does not beat a parser that finds the level on every line.
+- **One tab per application in the Loki Logs card.** A tab bar (All, then each application with its error-line count, worst first) replaces selecting a row of the Applications table, which nothing showed was clickable. An application tab shows only that application's KPIs, patterns, lines and service-split panels. The Applications table stays on the All tab, and a row there opens its tab. The 20 applications with the most errors get a tab; the others open from the table.
+- **A Baseline picker in the Loki Logs card**, with the Compare card's choices: the run's control group (the default when it has one) or any run of the same workload. The card names the runs it compared with. The error rate, new patterns and per-application baselines all follow the pick. Without a control group and with nothing picked, the card compares with the five previous runs, now for the error rate too, and says so. The Compare card's picker moved into a shared component; it looks and behaves as before.
+- **ADAPT classifies the Loki "Error lines by service" panel out of the box** as USE Errors, lower is better, so more error lines than the baseline is a regression that can fail the run. The other starter panels stay unclassified. A row someone already saved, or a template's, is never overwritten; the row appears on the workload's next Loki collection.
+- **Cogs on the Loki Logs and Splunk Logs cards** open the system's configuration on the Loki or Splunk tab, scoped to the run's environment and workload, like the other cards.
+
+### Fixed
+- **The Loki Logs card no longer reports a 0% error rate it cannot know.** When every line of the level panel is `(none)`, the level label is on none of the run's lines. The card now says so, shows no error rate, and explains how to set the parser. Before, it showed 0% error lines while listing the run's error lines a few rows down.
+- **A real Grafana dashboard whose uid starts with `loki-` stays a Grafana dashboard.** Perfana's own Loki placeholder dashboards now use the uid prefix `perfana-loki-`, so dashboards from the Loki mixin (`loki-reads`, `loki-logs`, ...) are no longer hidden from the add-dashboard picker, read as Loki sources by auto-config, or left out of the Refresh dialog's Grafana option. A profile SLO on Loki panels defaults to `^perfana-loki-`.
+- **A re-analysis that partly fails keeps the run's stored Loki patterns and lines** instead of replacing them with what the failing pass found. A long log level from a json or logfmt line no longer stops the patterns and lines from being stored.
+- **The Loki card's error-rate baseline over the previous runs averages each run's own rate,** so a run with longer buckets no longer counts for more. A baseline picked on one run no longer carries over to the next.
+- Loki label-value lookups accept only label names, and creating a panel whose id is taken leaves no dashboard rows behind.
+- Migration 1840 adds `loki_configs.level_parser` (default `none`, so existing connections are unchanged). Run it before the API reaches this version. Panels created earlier keep their LogQL, so re-add the two level starter panels after changing the parser, then re-analyse the run.
+
+## [0.2.97.109] - 2026-11-27
+
+### Added
+- **Applications in the Loki Logs card.** The card lists every application in the run, by the connection's new **Application label** (default `service_name`), with its lines, error lines, error rate against the same application in the baseline runs, and the number of patterns not seen there; an application missing from every baseline run is marked NEW. Selecting an application narrows the KPIs, the top log patterns, the latest error and warning lines, and the panels split by that label to it. The collapsed card names the application whose error rate rose. A workload with no "Log lines by level" panel now gets its error rate from the same per-application counts.
+- Patterns and lines are taken per application at analysis for the 20 applications with the most errors (then most lines). Per-application patterns need the application label to be a stream label, which `service_name` is in Loki 3; lines and counts work with structured metadata or parsed labels too.
+- Migration 1839 adds `loki_configs.service_label`, a `service` column on `loki_run_patterns` and `loki_run_samples`, and `loki_run_services`. Run it before the API and worker reach this version; runs analysed earlier show no Applications table until they are re-analysed while Loki still holds their window.
+
+## [0.2.97.108] - 2026-11-27
+
+### Added
+- **Loki logs become metrics per test run,** reached through the Loki datasource on a Grafana instance Perfana already has: no Loki address or credentials, and a Viewer service account is enough. A connection is added on the Integrations page by picking the Grafana instance and its Loki datasource; each system maps its streams with label matchers at system, environment or workload level and collects panels written as `$entities` plus LogQL pipeline stages (count, bytes, or sum/avg/max/min/pNN of an unwrapped field, split by a label). Starter panels count lines by level, error lines by service and log volume by service. The series are stored in `ds_metrics` like any other metric, so they take part in ADAPT, SLOs, Graphs, Trends, Compare and reports, and a profile can add an SLO on a Loki panel to every workload through **Loki — all panels**. Collection runs live, at analysis, on gap fill and on force refetch, and the refresh dialog has a Loki checkbox.
+- **Loki Logs card in Root Cause Analysis.** Shows the run's error rate against its baseline, the top log patterns with the ones not seen in the baseline runs marked NEW, the latest error and warning lines with their labels, and each panel's series with Grafana Explore links and Open in Graphs / Compare / Trends. Patterns and lines are snapshotted when the run is analysed, so the card keeps them after Loki's retention has dropped the window. Patterns need Loki 3 with the pattern ingester and Grafana 11; without them Perfana groups sampled error lines itself and says so.
+- Migration 1838 adds `loki_configs`, `loki_stream_mappings`, `loki_queries`, `loki_run_patterns` and `loki_run_samples`. Run it before the API reaches this version.
+
 ## [0.2.97.107] - 2026-11-26
 
 ### Fixed

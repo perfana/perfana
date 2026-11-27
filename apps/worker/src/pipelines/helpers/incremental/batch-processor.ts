@@ -18,7 +18,7 @@ import type { MetricProcessor, FlattenedMetricRecord, TestRunContext } from './m
 /**
  * Source type for metrics documents
  */
-export type MetricSource = 'Grafana' | 'Dynatrace' | 'Splunk';
+export type MetricSource = 'Grafana' | 'Dynatrace' | 'Splunk' | 'Loki';
 
 /**
  * Configuration for batch processing
@@ -131,6 +131,13 @@ export class BatchProcessor {
    */
   async processSplunkDocuments(documents: unknown[], testRun: TestRunContext): Promise<BatchProcessResult> {
     return this.processDocuments(documents, testRun, 'Splunk', (doc) =>
+      this.metricProcessor.flattenDynatraceMetricsDocument(doc, testRun)
+    );
+  }
+
+  /** Loki documents have the same shape and take the same path as Splunk's. */
+  async processLokiDocuments(documents: unknown[], testRun: TestRunContext): Promise<BatchProcessResult> {
+    return this.processDocuments(documents, testRun, 'Loki', (doc) =>
       this.metricProcessor.flattenDynatraceMetricsDocument(doc, testRun)
     );
   }

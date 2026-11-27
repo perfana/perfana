@@ -73,6 +73,16 @@ export interface IncrementalMetricsInput {
    * Splunk config ID (optional - if provided, only collect from this connection)
    */
   splunkConfigId?: string;
+
+  /**
+   * Whether to collect Loki metrics (default: FALSE, for the same reason as Splunk)
+   */
+  collectLokiMetrics?: boolean;
+
+  /**
+   * Loki config ID (optional - if provided, only collect from this connection)
+   */
+  lokiConfigId?: string;
 }
 
 /**
@@ -137,6 +147,11 @@ export interface IncrementalMetricsOutput {
    * Splunk collection result
    */
   splunk: CollectionResult;
+
+  /**
+   * Loki collection result
+   */
+  loki: CollectionResult;
 
   /**
    * Performance test collection result

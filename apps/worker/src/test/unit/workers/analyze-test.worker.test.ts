@@ -178,7 +178,7 @@ describe('analyzeTestWorker', () => {
       expect(result.message).toContain('completed for test run test-run-123');
       expect(result.data).toMatchObject({
         testRunId: 'test-run-123',
-        stages: 12, // 10 base stages (incl. transaction-stats-rollup, splunk-collection) + ADAPT + data-sanity-check
+        stages: 13, // 11 base stages (incl. transaction-stats-rollup, loki-collection, splunk-collection) + ADAPT + data-sanity-check
         adapt: true,
         benchmarksOnly: false,
       });
@@ -241,7 +241,7 @@ describe('analyzeTestWorker', () => {
         }),
         expect.any(Object) // ProgressReporter
       );
-      expect(result.data.stages).toBe(11); // 10 base stages (incl. transaction-stats-rollup, splunk-collection) + data-sanity-check, without ADAPT
+      expect(result.data.stages).toBe(12); // 11 base stages (incl. transaction-stats-rollup, splunk-collection, loki-collection) + data-sanity-check, without ADAPT
     });
 
     it('should execute with default options when not provided', async () => {
@@ -528,6 +528,7 @@ describe('analyzeTestWorker', () => {
       expect(callArgs[1].stages).toEqual([
         'dynatrace-collection',
         'splunk-collection',
+        'loki-collection',
         'panels-processing',
         'performance-test-metrics',
         'transaction-stats-rollup',
@@ -561,6 +562,7 @@ describe('analyzeTestWorker', () => {
       expect(callArgs[1].stages).toEqual([
         'dynatrace-collection',
         'splunk-collection',
+        'loki-collection',
         'panels-processing',
         'performance-test-metrics',
         'transaction-stats-rollup',

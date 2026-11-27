@@ -20,7 +20,7 @@ Comments are plain text, up to 10,000 characters.
 
 ## Comment on a row
 
-Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis**, a row in **Anomaly detection**, an SLO, a Splunk panel, a Dynatrace service, a tracing service, a Pyroscope profiler, a configuration item on **Configuration** or a dashboard tile on **Dashboards**.
+Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis**, a row in **Anomaly detection**, an SLO, a Splunk panel, a Loki panel or log pattern, a Dynatrace service, a tracing service, a Pyroscope profiler, a configuration item on **Configuration** or a dashboard tile on **Dashboards**.
 
 1. Hover over the row. An outlined comment icon appears at its end.
 2. Click it.

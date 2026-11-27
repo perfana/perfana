@@ -120,9 +120,9 @@ export function useTestRunsHandlers({
     const scopes = selectedRuns.map(getTestRunScope);
     const sources = await fetchAvailableSources(scopes);
 
-    if (!sources.grafana && !sources.dynatrace && !sources.splunk) {
+    if (!sources.grafana && !sources.dynatrace && !sources.splunk && !sources.loki) {
       // Only performance metrics — skip dialog, refresh immediately
-      handleBatchRefreshConfirm({ grafana: false, dynatrace: false, splunk: false, performanceMetrics: true });
+      handleBatchRefreshConfirm({ grafana: false, dynatrace: false, splunk: false, loki: false, performanceMetrics: true });
       return;
     }
 

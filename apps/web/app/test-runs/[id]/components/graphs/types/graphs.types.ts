@@ -2,7 +2,7 @@ import { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
 import type { ToastAction } from '../../../types';
 
-export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
+export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk' | 'loki';
 
 export interface GraphsCardProps {
   testRun: TestRun | null;

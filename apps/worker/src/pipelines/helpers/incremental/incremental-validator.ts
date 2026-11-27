@@ -54,6 +54,8 @@ export class IncrementalValidator {
       collectDynatraceMetrics,
       collectSplunkMetrics,
       splunkConfigId,
+      collectLokiMetrics,
+      lokiConfigId,
     } = input as Record<string, unknown>;
 
     // Validate required fields
@@ -121,6 +123,8 @@ export class IncrementalValidator {
         // two every Splunk collection ran with collectSplunkMetrics at its default, false.
         collectSplunkMetrics: collectSplunkMetrics as boolean | undefined,
         splunkConfigId: splunkConfigId as string | undefined,
+        collectLokiMetrics: collectLokiMetrics as boolean | undefined,
+        lokiConfigId: lokiConfigId as string | undefined,
       },
     };
   }

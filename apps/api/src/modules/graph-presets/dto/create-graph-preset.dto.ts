@@ -7,6 +7,7 @@ export enum DataSource {
   DYNATRACE = 'dynatrace',
   PERFORMANCE_METRICS = 'performance-metrics',
   SPLUNK = 'splunk',
+  LOKI = 'loki',
 }
 
 export class SeriesConfigDto {

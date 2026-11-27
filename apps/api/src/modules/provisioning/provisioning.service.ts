@@ -20,6 +20,8 @@ import {
   DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
   SPLUNK_PROFILE_SOURCE,
   SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT,
+  LOKI_PROFILE_SOURCE,
+  LOKI_DASHBOARD_UID_PATTERN_DEFAULT,
   DYNATRACE_HOST_PROFILE_PANELS,
 } from '@perfana/shared/constants';
 import { validateRegexPattern } from '@perfana/shared/utils';
@@ -84,16 +86,17 @@ interface DashboardYaml {
 interface BenchmarkYaml {
   profile: string;
   /**
-   * `performance-metrics` / `dynatrace-hosts` / `splunk-panels`: no profile dashboard; `dashboardUid` is a
-   * regex over the perf-test scenario / Dynatrace host / Splunk dashboard uids (default when omitted).
-   * A `splunk-panels` benchmark is matched on `panel.title`; its `panel.id` is ignored.
+   * `performance-metrics` / `dynatrace-hosts` / `splunk-panels` / `loki-panels`: no profile dashboard;
+   * `dashboardUid` is a regex over the perf-test scenario / Dynatrace host / Splunk / Loki dashboard uids
+   * (default when omitted). A `splunk-panels` or `loki-panels` benchmark is matched on `panel.title`;
+   * its `panel.id` is ignored.
    */
   source?: string;
   grafana?: string;
   dashboardUid?: string;
   addForWorkloadsMatchingRegex?: string;
   panel: {
-    /** Ignored for `splunk-panels` (keyed on `title`). */
+    /** Ignored for `splunk-panels` and `loki-panels` (keyed on `title`). */
     id?: number;
     title?: string;
     type?: string;
@@ -486,11 +489,14 @@ export class ProvisioningService implements OnApplicationBootstrap {
         // template: `dashboardUid` is a regex and there is no profile dashboard.
         const isDynatraceHosts = source === DYNATRACE_HOSTS_PROFILE_SOURCE;
         // A Splunk panel SLO is keyed on its panel title: Splunk panel ids are assigned per workload.
+        // Loki panels are keyed the same way.
         const isSplunk = source === SPLUNK_PROFILE_SOURCE;
-        const isPatternSource = source === PERF_TEST_PROFILE_SOURCE || isDynatraceHosts || isSplunk;
-        const splunkPanelTitle = isSplunk ? item.panel?.title?.trim() : undefined;
-        if (isSplunk && !splunkPanelTitle) {
-          this.logger.warn(`Benchmark skipped: a splunk-panels benchmark needs panel.title for profile "${item.profile}"`);
+        const isLoki = source === LOKI_PROFILE_SOURCE;
+        const isTitleKeyed = isSplunk || isLoki;
+        const isPatternSource = source === PERF_TEST_PROFILE_SOURCE || isDynatraceHosts || isTitleKeyed;
+        const splunkPanelTitle = isTitleKeyed ? item.panel?.title?.trim() : undefined;
+        if (isTitleKeyed && !splunkPanelTitle) {
+          this.logger.warn(`Benchmark skipped: a ${source} benchmark needs panel.title for profile "${item.profile}"`);
           result.skipped++;
           continue;
         }
@@ -530,6 +536,8 @@ export class ProvisioningService implements OnApplicationBootstrap {
           ? item.dashboardUid ?? DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT
           : isSplunk
             ? item.dashboardUid ?? SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT
+            : isLoki
+              ? item.dashboardUid ?? LOKI_DASHBOARD_UID_PATTERN_DEFAULT
             : isPatternSource
               ? item.dashboardUid ?? PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
               : item.dashboardUid;
@@ -550,7 +558,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
             profile_id: profile.id,
             profile_dashboard_id: dashboardId ?? IsNull(),
             ...(isPatternSource ? { dashboard_uid: dashboardUid } : {}),
-            ...(isSplunk ? { panel_id: IsNull(), panel_title: splunkPanelTitle } : { panel_id: item.panel.id }),
+            ...(isTitleKeyed ? { panel_id: IsNull(), panel_title: splunkPanelTitle } : { panel_id: item.panel.id }),
             workload_pattern: workloadPattern,
           },
         });
@@ -563,8 +571,8 @@ export class ProvisioningService implements OnApplicationBootstrap {
           grafana_instance: isPatternSource ? undefined : grafanaLabel,
           dashboard_uid: dashboardUid,
           // Undefined, not null: the row was found by panel_id IS NULL, and an insert writes NULL.
-          panel_id: isSplunk ? undefined : item.panel.id,
-          panel_title: isSplunk ? splunkPanelTitle : item.panel.title,
+          panel_id: isTitleKeyed ? undefined : item.panel.id,
+          panel_title: isTitleKeyed ? splunkPanelTitle : item.panel.title,
           panel_type: item.panel.type,
           // A trend is % of the series mean per hour whatever the panel measures.
           metric_unit: item.panel.evaluateType === 'trend' ? '%/h' : item.panel.yAxesFormat,

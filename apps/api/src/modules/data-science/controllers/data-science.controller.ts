@@ -245,13 +245,14 @@ export class DataScienceController {
         grafana: { type: 'boolean', description: 'Whether any scope has application_dashboards configured' },
         dynatrace: { type: 'boolean', description: 'Whether any scope has dynatrace_queries configured' },
         splunk: { type: 'boolean', description: 'Whether any scope has an enabled splunk_queries row' },
+        loki: { type: 'boolean', description: 'Whether any scope has an enabled loki_queries row' },
       },
     },
   })
   async getAvailableSources(@Body() dto: AvailableSourcesRequestDto) {
     try {
       if (!dto.scopes || dto.scopes.length === 0) {
-        return { grafana: false, dynatrace: false, splunk: false };
+        return { grafana: false, dynatrace: false, splunk: false, loki: false };
       }
 
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -269,7 +270,7 @@ export class DataScienceController {
       });
 
       if (uniqueScopes.length === 0) {
-        return { grafana: false, dynatrace: false, splunk: false };
+        return { grafana: false, dynatrace: false, splunk: false, loki: false };
       }
 
       // Build WHERE clause for Grafana (application_dashboards uses SUT + env)
@@ -284,6 +285,7 @@ export class DataScienceController {
       const dtScopes = uniqueScopes.filter(s => !!s.workload);
       let dynatraceHasRows = false;
       let splunkHasRows = false;
+      let lokiHasRows = false;
 
       if (dtScopes.length > 0) {
         const dtConditions = dtScopes.map((_, i) => {
@@ -308,14 +310,27 @@ export class DataScienceController {
           );
           splunkHasRows = sqResult[0]?.has_rows === true;
         }
+        // Same again for Loki (migration 1838).
+        const lokiResult = await this.dataSource.query(
+          `SELECT to_regclass('public.loki_queries') IS NOT NULL AS present`,
+        );
+        if (lokiResult[0]?.present === true) {
+          const lqResult = await this.dataSource.query(
+            `SELECT EXISTS(SELECT 1 FROM loki_queries WHERE enabled AND (${dtConditions.join(' OR ')})) AS has_rows`,
+            dtParams,
+          );
+          lokiHasRows = lqResult[0]?.has_rows === true;
+        }
       }
 
       // Exclude synthetic dashboards that are not real Grafana dashboards:
       // - performance-test-metrics-*  created by the worker pipeline
       // - dynatrace-*                 created by the Dynatrace integration
       // - splunk-*                    created by the Splunk integration
+      // - perfana-loki-*             created by the Loki integration (not loki-*: the Loki mixin's
+      //                               real dashboards, loki-reads and so on, use that prefix)
       const grafanaResult = await this.dataSource.query(
-        `SELECT EXISTS(SELECT 1 FROM application_dashboards WHERE (${grafanaConditions.join(' OR ')}) AND dashboard_uid NOT LIKE 'performance-test-metrics-%' AND dashboard_uid NOT LIKE 'dynatrace-%' AND dashboard_uid NOT LIKE 'splunk-%') AS has_rows`,
+        `SELECT EXISTS(SELECT 1 FROM application_dashboards WHERE (${grafanaConditions.join(' OR ')}) AND dashboard_uid NOT LIKE 'performance-test-metrics-%' AND dashboard_uid NOT LIKE 'dynatrace-%' AND dashboard_uid NOT LIKE 'splunk-%' AND dashboard_uid NOT LIKE 'perfana-loki-%') AS has_rows`,
         grafanaParams,
       );
 
@@ -323,12 +338,13 @@ export class DataScienceController {
         grafana: grafanaResult[0]?.has_rows === true,
         dynatrace: dynatraceHasRows,
         splunk: splunkHasRows,
+        loki: lokiHasRows,
       };
     } catch (error) {
       const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
       this.logger.error(`Failed to check available sources: ${errorMessage}`);
       // Graceful degradation: return all true so dialog shows all options
-      return { grafana: true, dynatrace: true, splunk: true };
+      return { grafana: true, dynatrace: true, splunk: true, loki: true };
     }
   }
 

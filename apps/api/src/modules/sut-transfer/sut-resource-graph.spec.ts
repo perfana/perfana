@@ -29,6 +29,7 @@ describe('SUT_RESOURCES', () => {
       'ds_tracked_differences', 'test_run_transaction_stats',
       'series_grouping_rules', 'ds_metric_series_groups',
       'splunk_configs', 'splunk_entity_mappings', 'splunk_queries',
+      'loki_configs', 'loki_stream_mappings', 'loki_queries', 'loki_run_patterns', 'loki_run_samples', 'loki_run_services',
     ].sort();
     expect([...tables].sort()).toEqual(expected);
   });
@@ -50,6 +51,9 @@ describe('SUT_RESOURCES', () => {
     expect(idx('test_runs')).toBeLessThan(idx('test_run_transaction_stats'));
     expect(idx('dynatrace_configs')).toBeLessThan(idx('dynatrace_entity_mappings'));
     expect(idx('dynatrace_configs')).toBeLessThan(idx('dynatrace_queries'));
+    expect(idx('grafana_instances')).toBeLessThan(idx('loki_configs'));
+    expect(idx('loki_configs')).toBeLessThan(idx('loki_stream_mappings'));
+    expect(idx('loki_configs')).toBeLessThan(idx('loki_queries'));
     expect(idx('application_dashboards')).toBeLessThan(idx('ds_control_group_statistics'));
     // report_templates is the NOT NULL FK parent of generated_reports.template_id.
     expect(idx('report_templates')).toBeLessThan(idx('generated_reports'));

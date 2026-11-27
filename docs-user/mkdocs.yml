@@ -79,6 +79,7 @@ nav:
       - Connect Dynatrace: integrations/connect-dynatrace.md
       - Connect Pyroscope: integrations/connect-pyroscope.md
       - Connect Splunk: integrations/connect-splunk.md
+      - Connect Loki: integrations/connect-loki.md
       - Connect Confluence: integrations/connect-confluence.md
       - Connect distributed tracing: integrations/connect-tracing.md
   - Administration:

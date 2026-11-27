@@ -3,12 +3,13 @@ import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
 import { TracingInstance } from '@/lib/distributed-tracing';
 import { SplunkConfig } from '@/lib/splunk';
+import { LokiConfig } from '@/lib/loki';
 import { ConfluenceConfig } from '@/lib/confluence';
 
 /**
  * Integration type identifiers
  */
-export type IntegrationType = 'grafana' | 'dynatrace' | 'pyroscope' | 'tracing' | 'splunk' | 'confluence';
+export type IntegrationType = 'grafana' | 'dynatrace' | 'pyroscope' | 'tracing' | 'splunk' | 'loki' | 'confluence';
 
 /**
  * Connection status for integration cards
@@ -38,7 +39,7 @@ export interface IntegrationCard {
   /** Brand color */
   color: string;
   /** Instance data (if connected) */
-  instanceData?: GrafanaInstance | DynatraceConfig | PyroscopeInstance | TracingInstance | SplunkConfig | ConfluenceConfig;
+  instanceData?: GrafanaInstance | DynatraceConfig | PyroscopeInstance | TracingInstance | SplunkConfig | LokiConfig | ConfluenceConfig;
 }
 
 /**
@@ -72,6 +73,7 @@ export const INTEGRATION_COLORS = {
   pyroscope: '#FF6B35',
   tracing: '#9C27B0',
   splunk: '#65A637',
+  loki: '#F2A900',
   confluence: '#1868DB',
 } as const;
 
@@ -84,5 +86,6 @@ export const INTEGRATION_CATEGORIES = {
   pyroscope: 'Profiling',
   tracing: 'Distributed Tracing',
   splunk: 'Logs',
+  loki: 'Logs',
   confluence: 'Reporting',
 } as const;

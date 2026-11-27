@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchGrafanaDashboardByUid } from '@/lib/grafana-dashboards';
 import { fetchSplunkPanelTitles } from '@/lib/splunk';
+import { fetchLokiPanelTitles } from '@/lib/loki';
 import { getUnit } from '@/lib/units';
 import {
   CreateProfileBenchmarkData,
@@ -11,9 +12,11 @@ import {
   PERF_TEST_PROFILE_DASHBOARD,
   DYNATRACE_HOSTS_PROFILE_DASHBOARD,
   SPLUNK_PROFILE_DASHBOARD,
+  LOKI_PROFILE_DASHBOARD,
   isPerfTestProfileDashboard,
   isDynatraceHostsProfileDashboard,
   isSplunkProfileDashboard,
+  isLokiProfileDashboard,
 } from '@/lib/profile-benchmarks';
 import {
   PERF_TEST_PROFILE_SOURCE,
@@ -23,6 +26,8 @@ import {
   DYNATRACE_HOST_PROFILE_PANELS,
   SPLUNK_PROFILE_SOURCE,
   SPLUNK_BENCHMARK_SOURCE,
+  LOKI_PROFILE_SOURCE,
+  LOKI_BENCHMARK_SOURCE,
 } from '@perfana/shared/constants';
 import { ProfileDashboard } from '@/lib/profiles';
 import {
@@ -97,12 +102,15 @@ export function useBenchmarkForm({
     }
     // Splunk panels are user-authored per workload, so the list is every panel title in use (plus
     // the starter panels). The SLO is matched on the title; these ids only key the picker.
-    if (isSplunkProfileDashboard(dashboard)) {
+    // Loki panels are the same.
+    if (isSplunkProfileDashboard(dashboard) || isLokiProfileDashboard(dashboard)) {
+      const loki = isLokiProfileDashboard(dashboard);
       try {
         setPanelsLoading(true);
-        const titles = await fetchSplunkPanelTitles();
+        const titles = loki ? await fetchLokiPanelTitles() : await fetchSplunkPanelTitles();
+        const type = loki ? LOKI_BENCHMARK_SOURCE : SPLUNK_BENCHMARK_SOURCE;
         setAvailablePanels(
-          titles.map((t, i) => ({ id: i + 1, title: t.panelTitle, type: SPLUNK_BENCHMARK_SOURCE, yAxesFormat: t.metricUnit })),
+          titles.map((t, i) => ({ id: i + 1, title: t.panelTitle, type, yAxesFormat: t.metricUnit })),
         );
       } catch {
         setAvailablePanels([]);
@@ -183,8 +191,11 @@ export function useBenchmarkForm({
           ? { ...DYNATRACE_HOSTS_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || DYNATRACE_HOSTS_PROFILE_DASHBOARD.dashboardUid }
           : benchmark.source === SPLUNK_PROFILE_SOURCE
             ? { ...SPLUNK_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || SPLUNK_PROFILE_DASHBOARD.dashboardUid }
-            : profileDashboards.find(d => d.id === benchmark.profileDashboardId);
-      const isSplunk = benchmark.source === SPLUNK_PROFILE_SOURCE;
+            : benchmark.source === LOKI_PROFILE_SOURCE
+              ? { ...LOKI_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || LOKI_PROFILE_DASHBOARD.dashboardUid }
+              : profileDashboards.find(d => d.id === benchmark.profileDashboardId);
+      const isLoki = benchmark.source === LOKI_PROFILE_SOURCE;
+      const isSplunk = benchmark.source === SPLUNK_PROFILE_SOURCE || isLoki;
 
       setFormData({
         selectedDashboard: dashboard || null,
@@ -192,7 +203,7 @@ export function useBenchmarkForm({
         selectedPanel: isSplunk && benchmark.panelTitle ? {
           id: 0,
           title: benchmark.panelTitle,
-          type: SPLUNK_BENCHMARK_SOURCE,
+          type: isLoki ? LOKI_BENCHMARK_SOURCE : SPLUNK_BENCHMARK_SOURCE,
           yAxesFormat: benchmark.metricUnit || null,
         } : benchmark.panelId ? {
           id: benchmark.panelId,
@@ -310,7 +321,9 @@ export function useBenchmarkForm({
 
       const isPerfTest = isPerfTestProfileDashboard(formData.selectedDashboard);
       const isDynatraceHosts = isDynatraceHostsProfileDashboard(formData.selectedDashboard);
-      const isSplunk = isSplunkProfileDashboard(formData.selectedDashboard);
+      const isLoki = isLokiProfileDashboard(formData.selectedDashboard);
+      // Splunk and Loki both key their SLO on the panel title.
+      const isSplunk = isSplunkProfileDashboard(formData.selectedDashboard) || isLoki;
       const isPattern = isPerfTest || isDynatraceHosts || isSplunk;
       const payload: CreateProfileBenchmarkData | UpdateProfileBenchmarkData = {
         profileDashboardId: isPattern ? undefined : formData.selectedDashboard!.id,
@@ -319,9 +332,11 @@ export function useBenchmarkForm({
           ? PERF_TEST_PROFILE_SOURCE
           : isDynatraceHosts
             ? DYNATRACE_HOSTS_PROFILE_SOURCE
-            : isSplunk
-              ? SPLUNK_PROFILE_SOURCE
-              : 'grafana',
+            : isLoki
+              ? LOKI_PROFILE_SOURCE
+              : isSplunk
+                ? SPLUNK_PROFILE_SOURCE
+                : 'grafana',
         grafanaInstance: isPattern ? undefined : formData.selectedDashboard!.grafanaLabel,
         // For perf-test / Dynatrace hosts / Splunk this is the uid regex grafana-sync fans out over, not a dashboard uid.
         dashboardUid: formData.selectedDashboard!.dashboardUid,

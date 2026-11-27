@@ -42,6 +42,8 @@ export const getIntegrationTypeLabel = (type: IntegrationType): string => {
       return 'Tracing';
     case 'splunk':
       return 'Splunk';
+    case 'loki':
+      return 'Loki';
     case 'confluence':
       return 'Confluence';
   }

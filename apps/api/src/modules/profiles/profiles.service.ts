@@ -22,6 +22,8 @@ import {
   DYNATRACE_HOST_PROFILE_PANELS,
   SPLUNK_PROFILE_SOURCE,
   SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT,
+  LOKI_PROFILE_SOURCE,
+  LOKI_DASHBOARD_UID_PATTERN_DEFAULT,
   PROVISIONED_SLO_AUTO_DISABLED_KEY,
   dynatraceHostPanelTitle,
 } from '@perfana/shared/constants';
@@ -32,6 +34,17 @@ import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto, ProfileBenchmarkR
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { AuditService } from '../audit/audit.service';
 import { deleteOwnedProvisionedRules, profileRuleIdsOf } from './provisioned-grouping-rules';
+
+/**
+ * Profile benchmark sources whose panels are user-authored per workload (Splunk, Loki): keyed on the
+ * panel TITLE, with each workload's panel id read from its query table by grafana-sync.
+ * `table` is a constant interpolated into SQL below, never user input.
+ */
+const TITLE_KEYED_SOURCES: Record<string, { name: string; table: string; defaultPattern: string }> = {
+  [SPLUNK_PROFILE_SOURCE]: { name: 'Splunk', table: 'splunk_queries', defaultPattern: SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT },
+  [LOKI_PROFILE_SOURCE]: { name: 'Loki', table: 'loki_queries', defaultPattern: LOKI_DASHBOARD_UID_PATTERN_DEFAULT },
+};
+const isTitleKeyed = (source: string | null | undefined): boolean => !!source && source in TITLE_KEYED_SOURCES;
 
 export interface ProfileResponse {
   id: string;
@@ -1003,14 +1016,16 @@ export class ProfilesService {
     // And for the Splunk dashboards. Splunk panels are user-authored per workload, so there is no
     // fixed panel list to check an id against: the title is the key, and grafana-sync reads each
     // workload's panel id from its splunk_queries row with that title.
-    if (source === SPLUNK_PROFILE_SOURCE) {
-      const pattern = dto.dashboardUid || SPLUNK_DASHBOARD_UID_PATTERN_DEFAULT;
+    // Loki panels are the same: user-authored per workload, keyed on the title.
+    if (isTitleKeyed(source)) {
+      const keyed = TITLE_KEYED_SOURCES[source]!;
+      const pattern = dto.dashboardUid || keyed.defaultPattern;
       const check = validateRegexPattern(pattern, { maxLength: 255 });
       if (!check.safe) {
         throw new BadRequestException(`dashboardUid must be a valid regex: ${check.error}`);
       }
       if (!dto.panelTitle?.trim()) {
-        throw new BadRequestException('panelTitle is required for a Splunk panel SLO');
+        throw new BadRequestException(`panelTitle is required for a ${keyed.name} panel SLO`);
       }
       return { profile_dashboard_id: null, grafana_instance: null, dashboard_uid: pattern };
     }
@@ -1077,8 +1092,8 @@ export class ProfilesService {
         grafana_instance: dashboardColumns.grafana_instance ?? undefined,
         dashboard_uid: dashboardColumns.dashboard_uid ?? undefined,
         // A Splunk panel SLO is keyed on its title; an id would name one workload's panel only.
-        panel_id: source === SPLUNK_PROFILE_SOURCE ? undefined : createDto.panelId,
-        panel_title: source === SPLUNK_PROFILE_SOURCE ? createDto.panelTitle?.trim() : createDto.panelTitle,
+        panel_id: isTitleKeyed(source) ? undefined : createDto.panelId,
+        panel_title: isTitleKeyed(source) ? createDto.panelTitle?.trim() : createDto.panelTitle,
         panel_type: createDto.panelType,
         panel_description: createDto.panelDescription,
         evaluate_type: createDto.evaluateType,
@@ -1237,10 +1252,10 @@ export class ProfilesService {
       }
       // A Splunk panel SLO is keyed on its title (see resolveDashboardColumns), which a PUT
       // sending only `panelTitle` never reaches; any id is dropped (null: save() skips undefined).
-      if (benchmark.source === SPLUNK_PROFILE_SOURCE) {
+      if (isTitleKeyed(benchmark.source)) {
         const title = benchmark.panel_title?.trim();
         if (!title) {
-          throw new BadRequestException('panelTitle is required for a Splunk panel SLO');
+          throw new BadRequestException(`panelTitle is required for a ${TITLE_KEYED_SOURCES[benchmark.source]!.name} panel SLO`);
         }
         benchmark.panel_title = title;
         benchmark.panel_id = null as unknown as undefined;
@@ -1410,8 +1425,8 @@ export class ProfilesService {
               // The '<dashboard label> - <panel>' shape the SUT edit dialog matches a Dynatrace SLO on.
               configTitle: `b.dashboard_label || ' - ' || $2::text`,
             }
-          : after.source === SPLUNK_PROFILE_SOURCE
-            ? { table: 'splunk_queries', title: after.panel_title ?? '', configTitle: '$2::text' }
+          : isTitleKeyed(after.source)
+            ? { table: TITLE_KEYED_SOURCES[after.source]!.table, title: after.panel_title ?? '', configTitle: '$2::text' }
             : null;
       if (panelChanged && perDashboardPanel) {
         // A host's (or a workload's Splunk) panel id differs per dashboard: read it from that

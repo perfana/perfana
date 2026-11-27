@@ -16,7 +16,8 @@ import { getConfig } from '../config/environment.js';
 import { getDatabaseService } from '../common/database-accessor.js';
 import { getRedisPool } from '../config/redis-pool.js';
 import { JobLockService } from '../services/JobLockService.js';
-import { getCollectableSplunkConfigIds } from '../services/collectable-sources.js';
+import { getCollectableLokiConfigIds, getCollectableSplunkConfigIds } from '../services/collectable-sources.js';
+import { snapshotLokiInsights } from '../pipelines/helpers/loki-insights.js';
 import { ProgressReporter } from '../services/ProgressReporter.js';
 import { HEAVY_STAGE_MAX_WAIT_MS } from '../services/HeavyStageMutex.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
@@ -546,6 +547,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         if (!sources || sources.grafana !== false) { enabledSourceTypes.add('grafana'); }
         if (!sources || sources.dynatrace !== false) { enabledSourceTypes.add('dynatrace'); }
         if (!sources || sources.splunk !== false) { enabledSourceTypes.add('splunk'); }
+        if (!sources || sources.loki !== false) { enabledSourceTypes.add('loki'); }
         if (!sources || sources.performanceMetrics !== false) { enabledSourceTypes.add('performance_test'); }
 
         const forceRefetchStart = Date.now();
@@ -641,6 +643,22 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                 if (added.length > 0) {
                   logger.info(`  ${testRunId}: discovered ${added.length} Splunk connection(s) with no collection status: ${added.join(', ')}`);
                   sourcesToRefetch = [...sourcesToRefetch, ...added.map((id) => ({ source_type: 'splunk', source_id: id }))];
+                }
+              }
+            }
+
+            // Loki is discovered on its own for the same reason.
+            if (enabledSourceTypes.has('loki')) {
+              const scope = await db.testRunRepo.findOne({
+                where: { testRunId },
+                select: ['testRunId', 'systemUnderTestId', 'testEnvironment', 'workload'],
+              });
+              if (scope) {
+                const known = new Set(sourcesToRefetch.filter((s) => s.source_type === 'loki').map((s) => s.source_id));
+                const added = (await getCollectableLokiConfigIds(db, scope)).filter((id) => !known.has(id));
+                if (added.length > 0) {
+                  logger.info(`  ${testRunId}: discovered ${added.length} Loki connection(s) with no collection status: ${added.join(', ')}`);
+                  sourcesToRefetch = [...sourcesToRefetch, ...added.map((id) => ({ source_type: 'loki', source_id: id }))];
                 }
               }
             }
@@ -749,6 +767,37 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   // and Dynatrace stages (worker CLAUDE.md, "Gap-filling a completed run").
                   if (status.source_id && statuses.length > 0) {
                     await db.updateCollectedRanges(testRunId, 'splunk', status.source_id, { from: fromTime, to: toTime });
+                  }
+                } else if (status.source_type === 'loki') {
+                  // The Splunk branch with the nouns changed: a failed or partial re-fetch throws
+                  // rather than certifying the source complete.
+                  const result = await incrementalPipeline.execute({
+                    testRunId,
+                    fromTime,
+                    toTime,
+                    collectGrafanaMetrics: false,
+                    collectDynatraceMetrics: false,
+                    collectSplunkMetrics: false,
+                    collectLokiMetrics: true,
+                    collectPerformanceTestMetrics: false,
+                    ...(status.source_id ? { lokiConfigId: status.source_id } : {}),
+                  });
+                  if (!result.success) {
+                    throw new Error(result.error?.message ?? 'Loki re-fetch failed');
+                  }
+                  const lokiErrors = ((result.data as { loki?: { errors?: string[] } })?.loki?.errors) ?? [];
+                  if (lokiErrors.length > 0) {
+                    throw new Error(`Loki re-fetch had panel errors: ${lokiErrors.join(' | ')}`);
+                  }
+                  dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;
+                  if (status.source_id && statuses.length > 0) {
+                    await db.updateCollectedRanges(testRunId, 'loki', status.source_id, { from: fromTime, to: toTime });
+                  }
+                  // A re-fetch re-reads the window, so it re-takes the card's snapshot too. Best-effort.
+                  const run = await db.getTestRunByTestRunId(testRunId);
+                  if (run) {
+                    await snapshotLokiInsights(db, logger, run).catch((snapErr: unknown) =>
+                      logger.warn(`    Loki snapshot for ${testRunId} failed: ${snapErr instanceof Error ? snapErr.message : snapErr}`));
                   }
                 } else {
                   // Grafana and performance_test use incremental pipeline with full time range
@@ -872,6 +921,9 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           if (sources.splunk !== false) {
             enabledSourceTypes.add('splunk');
           }
+          if (sources.loki !== false) {
+            enabledSourceTypes.add('loki');
+          }
           if (sources.performanceMetrics !== false) {
             enabledSourceTypes.add('performance_test');
           }
@@ -931,10 +983,12 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                     collectGrafanaMetrics: g.sourceType === 'grafana',
                     collectDynatraceMetrics: g.sourceType === 'dynatrace',
                     collectSplunkMetrics: g.sourceType === 'splunk',
+                    collectLokiMetrics: g.sourceType === 'loki',
                     collectPerformanceTestMetrics: g.sourceType === 'performance_test',
                     ...(g.sourceType === 'grafana' && g.sourceId ? { grafanaInstanceId: g.sourceId } : {}),
                     ...(g.sourceType === 'dynatrace' && g.sourceId ? { dynatraceConfigId: g.sourceId } : {}),
                     ...(g.sourceType === 'splunk' && g.sourceId ? { splunkConfigId: g.sourceId } : {}),
+                    ...(g.sourceType === 'loki' && g.sourceId ? { lokiConfigId: g.sourceId } : {}),
                   });
 
                   const dataPoints = ((result.data as Record<string, unknown>)?.totalDataPoints as number) || 0;

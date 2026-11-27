@@ -21,10 +21,13 @@ import { WorkerDatabaseService } from '../common/database.service.js';
 import { ProgressReporter } from './ProgressReporter.js';
 import { HEAVY_STAGES, HeavyStageMutex } from './HeavyStageMutex.js';
 import type { DsMetricCollectionStatus } from '@perfana/shared/entities';
-import { collectionSourceKey, getCollectableSplunkConfigIds, getConfiguredSourceKeys } from './collectable-sources.js';
+import { collectionSourceKey, getCollectableLokiConfigIds, getCollectableSplunkConfigIds, getConfiguredSourceKeys } from './collectable-sources.js';
+import { snapshotLokiInsights } from '../pipelines/helpers/loki-insights.js';
 
 /** How long after a ticked run ends analyze still re-reads it from Splunk. */
 const SPLUNK_RECOLLECT_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Same for Loki: re-read a ticked run once at analyze if it ended within this window. */
+const LOKI_RECOLLECT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Pipeline Orchestrator - Coordinates the execution of pipeline stages
@@ -48,6 +51,7 @@ const SPLUNK_RECOLLECT_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const ORCHESTRATED_STAGES = [
   'dynatrace-collection',
   'splunk-collection',
+  'loki-collection',
   'panels-processing',
   'performance-test-metrics',
   'transaction-stats-rollup',
@@ -413,6 +417,67 @@ export class PipelineOrchestrator {
   }
 
   /**
+   * Whole-run Loki collection, one pass per collectable connection, then the pattern and error-line
+   * snapshot for the run page's Loki card. The collection half is collectSplunkForWholeRun with the
+   * nouns changed (same no-first-row guard, same 24 h window for a ticked run). The snapshot runs
+   * either way: it is what keeps the card's patterns once Loki's pattern ingester and retention have
+   * dropped them, and an empty answer leaves an earlier snapshot alone. Soft-failed throughout.
+   */
+  private async collectLokiForWholeRun(testRunId: string): Promise<PipelineResult> {
+    const startedAt = Date.now();
+    const testRun = await this.databaseService.getTestRunByTestRunId(testRunId);
+    if (!testRun?.startTime || !testRun.endTime) {
+      return { success: true, stage: 'loki-collection', duration: Date.now() - startedAt, data: { skipped: 'run has no start or end time' } };
+    }
+    const configIds = await getCollectableLokiConfigIds(this.databaseService, testRun);
+    if (configIds.length === 0) {
+      return { success: true, stage: 'loki-collection', duration: Date.now() - startedAt, data: { skipped: 'no Loki panel with a mapped stream' } };
+    }
+    const hasStatusRows = (await this.databaseService.getAllCollectionStatuses(testRunId)).length > 0;
+    let total = 0;
+    const errors: string[] = [];
+    let skipped: string | undefined;
+    if (hasStatusRows && Date.now() - new Date(testRun.endTime).getTime() > LOKI_RECOLLECT_WINDOW_MS) {
+      skipped = 'collected live; ended over 24 h ago (force-refetch to re-read Loki)';
+    } else {
+      for (const lokiConfigId of configIds) {
+        const result = await this.incrementalMetricsPipeline.execute({
+          testRunId,
+          fromTime: testRun.startTime,
+          toTime: testRun.endTime,
+          lokiConfigId,
+          collectGrafanaMetrics: false,
+          collectDynatraceMetrics: false,
+          collectSplunkMetrics: false,
+          collectLokiMetrics: true,
+          collectPerformanceTestMetrics: false,
+        });
+        if (!result.success) {
+          errors.push(result.error?.message ?? `Loki collection failed for ${lokiConfigId}`);
+          continue;
+        }
+        total += (result.data as { loki?: { dataPoints?: number } } | undefined)?.loki?.dataPoints ?? 0;
+        if (hasStatusRows) {
+          await this.databaseService.updateCollectedRanges(testRunId, 'loki', lokiConfigId, { from: testRun.startTime, to: testRun.endTime });
+        }
+      }
+    }
+    let snapshot: Awaited<ReturnType<typeof snapshotLokiInsights>> | null = null;
+    try {
+      snapshot = await snapshotLokiInsights(this.databaseService, this.logger, testRun);
+      if (snapshot.errors.length > 0) {this.logger.warn(`Loki snapshot for ${testRunId} had errors: ${snapshot.errors.join(' | ')}`);}
+    } catch (err) {
+      this.logger.warn(`Loki snapshot for ${testRunId} failed, continuing the analysis: ${err instanceof Error ? err.message : err}`);
+    }
+    const data = { dataPoints: total, patterns: snapshot?.patterns ?? 0, samples: snapshot?.samples ?? 0, ...(skipped ? { skipped } : {}) };
+    if (errors.length > 0) {
+      this.logger.warn(`Loki collection for ${testRunId} failed, continuing the analysis: ${errors.join(' | ')}`);
+      return { success: true, stage: 'loki-collection', duration: Date.now() - startedAt, data: { ...data, skipped: 'loki-failed', reason: errors.join(' | ') } };
+    }
+    return { success: true, stage: 'loki-collection', duration: Date.now() - startedAt, data };
+  }
+
+  /**
    * Retry collection for a specific time range and source
    *
    * @param testRunId - Test run ID
@@ -439,11 +504,13 @@ export class PipelineOrchestrator {
       collectGrafanaMetrics: sourceType === 'grafana',
       collectDynatraceMetrics: sourceType === 'dynatrace',
       collectSplunkMetrics: sourceType === 'splunk',
+      collectLokiMetrics: sourceType === 'loki',
       collectPerformanceTestMetrics: sourceType === 'performance_test',
       // Filter by specific source if needed
       ...(sourceType === 'grafana' && sourceId ? { grafanaInstanceId: sourceId } : {}),
       ...(sourceType === 'dynatrace' && sourceId ? { dynatraceConfigId: sourceId } : {}),
       ...(sourceType === 'splunk' && sourceId ? { splunkConfigId: sourceId } : {}),
+      ...(sourceType === 'loki' && sourceId ? { lokiConfigId: sourceId } : {}),
     });
 
     if (!result.success) {
@@ -568,6 +635,7 @@ export class PipelineOrchestrator {
       const metricCollectionStages = [
         'dynatrace-collection',
         'splunk-collection',
+        'loki-collection',
         'panels-processing',
         'performance-test-metrics',
         'metrics-collection'
@@ -583,9 +651,10 @@ export class PipelineOrchestrator {
       // and indexing lag), so the live ticks' 5 min lookback misses whatever lands later. One
       // whole-run search per panel at analyze re-reads the run once everything has arrived and
       // overwrites the tick buckets on the same grid. collectSplunkForWholeRun decides whether a
-      // ticked run is still recent enough for that.
+      // ticked run is still recent enough for that. loki-collection is not skipped for the same
+      // reason (ingest lag), and because it also takes the run's pattern snapshot.
       const skippableCollectionStages = metricCollectionStages.filter(
-        (stage) => stage !== 'performance-test-metrics' && stage !== 'splunk-collection'
+        (stage) => stage !== 'performance-test-metrics' && stage !== 'splunk-collection' && stage !== 'loki-collection'
       );
 
       // Check if we should skip metric collection stages
@@ -864,6 +933,10 @@ ${results.map(r => {
 
       case 'splunk-collection':
         executionPromise = this.collectSplunkForWholeRun(testRunId);
+        break;
+
+      case 'loki-collection':
+        executionPromise = this.collectLokiForWholeRun(testRunId);
         break;
 
       case 'panels-processing':

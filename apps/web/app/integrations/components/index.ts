@@ -11,4 +11,5 @@ export {
   TracingExpandedContent,
 } from './expanded-content';
 export { useSplunkIntegration, SplunkFormDialog, SplunkDeleteDialog } from './SplunkIntegration';
+export { useLokiIntegration, LokiFormDialog, LokiDeleteDialog } from './LokiIntegration';
 export { useConfluenceIntegration, ConfluenceFormDialog, ConfluenceDeleteDialog } from './ConfluenceIntegration';

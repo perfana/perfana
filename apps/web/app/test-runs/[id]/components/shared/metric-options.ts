@@ -24,7 +24,7 @@ import { buildUrlPanels, fetchUrlDistinctNames, isUrlPanel } from '@/lib/url-per
 import { TestRun } from '@/types/test-runs';
 import { groupSeriesName, SERIES_GROUPING_AGGREGATIONS, type SeriesGroupingAggregation } from '@perfana/shared/utils';
 
-export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
+export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk' | 'loki';
 
 /** The dashboard shape every card's types declare; structurally identical across them. */
 export interface ApplicationDashboard {
@@ -186,6 +186,7 @@ export function sourceOf(dashboard: ApplicationDashboard): DataSource {
   if (type === 'dynatrace') return 'dynatrace';
   if (type === 'performance_test') return 'performance-metrics';
   if (type === 'splunk') return 'splunk';
+  if (type === 'loki') return 'loki';
   return 'grafana';
 }
 
@@ -428,8 +429,8 @@ export async function fetchPanelsForDashboard(
       })));
     }
 
-    if (source === 'splunk') {
-      // A Splunk placeholder has no dashboard JSON: its panels are what the run recorded,
+    if (source === 'splunk' || source === 'loki') {
+      // A Splunk or Loki placeholder has no dashboard JSON: its panels are what the run recorded,
       // like the perf-test ones, minus their URL panels and percentile folding.
       if (!testRun) return [];
       const rows = availableRows ?? await fetchAvailablePanelRows(testRun).catch(() => [] as AvailablePanelRow[]);
@@ -592,7 +593,7 @@ export const fetchPanelsForDashboards = async (
   // comes from is a select-all over a perf-test run — exactly the case where these rows are
   // fetched for the panel list anyway, so reading their series out costs nothing extra.
   // Splunk placeholders read the same rows for their panel list, so they need the call too.
-  const rows = testRun && dashboards.some((d) => sourceOf(d) === 'performance-metrics' || sourceOf(d) === 'splunk')
+  const rows = testRun && dashboards.some((d) => sourceOf(d) === 'performance-metrics' || sourceOf(d) === 'splunk' || sourceOf(d) === 'loki')
     ? await fetchAvailablePanelRows(testRun).catch(() => undefined)
     : undefined;
   const lists = await mapLimit(dashboards, OPTION_FETCH_CONCURRENCY,

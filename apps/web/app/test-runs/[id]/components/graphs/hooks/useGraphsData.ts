@@ -20,7 +20,7 @@ import {
   aggregatedYAxisFormat,
   fetchAggregatedSeriesData,
 } from '../utils/aggregated-series';
-import { isGrafana, isPerformanceTest, isSplunk } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest, isSplunk, isLoki } from '@/lib/metrics-source-utils';
 import { nextFreeSlot } from '@/lib/charts';
 import type { AxisDisplayMode } from '@/components/charts';
 import { TestRun } from '@/types/test-runs';
@@ -507,6 +507,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     const grafanaOnly = dashboards.filter(d => isGrafana(d));
     const perfTestOnly = dashboards.filter(d => isPerformanceTest(d));
     const splunkOnly = dashboards.filter(d => isSplunk(d));
+    const lokiOnly = dashboards.filter(d => isLoki(d));
 
     // Dynatrace dashboards come from a separate API — convert to ApplicationDashboard shape
     const dynatraceAsDashboards: ApplicationDashboard[] = dynatraceDashboards.map((d, index) => ({
@@ -517,7 +518,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       source_type: 'dynatrace',
     } as ApplicationDashboard));
 
-    return [...grafanaOnly, ...perfTestOnly, ...splunkOnly, ...dynatraceAsDashboards];
+    return [...grafanaOnly, ...perfTestOnly, ...splunkOnly, ...lokiOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
 
   return {

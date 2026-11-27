@@ -1,4 +1,4 @@
-export type SourceType = 'grafana' | 'dynatrace' | 'performance_test' | 'splunk' | 'prometheus' | 'influxdb' | 'unknown';
+export type SourceType = 'grafana' | 'dynatrace' | 'performance_test' | 'splunk' | 'loki' | 'prometheus' | 'influxdb' | 'unknown';
 
 /**
  * Get the source type for a dashboard. Uses source_type from the linked MetricsSource
@@ -22,6 +22,8 @@ export function getSourceType(dashboard: {
   // prefix is what classifies a Splunk placeholder today. Returning the metrics source's
   // source_type from that endpoint would retire every arm of this fallback.
   if (uid.startsWith('splunk-')) return 'splunk';
+  // perfana-loki-, never bare loki-: the Loki mixin's real Grafana dashboards (loki-reads, ...) use it.
+  if (uid.startsWith('perfana-loki-')) return 'loki';
   return 'grafana';
 }
 
@@ -37,13 +39,17 @@ export function isSplunk(dashboard: Parameters<typeof getSourceType>[0]): boolea
   return getSourceType(dashboard) === 'splunk';
 }
 
+export function isLoki(dashboard: Parameters<typeof getSourceType>[0]): boolean {
+  return getSourceType(dashboard) === 'loki';
+}
+
 export function isGrafana(dashboard: Parameters<typeof getSourceType>[0]): boolean {
   return getSourceType(dashboard) === 'grafana';
 }
 
 export function isArtificialDashboard(dashboard: Parameters<typeof getSourceType>[0]): boolean {
   const type = getSourceType(dashboard);
-  return type === 'dynatrace' || type === 'performance_test' || type === 'splunk';
+  return type === 'dynatrace' || type === 'performance_test' || type === 'splunk' || type === 'loki';
 }
 
 /**
@@ -55,6 +61,7 @@ export const SOURCE_DISPLAY: Record<SourceType, { label: string; color: string; 
   dynatrace:        { label: 'Dynatrace',        color: '#6F2DA8', groupLabel: 'Dynatrace Metrics' },
   performance_test: { label: 'Performance Test',  color: '#1976D2', groupLabel: 'Performance Test Metrics' },
   splunk:           { label: 'Splunk',           color: '#65A637', groupLabel: 'Splunk Logs' },
+  loki:             { label: 'Loki',             color: '#F2A900', groupLabel: 'Loki Logs' },
   prometheus:       { label: 'Prometheus',         color: '#E6522C', groupLabel: 'Prometheus Metrics' },
   influxdb:         { label: 'InfluxDB',           color: '#22ADF6', groupLabel: 'InfluxDB Metrics' },
   unknown:          { label: 'Unknown',            color: '#9E9E9E', groupLabel: 'Other' },

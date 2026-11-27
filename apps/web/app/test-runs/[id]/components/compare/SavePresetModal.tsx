@@ -34,7 +34,7 @@ export interface CompareSeries {
   panelId: number;
   panelTitle: string;
   metricName: string;
-  source: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
+  source: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk' | 'loki';
   metricsSourceId?: string;
   isAggregated?: boolean;
   yAxesFormat?: string;
@@ -64,7 +64,7 @@ export interface CurrentFilterState {
   } | null;
   seriesSearchText: string;
   showPercentiles: boolean;
-  source?: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk';
+  source?: 'grafana' | 'dynatrace' | 'performance-metrics' | 'splunk' | 'loki';
   addedSeries?: CompareSeries[]; // Series added for comparison
   displayConfig?: DisplayConfig;
 }

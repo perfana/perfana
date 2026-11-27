@@ -26,6 +26,8 @@ import { DynatraceConfig } from '@/lib/dynatrace';
 import { PyroscopeInstance } from '@/lib/pyroscope';
 import { SplunkConfig } from '@/lib/splunk';
 import { SplunkExpandedContent } from './SplunkIntegration';
+import { LokiConfig } from '@/lib/loki';
+import { LokiExpandedContent } from './LokiIntegration';
 import { ConfluenceConfig } from '@/lib/confluence';
 import { ConfluenceExpandedContent } from './ConfluenceIntegration';
 import { TracingInstance } from '@/lib/distributed-tracing';
@@ -64,6 +66,7 @@ export function IntegrationCardComponent({
   const isPyroscopeInstance = card.integrationType === 'pyroscope' && card.instanceData;
   const isTracingInstance = card.integrationType === 'tracing' && card.instanceData;
   const isSplunkInstance = card.integrationType === 'splunk' && card.instanceData;
+  const isLokiInstance = card.integrationType === 'loki' && card.instanceData;
   const isConfluenceInstance = card.integrationType === 'confluence' && card.instanceData;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -218,6 +221,9 @@ export function IntegrationCardComponent({
             )}
             {isSplunkInstance && (
               <SplunkExpandedContent config={card.instanceData as SplunkConfig} />
+            )}
+            {isLokiInstance && (
+              <LokiExpandedContent config={card.instanceData as LokiConfig} />
             )}
 
             {/* Placeholder content */}

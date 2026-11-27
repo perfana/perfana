@@ -18,6 +18,11 @@ export class RefreshSourcesDto {
   @IsBoolean()
   splunk?: boolean;
 
+  @ApiProperty({ description: 'Include Loki log metrics', required: false })
+  @IsOptional()
+  @IsBoolean()
+  loki?: boolean;
+
   @ApiProperty({ description: 'Include performance test metrics', required: false })
   @IsOptional()
   @IsBoolean()
