@@ -22,7 +22,6 @@ import {
   validateLogqlPipeline,
   validateMatchers,
   type LokiConnection,
-  lineShape,
   mergeMappings,
   patternLineFilter,
 } from '../client';
