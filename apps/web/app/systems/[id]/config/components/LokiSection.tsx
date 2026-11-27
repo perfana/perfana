@@ -258,6 +258,7 @@ export default function LokiSection({ systemId, systemName, organizationId, sele
           <StarterDialog
             open={starterOpen}
             levelLabel={config.levelLabel}
+            levelParser={config.levelParser ?? 'none'}
             serviceLabel={config.serviceLabel ?? 'service_name'}
             configId={configId}
             onClose={() => setStarterOpen(false)}
@@ -446,8 +447,8 @@ function AddStreamsDialog({ open, configId, systemId, env, workload, onClose, on
 // Starter panels
 // ---------------------------------------------------------------------------
 
-function StarterDialog({ open, levelLabel, serviceLabel, configId, onClose, onCreate }: {
-  open: boolean; levelLabel: string; serviceLabel: string; configId: string; onClose: () => void; onCreate: (serviceLabel: string) => void;
+function StarterDialog({ open, levelLabel, levelParser, serviceLabel, configId, onClose, onCreate }: {
+  open: boolean; levelLabel: string; levelParser: string; serviceLabel: string; configId: string; onClose: () => void; onCreate: (serviceLabel: string) => void;
 }) {
   const [field, setField] = useState(serviceLabel);
   const [labelNames, setLabelNames] = useState<string[]>([]);
@@ -462,7 +463,7 @@ function StarterDialog({ open, levelLabel, serviceLabel, configId, onClose, onCr
       <DialogTitle>Add starter panels</DialogTitle>
       <DialogContent>
         <Typography variant="body2" sx={{ mb: 2 }}>
-          Adds <strong>Log lines by level</strong> (split by <code>{levelLabel}</code>, the connection&apos;s level label),
+          Adds <strong>Log lines by level</strong> (split by <code>{levelParser !== 'none' ? `| ${levelParser} → ` : ''}{levelLabel}</code>, the connection&apos;s level),
           {' '}<strong>Error lines by service</strong> and <strong>Log volume by service</strong>. A panel with the same title is left alone.
         </Typography>
         <Autocomplete

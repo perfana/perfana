@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { LokiService, errorRateFromServices, levelTotals } from './loki.service';
+import { LokiService, describeLevelProbe, errorRateFromServices, levelLabelMissing, levelTotals } from './loki.service';
+import { validateLogqlPipeline } from '@perfana/shared/services/loki/client';
 import { Capability } from '../../constants/capabilities.constants';
 
 const ORG_A = '00000000-0000-0000-0000-00000000000a';
@@ -140,6 +141,50 @@ describe('LokiService mappings and panels', () => {
     expect(saved).toMatchObject({ panelId: 3, dashboardLabel: 'Loki logs', metricsSourceId: 'source-id' });
     const insert = dataSource.manager.query.mock.calls[2] as unknown as [string, unknown[]];
     expect(insert[1]).toEqual(expect.arrayContaining([GI, 'loki-loki-logs']));
+  });
+});
+
+describe('level parser', () => {
+  it('puts the connection\'s parser in front of the starter panels\' level grouping and filter', async () => {
+    const { service, configRepo } = build();
+    configRepo.findOne.mockResolvedValue({
+      id: CFG, organizationId: ORG_A, grafanaInstanceId: GI, datasourceUid: 'loki', levelLabel: 'level', levelParser: 'json', label: 'logs', grafanaInstance: grafana,
+    });
+    const created: Array<{ panelTitle: string; logql: string; splitBy: string }> = [];
+    jest.spyOn(service, 'listQueries').mockResolvedValue([]);
+    jest.spyOn(service, 'createQuery').mockImplementation(async (dto) => { created.push(dto as never); return dto as never; });
+    await service.createStarterQueries({ lokiConfigId: CFG, systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load' }, 'u', []);
+    expect(created.map((q) => [q.panelTitle, q.logql, q.splitBy])).toEqual([
+      ['Log lines by level', '$entities | json', 'level'],
+      ['Error lines by service', '$entities | json | level=~"(?i)(error|err|fatal|critical|crit|panic|emerg|alert|severe)"', 'service_name'],
+      ['Log volume by service', '$entities', 'service_name'],
+    ]);
+    for (const q of created) expect(validateLogqlPipeline(q.logql)).toBeNull();
+  });
+
+  it('stores the parser on create and update, defaulting to none', async () => {
+    const { service, configRepo } = build();
+    await service.createConfig({ label: 'logs', grafanaInstanceId: GI, datasourceUid: 'loki' }, 'u', []);
+    expect(configRepo.save).toHaveBeenLastCalledWith(expect.objectContaining({ levelParser: 'none' }));
+    await service.updateConfig(CFG, { levelParser: 'logfmt', levelLabel: 'level' }, 'u', []);
+    expect(configRepo.save).toHaveBeenLastCalledWith(expect.objectContaining({ levelParser: 'logfmt', levelLabel: 'level' }));
+  });
+
+  it('says whether the configured level works, what would, or that nothing does', () => {
+    const configured = { parser: 'none', label: 'detected_level' };
+    expect(describeLevelProbe(configured, { parser: 'none', label: 'detected_level', levels: ['error', 'info'], coverage: 1 }))
+      .toBe('Levels found with the label "detected_level": error, info.');
+    expect(describeLevelProbe(configured, { parser: 'none', label: 'detected_level', levels: ['info'], coverage: 0.3 }))
+      .toBe('Levels found with the label "detected_level": info, on 30% of lines.');
+    expect(describeLevelProbe(configured, { parser: 'json', label: 'level', levels: ['error'], coverage: 1 }))
+      .toBe('the label "detected_level" carries no level on most of these lines, but "| json" with the field "level" does (error): set the level parser to "json" and the level label to "level".');
+    expect(describeLevelProbe(configured, null)).toMatch(/^No log level found with the label "detected_level", nor with \| json or \| logfmt/);
+  });
+
+  it('calls the level label missing only when every series of the level panel is (none)', () => {
+    expect(levelLabelMissing([{ name: '(none)' }])).toBe(true);
+    expect(levelLabelMissing([{ name: '(none)' }, { name: 'error' }])).toBe(false);
+    expect(levelLabelMissing([])).toBe(false);
   });
 });
 

@@ -189,7 +189,7 @@ guide: `docs-user/docs/integrations/connect-loki.md`.
 Settings → Integrations → Loki (loki_configs, org-owned)
   ├── Grafana instance (grafana_instance_id): same organization; its credentials are used
   ├── Loki datasource uid on that instance
-  ├── Level label (default detected_level) and concurrent queries
+  ├── Level parser (none, json, logfmt), level label (default detected_level) and concurrent queries
 System config → Loki tab (per environment/workload)
   ├── Streams (loki_stream_mappings): label matchers, at system, environment or workload level,
   │     optional tags

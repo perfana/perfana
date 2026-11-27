@@ -318,13 +318,97 @@ export function withStreamMatcher(mapping: LokiStreamMappingLike, label: string,
  * breakdown behind the card's Applications table. Both labels go into `by`, which reads stream
  * labels, structured metadata (Loki 3's `detected_level`) and parsed labels alike.
  */
-export function serviceLevelExpr(mapping: LokiStreamMappingLike, serviceLabel: string, levelLabel: string, stepSeconds: number): string {
+export function serviceLevelExpr(
+  mapping: LokiStreamMappingLike, serviceLabel: string, levelLabel: string, stepSeconds: number, levelParser?: string | null,
+): string {
   for (const l of [serviceLabel, levelLabel]) {
     if (!LABEL_NAME_RE.test(l)) throw new LokiError(`Invalid Loki label name: ${l}`);
   }
   const problem = validateMatchers(mapping.matchers);
   if (problem) throw new LokiError(`Refusing to run the query: ${problem}`);
-  return `sum by (${serviceLabel}, ${levelLabel}) (count_over_time(${buildStreamSelector(mapping.matchers)} [${Math.max(1, Math.round(stepSeconds))}s]))`;
+  return `sum by (${serviceLabel}, ${levelLabel}) (count_over_time(${buildStreamSelector(mapping.matchers)}${levelParserStage(levelParser)} [${Math.max(1, Math.round(stepSeconds))}s]))`;
+}
+
+/**
+ * How a connection's level label is obtained (migration 1840). `none`: it is already on the line, as
+ * a stream label or structured metadata (Loki 3's `detected_level`). `json` / `logfmt`: it is a field
+ * of the line itself, extracted by that parser before anything groups or filters on it.
+ */
+/** The series name for lines that do not carry a panel's split label. */
+export const NO_LABEL_VALUE = '(none)';
+
+export const LOKI_LEVEL_PARSERS = ['none', 'json', 'logfmt'] as const;
+export type LokiLevelParser = (typeof LOKI_LEVEL_PARSERS)[number];
+
+/** The pipeline stage that extracts the level label, with a leading space; '' for `none` (or anything unknown). */
+export function levelParserStage(parser: string | null | undefined): string {
+  return parser === 'json' ? ' | json' : parser === 'logfmt' ? ' | logfmt' : '';
+}
+
+const KNOWN_LEVELS = new Set(['error', 'warn', 'info', 'debug', 'trace']);
+
+export interface LokiLevelSource {
+  parser: LokiLevelParser;
+  label: string;
+  /** Normalised levels seen in the window, e.g. ['error', 'info']. */
+  levels: string[];
+  /** Share of the window's lines (0..1) that carry one of those levels. */
+  coverage: number;
+}
+
+/** A candidate wins outright once this share of lines carries a level; below it the best one is kept as a fallback. */
+const LEVEL_COVERAGE_TARGET = 0.5;
+
+/**
+ * Where the lines behind `selector` keep their level, over the last hour: the configured parser and
+ * label first, then the label as-is or as `detected_level`, then `| json` and `| logfmt` with that
+ * label or `level`. The first candidate on which at least half the lines carry a recognisable level
+ * (error, warn, info, debug, trace) wins; otherwise the one covering the most lines, or null when
+ * none finds a level. Coverage matters because a Loki that has just enabled level discovery labels
+ * only its newest lines: `detected_level` on 10 lines of 5,649 must not beat `| json` on all of
+ * them. One small `sum by` query per candidate, each allowed to fail (a timeout skips that
+ * candidate, it does not abort the probe).
+ */
+export async function detectLokiLevelSource(
+  conn: LokiConnection,
+  selector: string,
+  configured: { parser?: string | null; label: string },
+  opts: LokiRequestOptions = {},
+): Promise<LokiLevelSource | null> {
+  const first: LokiLevelParser = (LOKI_LEVEL_PARSERS as readonly string[]).includes(configured.parser ?? '') ? configured.parser as LokiLevelParser : 'none';
+  const candidates: Array<[LokiLevelParser, string]> = [[first, configured.label]];
+  for (const parser of LOKI_LEVEL_PARSERS) {
+    for (const label of [configured.label, parser === 'none' ? 'detected_level' : 'level']) {
+      if (LABEL_NAME_RE.test(label) && !candidates.some(([p, l]) => p === parser && l === label)) candidates.push([parser, label]);
+    }
+  }
+  const to = new Date();
+  const from = new Date(to.getTime() - 3600_000);
+  let best: LokiLevelSource | null = null;
+  for (const [parser, label] of candidates) {
+    if (!LABEL_NAME_RE.test(label)) continue;
+    const expr = `sum by (${label}) (count_over_time(${selector}${levelParserStage(parser)} [3600s]))`;
+    try {
+      const series = await lokiRangeQuery(conn, expr, from, to, 3600, { timeoutMs: 15_000, ...opts });
+      let all = 0;
+      let leveled = 0;
+      const levels = new Set<string>();
+      for (const s of series) {
+        // Each sample counts the hour before it; the latest one is the window.
+        const n = s.points.reduce((latest, p) => (p.time > latest.time ? p : latest), s.points[0] ?? { time: new Date(0), value: 0 }).value;
+        all += n;
+        const level = normalizeLevel(s.labels[label]);
+        if (n > 0 && level && KNOWN_LEVELS.has(level)) { leveled += n; levels.add(level); }
+      }
+      if (levels.size === 0 || all === 0) continue;
+      const found = { parser, label, levels: [...levels].sort(), coverage: leveled / all };
+      if (found.coverage >= LEVEL_COVERAGE_TARGET) return found;
+      if (!best || found.coverage > best.coverage) best = found;
+    } catch {
+      // ponytail: a failed candidate is skipped; a dead connection fails every one and yields null
+    }
+  }
+  return best;
 }
 
 export interface LokiSeries {
@@ -569,7 +653,7 @@ export async function lokiPanelPoints(
     const series = await lokiRangeQuery(conn, expr, new Date(firstEval), new Date(lastEval), bucket, opts);
     const suffix = agg.combine === null && selected.length > 1 ? ` [${describeMatchers(mapping.matchers)}]` : '';
     for (const s of series) {
-      const base = panel.splitBy ? (s.labels[panel.splitBy] ?? '(none)') : panel.panelTitle;
+      const base = panel.splitBy ? (s.labels[panel.splitBy] ?? NO_LABEL_VALUE) : panel.panelTitle;
       const name = `${base}${suffix}`;
       let byTime = combined.get(name);
       if (!byTime) combined.set(name, (byTime = new Map()));

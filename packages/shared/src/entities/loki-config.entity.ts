@@ -8,7 +8,7 @@ import { GrafanaInstance } from './grafana-instance.entity';
  */
 @Entity('loki_configs')
 export class LokiConfig {
-  static auditableFields = ['label', 'grafanaInstanceId', 'datasourceUid', 'datasourceName', 'levelLabel', 'serviceLabel', 'maxConcurrentQueries'] as const;
+  static auditableFields = ['label', 'grafanaInstanceId', 'datasourceUid', 'datasourceName', 'levelLabel', 'levelParser', 'serviceLabel', 'maxConcurrentQueries'] as const;
 
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -28,6 +28,10 @@ export class LokiConfig {
   /** The label (stream label, structured metadata or parsed) carrying a line's level. */
   @Column({ name: 'level_label', type: 'varchar', length: 100, default: 'detected_level' })
   levelLabel!: string;
+
+  /** How the level label is obtained: none (on the line already), json or logfmt (migration 1840). */
+  @Column({ name: 'level_parser', type: 'varchar', length: 10, default: 'none' })
+  levelParser!: string;
 
   /** The label that names an application, for the card's per-application view (migration 1839). */
   @Column({ name: 'service_label', type: 'varchar', length: 100, default: 'service_name' })

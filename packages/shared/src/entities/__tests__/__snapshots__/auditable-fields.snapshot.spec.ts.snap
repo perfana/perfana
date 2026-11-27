@@ -204,6 +204,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "datasourceUid",
     "datasourceName",
     "levelLabel",
+    "levelParser",
     "serviceLabel",
     "maxConcurrentQueries",
   ],

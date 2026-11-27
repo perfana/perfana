@@ -13,7 +13,7 @@ const QUERY = {
   logql: '$entities', split_by: 'detected_level', aggregation: 'count', metric_unit: 'short', max_series: 20,
 };
 const CONFIG = {
-  id: 'cfg', label: 'logs', datasource_uid: 'loki-uid', level_label: 'detected_level', max_concurrent_queries: 2,
+  id: 'cfg', label: 'logs', datasource_uid: 'loki-uid', level_label: 'detected_level', level_parser: 'none', max_concurrent_queries: 2,
   organization_id: 'org', grafana_label: 'grafana', base_url: 'https://grafana.internal', grafana_org_id: '1',
   api_key: 'plain-key', username: null, password: null, use_proxy: false, grafana_organization_id: 'org',
 };

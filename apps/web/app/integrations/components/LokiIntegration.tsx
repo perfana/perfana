@@ -11,7 +11,7 @@ import {
   MenuItem, TextField, Typography,
 } from '@mui/material';
 import {
-  LokiConfig, LokiDatasource, createLokiConfig, deleteLokiConfig, fetchLokiConfigs, fetchLokiDatasources,
+  LOKI_LEVEL_PARSERS, LokiConfig, LokiConnectionTest, LokiDatasource, LokiLevelParser, createLokiConfig, deleteLokiConfig, fetchLokiConfigs, fetchLokiDatasources,
   testLokiConnection, testSavedLokiConnection, updateLokiConfig,
 } from '@/lib/loki';
 import type { GrafanaInstance } from '@/lib/grafana-instances';
@@ -24,12 +24,13 @@ export interface LokiFormState {
   datasourceUid: string;
   datasourceName: string;
   levelLabel: string;
+  levelParser: LokiLevelParser;
   serviceLabel: string;
   maxConcurrentQueries: number;
 }
 
 const EMPTY: LokiFormState = {
-  label: '', grafanaInstanceId: '', datasourceUid: '', datasourceName: '', levelLabel: 'detected_level', serviceLabel: 'service_name', maxConcurrentQueries: 2,
+  label: '', grafanaInstanceId: '', datasourceUid: '', datasourceName: '', levelLabel: 'detected_level', levelParser: 'none', serviceLabel: 'service_name', maxConcurrentQueries: 2,
 };
 
 function formFrom(c: LokiConfig): LokiFormState {
@@ -39,6 +40,7 @@ function formFrom(c: LokiConfig): LokiFormState {
     datasourceUid: c.datasourceUid,
     datasourceName: c.datasourceName ?? '',
     levelLabel: c.levelLabel,
+    levelParser: c.levelParser ?? 'none',
     serviceLabel: c.serviceLabel ?? 'service_name',
     maxConcurrentQueries: c.maxConcurrentQueries,
   };
@@ -72,6 +74,7 @@ export function useLokiIntegration({
       datasourceUid: form.datasourceUid.trim(),
       datasourceName: form.datasourceName.trim() || null,
       levelLabel: form.levelLabel.trim() || 'detected_level',
+      levelParser: form.levelParser,
       serviceLabel: form.serviceLabel.trim() || 'service_name',
       maxConcurrentQueries: form.maxConcurrentQueries,
     };
@@ -129,7 +132,7 @@ export function LokiFormDialog({
   const [form, setForm] = useState<LokiFormState>(EMPTY);
   const [openedFor, setOpenedFor] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
-  const [test, setTest] = useState<{ success: boolean; message: string } | null>(null);
+  const [test, setTest] = useState<LokiConnectionTest | null>(null);
   const [busy, setBusy] = useState<'save' | 'test' | null>(null);
   const [datasources, setDatasources] = useState<LokiDatasource[] | null>(null);
   const [datasourceError, setDatasourceError] = useState<string | null>(null);
@@ -176,10 +179,16 @@ export function LokiFormDialog({
     setBusy('test');
     setTest(null);
     try {
-      const unchanged = editing && editing.datasourceUid === form.datasourceUid.trim();
+      // The saved test checks the SAVED level settings, so it only stands in while the form still matches them.
+      const levelLabel = form.levelLabel.trim() || 'detected_level';
+      const serviceLabel = form.serviceLabel.trim() || 'service_name';
+      const unchanged = editing && editing.datasourceUid === form.datasourceUid.trim() && editing.levelLabel === levelLabel
+        && (editing.levelParser ?? 'none') === form.levelParser && (editing.serviceLabel ?? 'service_name') === serviceLabel;
       setTest(unchanged
         ? await testSavedLokiConnection(editing.id)
-        : await testLokiConnection({ grafanaInstanceId: form.grafanaInstanceId, datasourceUid: form.datasourceUid.trim() }));
+        : await testLokiConnection({
+          grafanaInstanceId: form.grafanaInstanceId, datasourceUid: form.datasourceUid.trim(), levelLabel, levelParser: form.levelParser, serviceLabel,
+        }));
     } catch (err) {
       setTest({ success: false, message: getErrorMessage(err) });
     } finally {
@@ -260,11 +269,23 @@ export function LokiFormDialog({
             <TextField label="Label" value={form.label} onChange={(e) => set('label', e.target.value)} placeholder="e.g., Loki production" />
             <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
+                select
+                label="Level parser"
+                sx={{ minWidth: 150 }}
+                value={form.levelParser}
+                onChange={(e) => set('levelParser', e.target.value as LokiLevelParser)}
+                helperText={form.levelParser === 'none' ? 'Level is a label' : `| ${form.levelParser} first`}
+              >
+                {LOKI_LEVEL_PARSERS.map((p) => <MenuItem key={p} value={p}>{p === 'none' ? 'None (a label)' : p}</MenuItem>)}
+              </TextField>
+              <TextField
                 label="Level label"
                 fullWidth
                 value={form.levelLabel}
                 onChange={(e) => set('levelLabel', e.target.value)}
-                helperText="The label that holds a line's level: detected_level (Loki 3), level, severity…"
+                helperText={form.levelParser === 'none'
+                  ? "The label that holds a line's level: detected_level (Loki 3), level, severity…"
+                  : `The field of the ${form.levelParser} line that holds its level: level, severity…`}
               />
               <TextField
                 label="Application label"
@@ -289,7 +310,22 @@ export function LokiFormDialog({
               Log patterns need Loki 3 with the pattern ingester and Grafana 11 or later. Without them Perfana groups
               sampled error lines itself.
             </Typography>
-            {test && <Alert severity={test.success ? 'success' : 'error'}>{test.message}</Alert>}
+            {test && (
+              <Alert
+                severity={!test.success ? 'error' : test.level === null ? 'warning' : 'success'}
+                action={test.level && (test.level.parser !== form.levelParser || test.level.label !== (form.levelLabel.trim() || 'detected_level')) ? (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    onClick={() => setForm((f) => ({ ...f, levelParser: test.level!.parser, levelLabel: test.level!.label }))}
+                  >
+                    Use it
+                  </Button>
+                ) : undefined}
+              >
+                {test.message}
+              </Alert>
+            )}
           </Box>
         )}
       </DialogContent>
@@ -335,7 +371,7 @@ export function LokiExpandedContent({ config }: { config: LokiConfig }) {
       </Typography>
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
         <Chip size="small" variant="outlined" label={`Datasource: ${config.datasourceName ?? config.datasourceUid}`} />
-        <Chip size="small" variant="outlined" label={`Level label: ${config.levelLabel}`} />
+        <Chip size="small" variant="outlined" label={`Level: ${config.levelParser && config.levelParser !== 'none' ? `| ${config.levelParser} → ` : ''}${config.levelLabel}`} />
         <Chip size="small" variant="outlined" label={`Application label: ${config.serviceLabel ?? 'service_name'}`} />
         <Chip size="small" variant="outlined" label={`${config.maxConcurrentQueries} concurrent queries`} />
       </Box>

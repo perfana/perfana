@@ -19,11 +19,14 @@ Setting Loki up has two parts: connect it once for the organization, then choose
 3. Choose the **Grafana instance**.
    Perfana lists the Loki datasources on that Grafana. If Grafana does not list them, type the datasource **uid**: in Grafana open **Connections** → **Data sources** → your Loki datasource; the uid is the last part of the address.
 4. Choose the **Loki datasource** and enter a **Label**, for example `Loki production`.
-5. Check the **Level label**: the label that holds a line's level. Loki 3 adds `detected_level` by itself; older setups often use `level` or `severity`.
+5. Check the **Level parser** and **Level label**: where a line's level comes from.
+   With the parser set to **None (a label)**, the level label is a label Loki already attaches. Loki 3 adds `detected_level` when level discovery is on; older setups often use `level` or `severity`.
+   When the level is a field inside the line itself, as in JSON logs (`{"level":"ERROR", …}`) or logfmt logs (`level=error …`), set the parser to **json** or **logfmt** and the level label to the field's name, usually `level`.
    Check the **Application label** too: the label that names an application, `service_name` by default (Loki 3 adds it to every stream). The run page's Applications table is built from it.
 6. Optional: change **Concurrent queries**, the number of queries Perfana runs at once.
 7. Click **Test connection**.
-   Perfana lists the labels Loki has seen in the last hour, or says why it could not reach it.
+   Perfana lists the labels Loki has seen in the last hour, or says why it could not reach it. It also checks the level over the last hour.
+   If the level label is on none of the lines but a parsed field is, the result names that field. Click **Use it** to fill in the parser and label.
 8. Click **Add**.
    A Loki card appears on the Integrations page with **Settings** and **Delete** actions.
 
@@ -68,6 +71,7 @@ Runs that finished before you set this up are not collected automatically. Re-ev
 - *No Applications table* — The lines carry no Application label, or the run was analysed before Perfana 0.2.97.109; re-analyse it while Loki still holds the window. Check the label in the connection's **Settings**.
 - *An application shows lines but no patterns* — Patterns are taken for the 20 applications with the most errors, and only when the Application label is a stream label. Lines and counts still work.
 - *No error rate on the card* — Add the **Log lines by level** starter panel, or any count panel split by the connection's level label.
+- *"No line of this run carries the level label"* — The level panel came back with every line under `(none)`. The level label is not on the lines, so Perfana cannot tell errors apart. It shows no error rate instead of a misleading 0%, and the per-application error rates read 0 for the same reason. Run **Test connection** in the connection's **Settings** and set the parser it suggests. Then delete and re-add the two level starter panels, and re-analyse the run while Loki still holds the window.
 
 ## Related
 

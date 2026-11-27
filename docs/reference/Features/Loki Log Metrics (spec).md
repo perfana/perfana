@@ -43,6 +43,8 @@ the instance) and again by the worker at collection (`lokiConfigBelongsTo`), fai
 
 - `loki_configs` — label, `grafana_instance_id` (FK, cascade), `datasource_uid`, `datasource_name`,
   `level_label` (default `detected_level`), `max_concurrent_queries`. Unique per instance + uid.
+  Migration 1840 adds `level_parser` (`none` | `json` | `logfmt`, default `none`, CHECK-constrained).
+  See "Where the level comes from" below.
 - `loki_stream_mappings` — Splunk's mapping table with `matchers jsonb` (`[{label, op, value}]`,
   op one of `= != =~ !~`) in place of index / sourcetype / host, and `selector`, the canonical
   `buildStreamSelector(matchers)` text, which carries the unique slot and is what the UI shows.
@@ -104,6 +106,31 @@ an enabled panel and a mapping in scope; a source that can never return data is 
 (root CLAUDE.md #21). A panel whose query fails keeps the tick; only a connection-level failure
 fails it. A force refetch with panel errors is never marked complete. Load refusals (429, 503,
 "too many outstanding requests") are retried.
+
+## Where the level comes from
+
+The connection's level label is read in four places: the starter panels **Log lines by level**
+and **Error lines by service**, the card's error rate (`isLevelPanel`: split by exactly that label,
+aggregation `count`), the worker's per-application totals (`serviceLevelExpr`), and its error and
+warning sample-line filters. `level_parser` is the stage that makes the label exist before any of
+them groups or filters on it. `levelParserStage()` in `packages/shared/src/services/loki/client.ts`
+turns it into ` | json`, ` | logfmt` or nothing, and every one of those four call sites applies it.
+A new reader of the level label has to as well. The failure mode is silent: Loki groups the
+missing label as one empty series, which the panel names `(none)`.
+
+- **The connection test detects it.** `detectLokiLevelSource` runs one `sum by (<label>)` over
+  the last hour per candidate: the configured parser and label first, then the label as-is or as
+  `detected_level`, then `| json` and `| logfmt` with that label or `level`. It picks streams with
+  `{<service label>=~".+"}`, or the first label Loki reports. The first candidate whose values
+  include error, warn, info, debug or trace wins, and the dialog offers to apply it. Nothing is
+  changed without the user.
+- **The card refuses to report a 0% it cannot know.** When every series of the level panel is
+  `(none)` (`levelLabelMissing`), the summary returns `levelLabelMissing: true` and no error rate.
+  It does not fall back to the per-application snapshot either, because that grouped on the same
+  label.
+- **Existing panels keep their LogQL.** A starter panel is filled once, at creation, so changing
+  the parser later needs the two level panels re-added. A run's stored series change only when
+  it is re-analysed.
 
 ## What the card shows
 

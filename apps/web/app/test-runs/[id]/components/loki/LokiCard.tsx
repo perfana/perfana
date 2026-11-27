@@ -246,6 +246,7 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                   />
                 )}
                 {!hasData && configured.patterns.length === 0 && <SoftBadge label="No log data for this run" color="orange" />}
+                {configured.levelLabelMissing && <SoftBadge label="No log level on these lines" color="orange" />}
                 <SoftBadge count={configured.sources.length} label={configured.sources.length === 1 ? 'stream selector' : 'stream selectors'} color="neutral" />
               </Box>
             </Box>
@@ -280,6 +281,8 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                     </Button>
                   )}
                 </Box>
+
+                {configured.levelLabelMissing && <LevelMissingAlert connection={configured.connection} />}
 
                 {services.length > 0 && (
                   <ApplicationsSection services={services} serviceLabel={serviceLabel} selected={scope?.app ?? null} onSelect={setApp} />
@@ -771,3 +774,21 @@ function PanelSummary({ panel, commentCounts, app, serviceLabel }: {
     </Box>
   );
 }
+
+/**
+ * The level panel came back as nothing but `(none)`: the connection's level label is on none of the
+ * run's lines, so no error rate can be told apart (the API leaves it out rather than show 0%). The
+ * usual cause is JSON or logfmt lines on a Loki that does not add `detected_level`.
+ */
+function LevelMissingAlert({ connection }: { connection: Configured['connection'] }) {
+  const parser = connection?.levelParser && connection.levelParser !== 'none' ? `| ${connection.levelParser} ` : '';
+  return (
+    <Alert severity="warning" sx={{ mb: 2 }}>
+      No line of this run carries the level label <code>{parser}{connection?.levelLabel ?? 'detected_level'}</code>, so Perfana cannot
+      tell errors apart and shows no error rate; the per-application error rates read 0 for the same reason.
+      If the level is a field of the line, set the connection&apos;s level parser to json or logfmt (Integrations → Loki → Test
+      connection suggests one), then recreate the level panels and re-analyse the run.
+    </Alert>
+  );
+}
+

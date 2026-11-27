@@ -3,6 +3,8 @@ import {
   buildStreamSelector,
   labelFilter,
   serviceLevelExpr,
+  detectLokiLevelSource,
+  levelParserStage,
   withStreamMatcher,
   clusterLogLines,
   framesToLogLines,
@@ -267,3 +269,63 @@ describe('per-application helpers', () => {
       .toEqual([{ label: 'service_name', op: '=', value: 'x' }]);
   });
 });
+
+describe('level parser', () => {
+  it('maps a parser to the stage that extracts the level, and anything else to nothing', () => {
+    expect(levelParserStage('json')).toBe(' | json');
+    expect(levelParserStage('logfmt')).toBe(' | logfmt');
+    expect(levelParserStage('none')).toBe('');
+    expect(levelParserStage('regexp')).toBe('');
+    expect(levelParserStage(undefined)).toBe('');
+  });
+
+  it('parses before grouping in the per-application expression', () => {
+    expect(serviceLevelExpr({ matchers: [{ label: 'app', op: '=', value: 'shop' }] }, 'service_name', 'level', 60, 'json'))
+      .toBe('sum by (service_name, level) (count_over_time({app="shop"} | json [60s]))');
+  });
+
+  it('accepts the starter panels\' parsed level filter as a panel query', () => {
+    expect(validateLogqlPipeline('$entities | json | level=~"(?i)(error|err|fatal|critical|crit|panic|emerg|alert|severe)"')).toBeNull();
+    expect(validateLogqlPipeline('$entities | logfmt')).toBeNull();
+  });
+});
+
+describe('detectLokiLevelSource', () => {
+  const t = Date.now();
+  const frames = (...series: Array<Record<string, string>>) => jsonResponse({ results: { A: { frames: series.map((l) => seriesFrame(l, [[t, 5]])) } } });
+
+  it('keeps the configured label when it carries levels', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(frames({ detected_level: 'error' }, { detected_level: 'info' }));
+    await expect(detectLokiLevelSource(conn, '{service_name=~".+"}', { label: 'detected_level' }, { fetchImpl }))
+      .resolves.toEqual({ parser: 'none', label: 'detected_level', levels: ['error', 'info'], coverage: 1 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls through to | json and the level field when the label is on no line', async () => {
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(frames({}))                                  // none / detected_level: one unlabelled series
+      .mockResolvedValueOnce(frames({}))                                  // json / detected_level
+      .mockResolvedValueOnce(frames({ level: 'ERROR' }, { level: 'INFO' }, { level: '' }));
+    await expect(detectLokiLevelSource(conn, '{service_name=~".+"}', { label: 'detected_level' }, { fetchImpl }))
+      .resolves.toEqual({ parser: 'json', label: 'level', levels: ['error', 'info'], coverage: 10 / 15 });
+    const exprs = fetchImpl.mock.calls.map(([, init]) => JSON.parse(init.body).queries[0].expr);
+    expect(exprs[2]).toBe('sum by (level) (count_over_time({service_name=~".+"} | json [3600s]))');
+  });
+
+  it('passes over a label that only the newest lines carry, for the parser that finds it on all of them', async () => {
+    const counts = (series: Array<[Record<string, string>, number]>) =>
+      jsonResponse({ results: { A: { frames: series.map(([l, n]) => seriesFrame(l, [[t, n]])) } } });
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(counts([[{}, 5639], [{ detected_level: 'info' }, 10]]))   // what the demo Loki answered
+      .mockResolvedValueOnce(counts([[{}, 5649]]))
+      .mockResolvedValueOnce(counts([[{ level: 'INFO' }, 5649]]));
+    await expect(detectLokiLevelSource(conn, '{service_name=~".+"}', { label: 'detected_level' }, { fetchImpl }))
+      .resolves.toMatchObject({ parser: 'json', label: 'level', coverage: 1 });
+  });
+
+  it('answers null, not an error, when no candidate finds a level or every query fails', async () => {
+    await expect(detectLokiLevelSource(conn, '{a=~".+"}', { label: 'detected_level' }, { fetchImpl: jest.fn().mockResolvedValue(frames({})) })).resolves.toBeNull();
+    await expect(detectLokiLevelSource(conn, '{a=~".+"}', { label: 'detected_level' }, { fetchImpl: jest.fn().mockRejectedValue(new Error('down')) })).resolves.toBeNull();
+  });
+});
+

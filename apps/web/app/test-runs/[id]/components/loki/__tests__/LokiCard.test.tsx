@@ -149,3 +149,15 @@ it('opens the system config on the Loki tab, scoped to the run', async () => {
   expect(open).toHaveBeenCalledWith('/systems/sut-1/config?tab=loki&environment=acc&workload=load&fromTestRun=run-1', '_blank');
   open.mockRestore();
 });
+
+it('warns that the level label is on no line instead of showing an error rate', async () => {
+  mockSummary.mockResolvedValue({ ...configured, errorRate: null, levelLabelMissing: true });
+  render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
+  expect(await screen.findByText(/No line of this run carries the level label/)).toBeInTheDocument();
+});
+
+it('flags the missing level label on the collapsed card', async () => {
+  mockSummary.mockResolvedValue({ ...configured, errorRate: null, levelLabelMissing: true });
+  render(<LokiCard testRun={testRun} expanded={false} onExpand={() => {}} />);
+  expect(await screen.findByText('No log level on these lines')).toBeInTheDocument();
+});

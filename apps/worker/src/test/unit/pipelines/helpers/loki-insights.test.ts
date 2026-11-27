@@ -7,7 +7,7 @@ import { mergePatterns, pickServices, selectPatterns, serviceTotalsFrom, snapsho
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
 
 const CONFIG = {
-  id: 'cfg', label: 'logs', datasource_uid: 'loki-uid', level_label: 'detected_level', service_label: 'service_name', max_concurrent_queries: 2,
+  id: 'cfg', label: 'logs', datasource_uid: 'loki-uid', level_label: 'detected_level', level_parser: 'none', service_label: 'service_name', max_concurrent_queries: 2,
   organization_id: 'org', grafana_label: 'grafana', base_url: 'https://grafana.internal', grafana_org_id: '1',
   api_key: 'k', username: null, password: null, use_proxy: false, grafana_organization_id: 'org',
 };
@@ -16,14 +16,14 @@ const run = {
   startTime: new Date('2026-11-27T10:00:00Z'), endTime: new Date('2026-11-27T11:00:00Z'), organizationId: 'org', teamId: null,
 };
 
-function makeDb(opts: { services?: boolean } = {}) {
+function makeDb(opts: { services?: boolean; config?: Partial<typeof CONFIG> } = {}) {
   const tx = { query: vi.fn(async () => []) };
   const db = {
     query: vi.fn(async (sql: string) => {
       if (sql.includes('to_regclass')) return [{ patterns: true, services: opts.services ?? false }];
       if (sql.includes('FROM loki_queries')) return [{ loki_config_id: 'cfg' }];
       if (sql.includes('FROM loki_stream_mappings')) return [{ loki_config_id: 'cfg', matchers: [{ label: 'app', op: '=', value: 'shop' }], labels: [] }];
-      if (sql.includes('FROM loki_configs')) return [CONFIG];
+      if (sql.includes('FROM loki_configs')) return [{ ...CONFIG, ...opts.config }];
       return [];
     }),
     dataSource: { query: vi.fn(async (sql: string) => (sql.includes('to_regclass') ? [{ present: true }] : [{ loki_config_id: 'cfg' }])) },
@@ -162,5 +162,20 @@ describe('per-application snapshot', () => {
     const sqls = tx.query.mock.calls.map((c) => String(c[0]));
     expect(sqls.some((q) => q.includes('loki_run_services'))).toBe(false);
     expect(sqls.filter((q) => q.includes('INSERT INTO loki_run_patterns')).every((q) => !q.includes('service'))).toBe(true);
+  });
+
+  it('puts the connection\'s level parser in front of every level filter and grouping', async () => {
+    const exprs: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init: { body?: string }) => {
+      if (url.includes('/resources/patterns')) return json({ status: 'success', data: [] });
+      exprs.push(JSON.parse(init.body ?? '{}').queries?.[0]?.expr ?? '');
+      return emptyLogs();
+    });
+    const { db } = makeDb({ services: true, config: { level_parser: 'json', level_label: 'level' } });
+    await snapshotLokiInsights(db as never, logger, run);
+    const levelExprs = exprs.filter((e) => /\blevel\b/.test(e));
+    expect(levelExprs.length).toBeGreaterThan(0);
+    for (const e of levelExprs.filter((x) => x.includes('level=~'))) expect(e).toMatch(/\| json \| level=~/);
+    expect(exprs.find((e) => e.startsWith('sum by (service_name, level)'))).toMatch(/\{app="shop"\} \| json \[\d+s\]/);
   });
 });

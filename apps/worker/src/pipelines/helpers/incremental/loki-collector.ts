@@ -74,6 +74,8 @@ export interface LokiConfigRow {
   label: string;
   datasource_uid: string;
   level_label: string;
+  /** none | json | logfmt; read through to_jsonb so a worker ahead of migration 1840 reads 'none'. */
+  level_parser: string;
   /** NULL-safe before migration 1839, which adds the column: read through to_jsonb. */
   service_label: string;
   max_concurrent_queries: number;
@@ -99,6 +101,7 @@ export async function loadLokiConfig(db: WorkerDatabaseService, id: string): Pro
   const rows = await db.query<LokiConfigRow>(
     `SELECT c.id, c.label, c.datasource_uid, c.level_label,
             COALESCE(to_jsonb(c)->>'service_label', 'service_name') AS service_label,
+            COALESCE(to_jsonb(c)->>'level_parser', 'none') AS level_parser,
             c.max_concurrent_queries, c.organization_id,
             g.label AS grafana_label, COALESCE(NULLIF(g.server_url, ''), g.client_url) AS base_url,
             g.org_id AS grafana_org_id, g.api_key, g.username, g.password, g.use_proxy,

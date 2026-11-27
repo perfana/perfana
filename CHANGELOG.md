@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.110] - 2026-11-27
+
+### Added
+- **A Loki connection can take its log level from the line itself.** A new **Level parser** setting (None, json or logfmt) sits beside the level label. With json or logfmt, Perfana extracts the level field from each line before counting or filtering on it. That covers JSON or logfmt logs on a Loki that does not attach `detected_level`. The starter panels, the card's error rate, the per-application error rates and the error and warning lines all apply it.
+- **Test connection finds where the level is.** It checks the last hour of lines: the configured label first, then `detected_level`, then `| json` and `| logfmt` with that field or `level`. It names the first source on which most lines carry a level, and **Use it** fills in the parser and label. A label carried only by the newest lines, as on a Loki that has just turned on level discovery, does not beat a parser that finds the level on every line.
+- **Cogs on the Loki Logs and Splunk Logs cards** open the system's configuration on the Loki or Splunk tab, scoped to the run's environment and workload, like the other cards.
+
+### Fixed
+- **The Loki Logs card no longer reports a 0% error rate it cannot know.** When every line of the level panel is `(none)`, the level label is on none of the run's lines. The card now says so, shows no error rate, and explains how to set the parser. Before, it showed 0% error lines while listing the run's error lines a few rows down.
+- Migration 1840 adds `loki_configs.level_parser` (default `none`, so existing connections are unchanged). Run it before the API reaches this version. Panels created earlier keep their LogQL: re-add the two level starter panels after changing the parser, then re-analyse the run.
+
 ## [0.2.97.109] - 2026-11-27
 
 ### Added

@@ -15,10 +15,14 @@ import {
   lokiLabelValues,
   lokiPanelPoints,
   lokiTestConnection,
+  detectLokiLevelSource,
+  levelParserStage,
   LokiConnection,
   LokiError,
   LokiMatcher,
   LokiRequestOptions,
+  type LokiLevelSource,
+  NO_LABEL_VALUE,
   normalizeLevel,
   parseAggregation,
   selectMappings,
@@ -61,13 +65,14 @@ const NEW_PATTERN_BASELINE_RUNS = 5;
 
 /**
  * The starter panels, created per scope by POST /loki/queries/starter. `{level}` and `{service}`
- * are replaced with the connection's level label and the chosen service label.
+ * are replaced with the connection's level label and the chosen service label, `{parser}` with the
+ * stage that extracts the level (` | json`, ` | logfmt`, or nothing).
  */
 export const STARTER_PANELS = [
-  { panelTitle: LOKI_STARTER_PANEL_TITLES[0], logql: '$entities', splitBy: '{level}', aggregation: 'count' },
+  { panelTitle: LOKI_STARTER_PANEL_TITLES[0], logql: '$entities{parser}', splitBy: '{level}', aggregation: 'count' },
   {
     panelTitle: LOKI_STARTER_PANEL_TITLES[1],
-    logql: '$entities | {level}=~"(?i)(error|err|fatal|critical|crit|panic|emerg|alert|severe)"',
+    logql: '$entities{parser} | {level}=~"(?i)(error|err|fatal|critical|crit|panic|emerg|alert|severe)"',
     splitBy: '{service}',
     aggregation: 'count',
   },
@@ -82,6 +87,23 @@ export interface ScopeRef {
 
 const errMsg = (err: unknown): string =>
   err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
+
+/** The connection test's sentence about the level: found as configured, found elsewhere (and what to set), or nowhere. */
+export function describeLevelProbe(configured: { parser: string; label: string }, found: LokiLevelSource | null): string {
+  const how = (s: { parser: string; label: string }) => (s.parser === 'none' ? `the label "${s.label}"` : `"| ${s.parser}" with the field "${s.label}"`);
+  if (!found) return `No log level found with ${how(configured)}, nor with | json or | logfmt: error rates will read 0 until the lines carry one.`;
+  const share = found.coverage < 0.95 ? `, on ${Math.round(found.coverage * 100)}% of lines` : '';
+  if (found.parser === configured.parser && found.label === configured.label) return `Levels found with ${how(found)}: ${found.levels.join(', ')}${share}.`;
+  return `${how(configured)} carries no level on most of these lines, but ${how(found)} does (${found.levels.join(', ')}${share}): set the level parser to "${found.parser}" and the level label to "${found.label}".`;
+}
+
+/**
+ * A level panel whose every series is `(none)`: the split label is on none of the run's lines, so
+ * the panel cannot tell an error from anything else and its "0 errors" means nothing.
+ */
+export function levelLabelMissing(series: Array<{ name: string }>): boolean {
+  return series.length > 0 && series.every((s) => s.name === NO_LABEL_VALUE);
+}
 
 /** `{ totalLines, errorLines }` from a level panel's series totals. */
 export function levelTotals(series: Array<{ name: string; total: number | null }>): { total: number; errors: number } | null {
@@ -187,6 +209,7 @@ export class LokiService {
       datasourceUid: dto.datasourceUid.trim(),
       datasourceName: dto.datasourceName?.trim() || null,
       levelLabel: dto.levelLabel?.trim() || 'detected_level',
+      levelParser: dto.levelParser ?? 'none',
       serviceLabel: dto.serviceLabel?.trim() || 'service_name',
       maxConcurrentQueries: dto.maxConcurrentQueries ?? 2,
       organizationId: instance.organizationId,
@@ -207,6 +230,7 @@ export class LokiService {
     if (dto.datasourceUid !== undefined) entity.datasourceUid = dto.datasourceUid.trim();
     if (dto.datasourceName !== undefined) entity.datasourceName = dto.datasourceName?.trim() || null;
     if (dto.levelLabel !== undefined) entity.levelLabel = dto.levelLabel.trim() || 'detected_level';
+    if (dto.levelParser !== undefined) entity.levelParser = dto.levelParser;
     if (dto.serviceLabel !== undefined) entity.serviceLabel = dto.serviceLabel.trim() || 'service_name';
     if (dto.maxConcurrentQueries !== undefined) entity.maxConcurrentQueries = dto.maxConcurrentQueries;
     entity.updatedBy = userId;
@@ -231,14 +255,18 @@ export class LokiService {
   async testConnection(dto: TestLokiConnectionDto, userId: string, roles: string[]) {
     const instance = await this.loadGrafanaInstance(dto.grafanaInstanceId, userId, roles);
     await this.requireCapability(userId, roles, instance.organizationId, Capability.IntegrationLokiCreate);
-    return this.probe({ ...this.grafanaConnection(instance), datasourceUid: dto.datasourceUid }, await this.requestOptions(instance));
+    return this.probe({ ...this.grafanaConnection(instance), datasourceUid: dto.datasourceUid }, await this.requestOptions(instance), {
+      label: dto.levelLabel?.trim() || 'detected_level', parser: dto.levelParser ?? 'none', serviceLabel: dto.serviceLabel?.trim() || 'service_name',
+    });
   }
 
   async testSavedConnection(id: string, userId: string, roles: string[]) {
     const config = await this.loadConfig(id, userId, roles);
     await this.requireCapability(userId, roles, config.organizationId, Capability.IntegrationLokiUpdate);
     const instance = config.grafanaInstance!;
-    return this.probe(this.connectionOf(config, instance), await this.requestOptions(instance));
+    return this.probe(this.connectionOf(config, instance), await this.requestOptions(instance), {
+      label: config.levelLabel, parser: config.levelParser || 'none', serviceLabel: config.serviceLabel || 'service_name',
+    });
   }
 
   /** Label names, for the mapping editor. Lists what the token can see: a configuration action. */
@@ -426,7 +454,7 @@ export class LokiService {
     const config = await this.requireSameOrgConfig(scope.lokiConfigId, sut, userId, roles);
     const titles = new Set(existing.map((q) => q.panelTitle));
     const service = scope.serviceLabel?.trim() || config.serviceLabel || 'service_name';
-    const fill = (s: string) => s.replace(/\{level\}/g, config.levelLabel).replace(/\{service\}/g, service);
+    const fill = (s: string) => s.replace(/\{parser\}/g, levelParserStage(config.levelParser)).replace(/\{level\}/g, config.levelLabel).replace(/\{service\}/g, service);
     const created: LokiQuery[] = [];
     for (const p of STARTER_PANELS) {
       if (titles.has(p.panelTitle)) continue;
@@ -600,15 +628,24 @@ export class LokiService {
     });
 
     const insights = await this.runInsights(run.testRunId, run.systemUnderTestId, run.testEnvironment, run.workload, configById, start, end, mappings);
+    // A level panel with nothing but `(none)` means the level label is on none of the lines. The
+    // per-application snapshot grouped on the same label, so it holds no errors either: show no
+    // error rate rather than a 0% that reads as "clean".
+    const levelPanel = panels.find((p) => p.isLevelPanel && p.series.length > 0);
+    const levelMissing = !!levelPanel && levelLabelMissing(levelPanel.series);
     // The level panel's ratio when there is one; otherwise the per-application snapshot's.
-    const errorRate = (await this.errorRate(run.testRunId, panels)) ?? errorRateFromServices(insights.services);
+    const errorRate = levelMissing ? null : (await this.errorRate(run.testRunId, panels)) ?? errorRateFromServices(insights.services);
     const firstConfig = configById.get(queries[0]!.lokiConfigId);
 
     return {
       configured: true as const,
       connection: firstConfig
-        ? { id: firstConfig.id, label: firstConfig.label, levelLabel: firstConfig.levelLabel, serviceLabel: firstConfig.serviceLabel || 'service_name' }
+        ? {
+          id: firstConfig.id, label: firstConfig.label, levelLabel: firstConfig.levelLabel,
+          levelParser: firstConfig.levelParser || 'none', serviceLabel: firstConfig.serviceLabel || 'service_name',
+        }
         : null,
+      levelLabelMissing: levelMissing,
       sources: mappings.map((m) => ({
         id: m.id, level: m.level, selector: m.selector, labels: m.labels,
         exploreUrl: explore(configById.get(m.lokiConfigId), m.selector),
@@ -630,7 +667,7 @@ export class LokiService {
     panels: Array<{ isLevelPanel: boolean; panelId: number; applicationDashboardId: string | null; metricsSourceId: string | null; series: Array<{ name: string; total: number | null; mean: number | null }> }>,
   ) {
     const levelPanel = panels.find((p) => p.isLevelPanel && p.series.length > 0);
-    if (!levelPanel) return null;
+    if (!levelPanel || levelLabelMissing(levelPanel.series)) return null;
     const totals = levelTotals(levelPanel.series);
     if (!totals) return null;
     const pct = totals.total > 0 ? (totals.errors / totals.total) * 100 : 0;
@@ -950,20 +987,26 @@ export class LokiService {
     }
   }
 
-  private async probe(conn: LokiConnection, opts: LokiRequestOptions) {
+  /**
+   * Lists the labels, then checks where the lines keep their level (`detectLokiLevelSource`) over
+   * streams picked by the service label, or the first label Loki reports. `level` is what was found;
+   * the message says whether the configured parser and label find levels, and if not, which would.
+   */
+  private async probe(conn: LokiConnection, opts: LokiRequestOptions, configured: { label: string; parser: string; serviceLabel: string }) {
+    let labels: string[];
     try {
-      const { labels } = await lokiTestConnection(conn, opts);
-      return {
-        success: true,
-        message: labels.length > 0
-          ? `Connected. Loki has ${labels.length} label${labels.length === 1 ? '' : 's'} in the last hour: ${labels.slice(0, 8).join(', ')}${labels.length > 8 ? ', …' : ''}`
-          : 'Connected, but Loki reported no labels in the last hour. Check the datasource uid and that logs are flowing.',
-        labels,
-      };
+      ({ labels } = await lokiTestConnection(conn, opts));
     } catch (err) {
       this.logger.warn(`Loki connection test via ${hostForLog(conn.baseUrl)} failed: ${errMsg(err)}${err instanceof LokiError && err.detail ? ` | cause: ${err.detail}` : ''}`);
       return { success: false, message: errMsg(err) };
     }
+    if (labels.length === 0) {
+      return { success: true, message: 'Connected, but Loki reported no labels in the last hour. Check the datasource uid and that logs are flowing.', labels, level: null };
+    }
+    const selectorLabel = labels.includes(configured.serviceLabel) ? configured.serviceLabel : labels[0]!;
+    const level = await detectLokiLevelSource(conn, `{${selectorLabel}=~".+"}`, configured, opts);
+    const connected = `Connected. Loki has ${labels.length} label${labels.length === 1 ? '' : 's'} in the last hour: ${labels.slice(0, 8).join(', ')}${labels.length > 8 ? ', …' : ''}.`;
+    return { success: true, message: `${connected} ${describeLevelProbe(configured, level)}`, labels, level };
   }
 
   private grafanaConnection(g: GrafanaInstance): Omit<LokiConnection, 'datasourceUid'> {
@@ -1014,6 +1057,7 @@ export class LokiService {
       datasourceUid: c.datasourceUid,
       datasourceName: c.datasourceName ?? null,
       levelLabel: c.levelLabel,
+      levelParser: c.levelParser || 'none',
       serviceLabel: c.serviceLabel || 'service_name',
       maxConcurrentQueries: c.maxConcurrentQueries,
       organizationId: c.organizationId,

@@ -20,6 +20,7 @@ import {
   isWarnLevel,
   withStreamMatcher,
   serviceLevelExpr,
+  levelParserStage,
   labelFilter,
   levelOfLine,
   lokiLogLines,
@@ -214,8 +215,10 @@ export async function snapshotLokiInsights(
     if (mappings.length === 0) {continue;}
     const level = config.level_label;
     const serviceLabel = config.service_label || 'service_name';
-    const errorFilter = `| ${level}=~"${ERROR_RE}"`;
-    const warnFilter = `| ${level}=~"${WARN_RE}"`;
+    // The parser that extracts the level goes in front of every filter on it (`| json | level=~…`).
+    const parse = levelParserStage(config.level_parser).trim();
+    const errorFilter = `${parse ? `${parse} ` : ''}| ${level}=~"${ERROR_RE}"`;
+    const warnFilter = `${parse ? `${parse} ` : ''}| ${level}=~"${WARN_RE}"`;
 
     // 1. Newest error and warning lines per mapping. A stream without the level label matches no
     //    label filter, so an empty answer falls back to a line filter on the usual words.
@@ -256,7 +259,7 @@ export async function snapshotLokiInsights(
       apiAvailable = false;
       for (const m of mappings) {
         try {
-          let lines = await lokiLogLines(conn, buildLogExpr(m, `| ${level}=~"${ERROR_RE.slice(0, -1)}|warn|warning)"`), from, to, FALLBACK_SAMPLE_LINES, opts);
+          let lines = await lokiLogLines(conn, buildLogExpr(m, `${parse ? `${parse} ` : ''}| ${level}=~"${ERROR_RE.slice(0, -1)}|warn|warning)"`), from, to, FALLBACK_SAMPLE_LINES, opts);
           if (lines.length === 0) {lines = await lokiLogLines(conn, buildLogExpr(m, ERROR_LINE_FILTER), from, to, FALLBACK_SAMPLE_LINES, opts);}
           sampled.push(...lines);
         } catch (err) {
@@ -274,7 +277,7 @@ export async function snapshotLokiInsights(
     const evalEnd = new Date(from.getTime() + Math.ceil((to.getTime() - from.getTime()) / (step * 1000)) * step * 1000);
     for (const m of mappings) {
       try {
-        const series = await lokiRangeQuery(conn, serviceLevelExpr(m, serviceLabel, level, step), new Date(from.getTime() + step * 1000), evalEnd, step, opts);
+        const series = await lokiRangeQuery(conn, serviceLevelExpr(m, serviceLabel, level, step, config.level_parser), new Date(from.getTime() + step * 1000), evalEnd, step, opts);
         serviceTotalsFrom(series, serviceLabel, level, totals);
       } catch (err) {
         result.errors.push(`Loki lines per ${serviceLabel} for ${buildStreamSelector(m.matchers)}: ${errMsg(err)}`);

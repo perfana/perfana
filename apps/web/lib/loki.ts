@@ -18,6 +18,8 @@ export interface LokiConfig {
   datasourceUid: string;
   datasourceName: string | null;
   levelLabel: string;
+  /** How the level label is obtained: none (on the line already), json or logfmt. Absent from an API older than v0.2.97.110. */
+  levelParser?: LokiLevelParser;
   /** The label that names an application (default service_name), for the card's Applications view. */
   serviceLabel: string;
   maxConcurrentQueries: number;
@@ -30,8 +32,29 @@ export interface LokiConfigInput {
   datasourceUid?: string;
   datasourceName?: string | null;
   levelLabel?: string;
+  levelParser?: LokiLevelParser;
   serviceLabel?: string;
   maxConcurrentQueries?: number;
+}
+
+export type LokiLevelParser = 'none' | 'json' | 'logfmt';
+export const LOKI_LEVEL_PARSERS: LokiLevelParser[] = ['none', 'json', 'logfmt'];
+
+/** Where the connection test found the lines' level. */
+export interface LokiLevelSource {
+  parser: LokiLevelParser;
+  label: string;
+  levels: string[];
+  /** Share of the hour's lines (0..1) carrying one of those levels. */
+  coverage: number;
+}
+
+export interface LokiConnectionTest {
+  success: boolean;
+  message: string;
+  labels?: string[];
+  /** null when no level was found; absent when the test failed or the API predates the check. */
+  level?: LokiLevelSource | null;
 }
 
 export interface LokiDatasource {
@@ -126,11 +149,13 @@ export const updateLokiConfig = (id: string, input: Omit<LokiConfigInput, 'grafa
 export const deleteLokiConfig = (id: string) =>
   call<void>(`/loki/configs/${id}`, 'Failed to delete the Loki connection', { method: 'DELETE' });
 
-export const testLokiConnection = (input: { grafanaInstanceId: string; datasourceUid: string }) =>
-  call<{ success: boolean; message: string; labels?: string[] }>('/loki/configs/test-connection', 'Connection test failed', { method: 'POST', ...json(input) });
+export const testLokiConnection = (input: {
+  grafanaInstanceId: string; datasourceUid: string; levelLabel?: string; levelParser?: LokiLevelParser; serviceLabel?: string;
+}) =>
+  call<LokiConnectionTest>('/loki/configs/test-connection', 'Connection test failed', { method: 'POST', ...json(input) });
 
 export const testSavedLokiConnection = (id: string) =>
-  call<{ success: boolean; message: string; labels?: string[] }>(`/loki/configs/${id}/test-connection`, 'Connection test failed', { method: 'POST' });
+  call<LokiConnectionTest>(`/loki/configs/${id}/test-connection`, 'Connection test failed', { method: 'POST' });
 
 export const fetchLokiLabels = (id: string, hours = 24, refresh = false) =>
   call<string[]>(`/loki/configs/${id}/labels?hours=${hours}${refresh ? '&refresh=true' : ''}`, 'Failed to list Loki labels');
@@ -270,7 +295,9 @@ export type LokiRunSummary =
   | { configured: false }
   | {
       configured: true;
-      connection: { id: string; label: string; levelLabel: string; serviceLabel?: string } | null;
+      connection: { id: string; label: string; levelLabel: string; levelParser?: LokiLevelParser; serviceLabel?: string } | null;
+      /** True when the level panel holds nothing but `(none)`: the level label is on none of the run's lines. */
+      levelLabelMissing?: boolean;
       sources: Array<Pick<LokiStreamMapping, 'id' | 'level' | 'selector' | 'labels'> & { exploreUrl: string | null }>;
       window: { from: string; to: string } | null;
       errorRate: LokiErrorRate | null;

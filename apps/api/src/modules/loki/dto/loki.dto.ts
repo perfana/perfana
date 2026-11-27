@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
-import { LOKI_MATCHER_OPS, type LokiMatcherOp } from '@perfana/shared/services/loki/client';
+import { LOKI_LEVEL_PARSERS, LOKI_MATCHER_OPS, type LokiLevelParser, type LokiMatcherOp } from '@perfana/shared/services/loki/client';
 
 const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -26,6 +26,13 @@ export class CreateLokiConfigDto {
   @IsOptional() @IsString() @Matches(LABEL_NAME) @MaxLength(100)
   levelLabel?: string;
 
+  @ApiPropertyOptional({
+    enum: LOKI_LEVEL_PARSERS, default: 'none',
+    description: 'How the level label is obtained: none (a stream label or structured metadata), or the json / logfmt parser that extracts it from the line',
+  })
+  @IsOptional() @IsIn(LOKI_LEVEL_PARSERS as unknown as string[])
+  levelParser?: LokiLevelParser;
+
   @ApiPropertyOptional({ description: 'Label that names an application, for the per-application view', default: 'service_name' })
   @IsOptional() @IsString() @Matches(LABEL_NAME) @MaxLength(100)
   serviceLabel?: string;
@@ -39,6 +46,18 @@ export class UpdateLokiConfigDto extends PartialType(OmitType(CreateLokiConfigDt
 export class TestLokiConnectionDto {
   @ApiProperty() @IsUUID() grafanaInstanceId!: string;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(255) @Matches(/^[\w.-]+$/) datasourceUid!: string;
+
+  @ApiPropertyOptional({ description: 'The level label to check (default detected_level)' })
+  @IsOptional() @IsString() @Matches(LABEL_NAME) @MaxLength(100)
+  levelLabel?: string;
+
+  @ApiPropertyOptional({ enum: LOKI_LEVEL_PARSERS })
+  @IsOptional() @IsIn(LOKI_LEVEL_PARSERS as unknown as string[])
+  levelParser?: LokiLevelParser;
+
+  @ApiPropertyOptional({ description: 'The service label, used to pick streams for the level check (default service_name)' })
+  @IsOptional() @IsString() @Matches(LABEL_NAME) @MaxLength(100)
+  serviceLabel?: string;
 }
 
 export class LokiMatcherDto {
