@@ -11,7 +11,7 @@
 import { useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse, Divider, IconButton, Link, Menu,
-  Table, TableBody, TableCell, TableHead, TableRow, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
+  Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import { ExpandLess, ExpandMore, MoreVert, OpenInNew } from '@mui/icons-material';
 import { useEffect } from 'react';
@@ -30,6 +30,9 @@ import type { CommentItemCounts } from '@/lib/test-run-comments';
 const LOKI_ORANGE = '#F2A900';
 const MONO = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 };
 const MAX_ROWS = 10;
+/** Applications that get a tab of their own, worst first; the rest are reached from the All tab's table. */
+const MAX_APP_TABS = 20;
+const ALL_TAB = '__all__';
 const PATTERN_ROWS = 15;
 const SAMPLE_ROWS = 10;
 
@@ -285,21 +288,11 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                 {configured.levelLabelMissing && <LevelMissingAlert connection={configured.connection} />}
 
                 {services.length > 0 && (
-                  <ApplicationsSection services={services} serviceLabel={serviceLabel} selected={scope?.app ?? null} onSelect={setApp} />
+                  <ApplicationTabs services={services} serviceLabel={serviceLabel} selected={scope?.app ?? null} onSelect={setApp} />
                 )}
 
-                {scope?.app && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                    <Typography variant="body2" color="text.secondary">Showing</Typography>
-                    <Chip
-                      size="small"
-                      color="primary"
-                      label={`${serviceLabel}=${scope.app}`}
-                      onDelete={() => setApp(null)}
-                      sx={{ ...MONO, fontSize: 12 }}
-                    />
-                    <Typography variant="caption" color="text.secondary">Clear to see all applications</Typography>
-                  </Box>
+                {services.length > 0 && !scope?.app && (
+                  <ApplicationsSection services={services} serviceLabel={serviceLabel} onSelect={setApp} />
                 )}
 
                 {scope && <KpiStrip scope={scope} trend={scopeTrend} />}
@@ -335,11 +328,58 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
 }
 
 /**
- * One row per application (a value of the connection's service label), most error lines first.
- * Clicking a row narrows the KPIs, patterns, lines and service-split panels to that application.
+ * All, then one tab per application (a value of the connection's service label), worst first, each
+ * with its error lines. A tab narrows the KPIs, patterns, lines and service-split panels below it.
+ * An application past MAX_APP_TABS still gets a tab while it is the selected one (chosen from the
+ * All table), so the bar always shows where you are.
  */
-function ApplicationsSection({ services, serviceLabel, selected, onSelect }: {
+function ApplicationTabs({ services, serviceLabel, selected, onSelect }: {
   services: LokiRunService[]; serviceLabel: string; selected: string | null; onSelect: (app: string | null) => void;
+}) {
+  const named = services.filter((s) => s.service !== NO_SERVICE);
+  const tabs = named.slice(0, MAX_APP_TABS);
+  const extra = selected && !tabs.some((s) => s.service === selected) ? named.find((s) => s.service === selected) : undefined;
+  if (extra) tabs.push(extra);
+  return (
+    <Tabs
+      value={selected ?? ALL_TAB}
+      onChange={(_, v: string) => onSelect(v === ALL_TAB ? null : v)}
+      variant="scrollable"
+      scrollButtons="auto"
+      allowScrollButtonsMobile
+      aria-label={`Applications by ${serviceLabel}`}
+      sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', minHeight: 40, '& .MuiTab-root': { minHeight: 40, textTransform: 'none' } }}
+    >
+      <Tab value={ALL_TAB} label={`All applications (${named.length})`} />
+      {tabs.map((s) => {
+        const worse = errorRateTrend(s) === 'worse';
+        return (
+          <Tab
+            key={s.service}
+            value={s.service}
+            aria-label={s.service}
+            label={(
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <Box component="span" sx={MONO}>{s.service}</Box>
+                {s.errorLines > 0 && (
+                  <Chip size="small" color={worse ? 'error' : 'warning'} variant={worse ? 'filled' : 'outlined'} label={`${fmt(s.errorLines)}${worse ? ' ↑' : ''}`} sx={{ height: 18, fontSize: 10 }} />
+                )}
+                {s.isNew && <Chip size="small" color="error" label="NEW" sx={{ height: 18, fontSize: 10 }} />}
+              </Box>
+            )}
+          />
+        );
+      })}
+    </Tabs>
+  );
+}
+
+/**
+ * The All tab's overview: one row per application, most error lines first. A row opens that
+ * application's tab.
+ */
+function ApplicationsSection({ services, serviceLabel, onSelect }: {
+  services: LokiRunService[]; serviceLabel: string; onSelect: (app: string | null) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
   const rows = showAll ? services : services.slice(0, MAX_ROWS);
@@ -348,7 +388,7 @@ function ApplicationsSection({ services, serviceLabel, selected, onSelect }: {
     <Box sx={{ mb: 3 }}>
       <Typography variant="subtitle1" fontWeight={600}>Applications</Typography>
       <Typography variant="caption" color="text.secondary">
-        Lines per <code>{serviceLabel}</code> in the run, against the same application in the baseline runs. Select one to narrow the card to it.
+        Lines per <code>{serviceLabel}</code> in the run, against the same application in the baseline runs. Open a row, or its tab above, to see that application alone.
       </Typography>
       <Table size="small" sx={{ mt: 1, '& td, & th': { px: 1 } }}>
         <TableHead>
@@ -365,29 +405,28 @@ function ApplicationsSection({ services, serviceLabel, selected, onSelect }: {
         <TableBody>
           {rows.map((s) => {
             const none = s.service === NO_SERVICE;
-            const isSelected = selected === s.service;
             const t = errorRateTrend(s);
             return (
               <TableRow
                 key={s.service}
                 hover={!none}
-                selected={isSelected}
-                onClick={none ? undefined : () => onSelect(isSelected ? null : s.service)}
+                onClick={none ? undefined : () => onSelect(s.service)}
                 sx={{ cursor: none ? 'default' : 'pointer' }}
               >
                 <TableCell sx={MONO}>
                   {none ? (
                     <Tooltip title={`Lines with no ${serviceLabel} label`}><span>(no {serviceLabel})</span></Tooltip>
                   ) : (
-                    <Box
+                    <Link
                       component="button"
                       type="button"
-                      aria-pressed={isSelected}
-                      onClick={(e) => { e.stopPropagation(); onSelect(isSelected ? null : s.service); }}
-                      sx={{ all: 'unset', cursor: 'pointer', '&:focus-visible': { outline: 2, outlineColor: 'primary.main' } }}
+                      underline="hover"
+                      aria-label={`Show ${s.service}`}
+                      onClick={(e) => { e.stopPropagation(); onSelect(s.service); }}
+                      sx={{ ...MONO, verticalAlign: 'baseline' }}
                     >
                       {s.service}
-                    </Box>
+                    </Link>
                   )}
                   {s.isNew && <Chip size="small" color="error" label="NEW" sx={{ height: 18, fontSize: 10, ml: 0.75 }} />}
                 </TableCell>

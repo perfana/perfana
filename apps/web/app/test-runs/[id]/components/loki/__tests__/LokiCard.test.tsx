@@ -104,8 +104,10 @@ it('lists the applications, worst first, and flags the one whose error rate rose
   mockSummary.mockResolvedValue(configured);
   render(<LokiCard testRun={testRun} expanded onExpand={() => {}} />);
   expect(await screen.findByText('Applications')).toBeInTheDocument();
-  const checkout = screen.getByRole('button', { name: 'checkout' });
-  expect(checkout).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: 'Show checkout' })).toBeInTheDocument();
+  // Every application with lines gets a tab, after All.
+  expect(screen.getAllByRole('tab').map((t) => t.getAttribute('aria-label') ?? t.textContent)).toEqual(['All applications (2)', 'checkout', 'payments']);
+  expect(screen.getByRole('tab', { name: /All applications/ })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('link', { name: 'Open checkout in Grafana Explore' })).toHaveAttribute('href', 'https://grafana/explore?svc=checkout');
   // An application with no lines in the run is left out.
   expect(screen.queryByText(/no service_name/)).not.toBeInTheDocument();
@@ -117,17 +119,21 @@ it('narrows patterns and lines to the selected application, and clears back to a
   expect(await screen.findByText(/db timeout after <_>/)).toBeInTheDocument();
   expect(screen.queryByText(/card declined <_>/)).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'payments' }));
-  expect(screen.getByRole('button', { name: 'payments' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByText('service_name=payments')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'payments' }));
+  expect(screen.getByRole('tab', { name: 'payments' })).toHaveAttribute('aria-selected', 'true');
+  // The overview table belongs to the All tab only.
+  expect(screen.queryByText('Applications')).not.toBeInTheDocument();
   expect(screen.getByText(/card declined <_>/)).toBeInTheDocument();
   expect(screen.queryByText(/db timeout after <_>/)).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: /card declined 4242/ })).toBeInTheDocument();
   // The level panel is not split by service_name, so it keeps every series.
   expect(screen.getByText('Panels not split by service_name show all applications.')).toBeInTheDocument();
 
-  fireEvent.click(screen.getByTestId('CancelIcon'));
+  fireEvent.click(screen.getByRole('tab', { name: /All applications/ }));
   expect(screen.getByText(/db timeout after <_>/)).toBeInTheDocument();
+  // A row of the All table opens that application's tab too.
+  fireEvent.click(screen.getByRole('button', { name: 'Show checkout' }));
+  expect(screen.getByRole('tab', { name: 'checkout' })).toHaveAttribute('aria-selected', 'true');
 });
 
 it('scopes the KPIs to an application, falling back to all-streams lines carrying its label', () => {
