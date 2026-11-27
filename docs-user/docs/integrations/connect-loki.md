@@ -50,7 +50,7 @@ Setting Loki up has two parts: connect it once for the organization, then choose
 
 ## Result
 
-New test runs of that workload collect the Loki panels while the test runs and again at analysis. A **Loki Logs** card appears in the run's Root Cause Analysis tab with:
+New test runs of that workload collect the Loki panels while the test runs and again at analysis. A **Loki Logs** card appears in the run's Root Cause Analysis tab. Everything on it covers the whole test run, ramp-up and ramp-down included, and so do its links to Grafana Explore. The card shows:
 
 - a **Baseline** picker, with the same choices as the Compare card: the run's **control group** (the earlier runs anomaly detection compares it with; the default when it has one) or any run of the same workload. Under it the card names the runs it compared with. Without a control group and with nothing picked, it compares with the five previous runs and says so;
 - the **error rate** (error lines as a share of all lines) against that baseline;
