@@ -530,49 +530,52 @@ function PatternsSection({ scope, commentCounts }: { scope: ScopeView; commentCo
             </TableRow>
           </TableHead>
           <TableBody>
-            {rows.map((p) => (
-              <TableRow
-                key={patternKey(p)}
-                data-comment-item={patternKey(p)}
-                sx={{ '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 } }}
-              >
-                <TableCell sx={{ position: 'relative', ...MONO, fontSize: 12, wordBreak: 'break-word' }}>
-                  <Box
-                    aria-hidden
-                    sx={{
-                      position: 'absolute', inset: '4px auto 4px 0', borderRadius: 0.5,
-                      width: `${Math.max(2, (p.count / top) * 100)}%`,
-                      bgcolor: isErrorName(p.level) ? 'error.main' : LOKI_ORANGE, opacity: 0.12,
-                    }}
-                  />
-                  <Box component="span" sx={{ position: 'relative' }}>
-                    {p.isNew && <Chip size="small" color="error" label="NEW" sx={{ height: 18, fontSize: 10, mr: 0.75, fontFamily: 'inherit' }} />}
-                    {p.pattern}
-                  </Box>
-                </TableCell>
-                <TableCell>{p.level ? <Chip size="small" variant="outlined" color={levelColor(p.level)} label={p.level} sx={{ height: 20 }} /> : '–'}</TableCell>
-                <TableCell align="right" sx={MONO}>
-                  {fmt(p.count)}
-                  {total > 0 && <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>{formatPct((p.count / total) * 100)}</Typography>}
-                </TableCell>
-                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
-                  <Typography variant="caption" color="text.secondary">
-                    {p.firstSeen ? new Date(p.firstSeen).toLocaleTimeString() : '–'}
-                    {p.lastSeen && p.lastSeen !== p.firstSeen ? ` – ${new Date(p.lastSeen).toLocaleTimeString()}` : ''}
-                  </Typography>
-                </TableCell>
-                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                  <RowCommentButton card="loki" itemKey={patternKey(p)} itemLabel={p.pattern.slice(0, 200)} counts={commentCounts} />
-                  {p.exploreUrl && (
-                    <Tooltip title="Open the lines matching this pattern in Grafana Explore">
-                      <IconButton size="small" component={Link} href={p.exploreUrl} target="_blank" rel="noopener noreferrer" aria-label="Open pattern in Grafana Explore">
-                        <OpenInNew fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+            {rows.map((p) => {
+              const rowId = patternKey(p);
+              return (
+                <TableRow
+                  key={rowId}
+                  data-comment-item={rowId}
+                  sx={{ '&:hover .row-comment-button, &:focus-within .row-comment-button': { opacity: 1 } }}
+                >
+                  <TableCell sx={{ position: 'relative', ...MONO, fontSize: 12, wordBreak: 'break-word' }}>
+                    <Box
+                      aria-hidden
+                      sx={{
+                        position: 'absolute', inset: '4px auto 4px 0', borderRadius: 0.5,
+                        width: `${Math.max(2, (p.count / top) * 100)}%`,
+                        bgcolor: isErrorName(p.level) ? 'error.main' : LOKI_ORANGE, opacity: 0.12,
+                      }}
+                    />
+                    <Box component="span" sx={{ position: 'relative' }}>
+                      {p.isNew && <Chip size="small" color="error" label="NEW" sx={{ height: 18, fontSize: 10, mr: 0.75, fontFamily: 'inherit' }} />}
+                      {p.pattern}
+                    </Box>
+                  </TableCell>
+                  <TableCell>{p.level ? <Chip size="small" variant="outlined" color={levelColor(p.level)} label={p.level} sx={{ height: 20 }} /> : '–'}</TableCell>
+                  <TableCell align="right" sx={MONO}>
+                    {fmt(p.count)}
+                    {total > 0 && <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>{formatPct((p.count / total) * 100)}</Typography>}
+                  </TableCell>
+                  <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {p.firstSeen ? new Date(p.firstSeen).toLocaleTimeString() : '–'}
+                      {p.lastSeen && p.lastSeen !== p.firstSeen ? ` – ${new Date(p.lastSeen).toLocaleTimeString()}` : ''}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                    <RowCommentButton card="loki" itemKey={rowId} itemLabel={p.pattern.slice(0, 200)} counts={commentCounts} />
+                    {p.exploreUrl && (
+                      <Tooltip title="Open the lines matching this pattern in Grafana Explore">
+                        <IconButton size="small" component={Link} href={p.exploreUrl} target="_blank" rel="noopener noreferrer" aria-label="Open pattern in Grafana Explore">
+                          <OpenInNew fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}
