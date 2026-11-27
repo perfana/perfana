@@ -144,7 +144,8 @@ missing label as one empty series, which the panel names `(none)`.
    must be in the same system, environment and workload (else 404, the same answer for a run that
    does not exist and one the caller cannot see); its error rate comes from its own level panel in
    `ds_metric_statistics`. Absent, the control group, else the workload's five previous completed
-   runs (`previous-runs`, error rate pooled over their level panels), else `none`. The response
+   runs (`previous-runs`, each run's error ratio from its own level panel, averaged over the runs
+   so a run with longer buckets does not weigh more), else `none`. The response
    carries `{ kind, testRunIds }`, and the card's **Baseline** picker (the Compare card's, shared as
    `BaselineTestRunSelect`) shows it and sends the pick.
 
@@ -152,7 +153,8 @@ missing label as one empty series, which the panel names `(none)`.
    aggregation `count`): error lines / all lines, where `error` is any of error, err, fatal,
    critical, crit, panic, emerg, alert, severe. The baseline is the same ratio over the run's
    baseline (item 0): the control group's pooled `ds_control_group_statistics` (the group the
-   latest ADAPT conclusion names), or a pinned or previous run's level panel. A ratio, so it compares across runs with different bucket sizes, which raw counts per
+   latest ADAPT conclusion names), or a pinned run's level panel, or the mean of the previous runs'
+   per-run ratios. A ratio, so it compares across runs with different bucket sizes, which raw counts per
    bucket do not. The card calls it worse at 1.5x the baseline ratio and ignores differences under
    0.1 percentage point.
 2. **Top log patterns**, from the snapshot, each marked `isNew` when its normalised key is in no
@@ -188,7 +190,8 @@ pass as the patterns.
 
 - **Counts.** Per mapping, `sum by (<service_label>, <level_label>) (count_over_time(<selector>
   [<step>s]))` over the run window, summed per service and split into total / error / warn lines,
-  written to `loki_run_services`. `by` reads stream labels, structured metadata and parsed labels
+  written to `loki_run_services` (owned, four RLS policies, removed by the test-run delete and in
+  the SUT export by test run, like the other snapshots). `by` reads stream labels, structured metadata and parsed labels
   alike. Lines without the label are stored as `(none)`; the card does not offer it as a scope.
 - **Per-application patterns and lines** for the 20 services with most errors, then most lines
   (`LOKI_MAX_SERVICES`): lines through a label filter (`| service_name="x"`, any kind of label);
@@ -203,7 +206,8 @@ pass as the patterns.
   baseline at all, NEW is null rather than claimed.
 - **Overall error rate** falls back to the per-application counts when the workload has no level
   panel; its baseline then weights each application's baseline ratio by its lines in this run.
-- **The card**: an Applications table, worst first, with the error rate drawn against a baseline
+- **The card**: a tab per application next to **All applications**, and on that tab an
+  Applications table, worst first, with the error rate drawn against a baseline
   tick; selecting one narrows the KPIs, patterns, lines (falling back to the all-streams lines that
   carry its label) and every panel split by the service label. A comment on an application's
   pattern switches the card to that application when it is opened.

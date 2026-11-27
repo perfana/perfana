@@ -36,6 +36,14 @@
 
     [:octicons-arrow-right-24: Connect Splunk](connect-splunk.md)
 
+-   :material-text-box-multiple-outline:{ .lg .middle } **Connect Loki**
+
+    ---
+
+    Logs as metrics through Grafana's Loki datasource, plus log patterns and error lines per run.
+
+    [:octicons-arrow-right-24: Connect Loki](connect-loki.md)
+
 -   :material-book-open-variant:{ .lg .middle } **Connect Confluence**
 
     ---

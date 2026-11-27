@@ -47,7 +47,7 @@ Perfana collects metrics from performance tests and compares them against histor
 - [[Real-time Monitoring]] — Live test run monitoring via WebSocket
 - [[RBAC]] — Role-based access control (Keycloak)
 - [[Multi-tenancy]] — Organizations and teams
-- [[Integrations]] — Grafana, Dynatrace, Splunk, Pyroscope, Tempo
+- [[Integrations]] — Grafana, Dynatrace, Splunk, Loki, Pyroscope, Tempo
 - [[Splunk Log Metrics (spec)]] - Splunk log events as per-run metrics in `ds_metrics`
 - [[Loki Log Metrics (spec)]] - Loki logs through a Grafana Loki datasource: per-run metrics, patterns and error lines
 - [[Templates]] — Standardized checks, reports, and dashboards

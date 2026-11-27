@@ -180,9 +180,12 @@ guide: `docs-user/docs/integrations/connect-loki.md`.
 - **Log metrics** — line counts, bytes, or `sum`/`avg`/`max`/`min`/`pNN` of an unwrapped field per
   bucket, split by a label, per panel
 - **Starter panels** — log lines by level, error lines by service, log volume by service
-- **Run card** — *Loki Logs* in Root Cause Analysis: error rate vs the control group, top log
-  patterns flagged new against the baseline runs' snapshots, latest error/warning lines, panel
-  totals, Grafana Explore links
+- **Run card** — *Loki Logs* in Root Cause Analysis: error rate vs a baseline picked in the card
+  (the control group, else the workload's five previous runs, or any run of the workload), a tab
+  and an Applications row per application (`service_label`), top log patterns flagged new against
+  the baseline runs' snapshots, latest error/warning lines, panel totals, Grafana Explore links
+- **ADAPT** — the *Error lines by service* starter panel is classified `USE_errors`, lower is
+  better, out of the box; the other panels stay unclassified
 
 ### Configuration
 ```
@@ -190,6 +193,7 @@ Settings → Integrations → Loki (loki_configs, org-owned)
   ├── Grafana instance (grafana_instance_id): same organization; its credentials are used
   ├── Loki datasource uid on that instance
   ├── Level parser (none, json, logfmt), level label (default detected_level) and concurrent queries
+  ├── Application label (service_label, default service_name)
 System config → Loki tab (per environment/workload)
   ├── Streams (loki_stream_mappings): label matchers, at system, environment or workload level,
   │     optional tags
