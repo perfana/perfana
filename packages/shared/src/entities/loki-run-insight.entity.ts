@@ -146,6 +146,10 @@ export class LokiRunService {
   @Column({ name: 'warn_lines', type: 'bigint' })
   warnLines!: string;
 
+  /** Lines per log level (`{"info": 4525}`); NULL on rows written before migration 1841. */
+  @Column({ name: 'level_lines', type: 'jsonb', nullable: true })
+  levelLines?: Record<string, number> | null;
+
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId!: string;
 
