@@ -123,6 +123,8 @@ export interface ServiceTotals {
   total: number;
   errors: number;
   warns: number;
+  /** Lines per normalised level; `(none)` for lines without the level label. */
+  levels: Record<string, number>;
 }
 
 /** Series of `sum by (service, level)` → totals per service, summed over the window and across mappings. */
@@ -135,8 +137,10 @@ export function serviceTotalsFrom(
   for (const s of series) {
     const service = s.labels[serviceLabel] || NO_SERVICE;
     const n = s.points.reduce((acc, p) => acc + (Number.isFinite(p.value) ? p.value : 0), 0);
-    const t = into.get(service) ?? { service, total: 0, errors: 0, warns: 0 };
+    const t = into.get(service) ?? { service, total: 0, errors: 0, warns: 0, levels: {} };
     t.total += n;
+    const level = normalizeLevel(s.labels[levelLabel]) ?? NO_SERVICE;
+    t.levels[level] = (t.levels[level] ?? 0) + n;
     if (isErrorLevel(s.labels[levelLabel])) {t.errors += n;}
     else if (isWarnLevel(s.labels[levelLabel])) {t.warns += n;}
     into.set(service, t);
@@ -183,12 +187,15 @@ export async function snapshotLokiInsights(
   if (!run.startTime || !run.endTime) {return result;}
   const from = new Date(run.startTime);
   const to = new Date(run.endTime);
-  const present = await db.query<{ patterns: boolean; services: boolean }>(
-    `SELECT to_regclass('public.loki_run_patterns') IS NOT NULL AS patterns, to_regclass('public.loki_run_services') IS NOT NULL AS services`,
+  const present = await db.query<{ patterns: boolean; services: boolean; levels: boolean }>(
+    `SELECT to_regclass('public.loki_run_patterns') IS NOT NULL AS patterns, to_regclass('public.loki_run_services') IS NOT NULL AS services,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'loki_run_services' AND column_name = 'level_lines') AS levels`,
   );
   if (!present[0]?.patterns) {return result;}
   // Before migration 1839 the service columns do not exist: take the overall snapshot only.
   const perService = !!present[0]?.services;
+  // Before migration 1841 there is no level_lines column: write the totals without it.
+  const perLevel = !!present[0]?.levels;
 
   const configIds = await getCollectableLokiConfigIds(db, run);
   if (configIds.length === 0) {return result;}
@@ -398,10 +405,16 @@ export async function snapshotLokiInsights(
       );
     }
     for (const t of serviceRows) {
+      const values = [run.testRunId, run.systemUnderTestId, t.configId, cut(t.service, 255), Math.round(t.total), Math.round(t.errors), Math.round(t.warns), org, run.teamId ?? null];
+      // A level name is free text from the line when parsed: cut it, and keep at most 50 levels.
+      const levels = Object.fromEntries(Object.entries(t.levels).sort((a, b) => b[1] - a[1]).slice(0, 50).map(([k, v]) => [cut(k, 50), Math.round(v)]));
       await em.query(
-        `INSERT INTO loki_run_services (test_run_id, system_under_test_id, loki_config_id, service, total_lines, error_lines, warn_lines, organization_id, team_id, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'worker-pipeline')`,
-        [run.testRunId, run.systemUnderTestId, t.configId, cut(t.service, 255), Math.round(t.total), Math.round(t.errors), Math.round(t.warns), org, run.teamId ?? null],
+        perLevel
+          ? `INSERT INTO loki_run_services (test_run_id, system_under_test_id, loki_config_id, service, total_lines, error_lines, warn_lines, organization_id, team_id, created_by, level_lines)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'worker-pipeline', $10::jsonb)`
+          : `INSERT INTO loki_run_services (test_run_id, system_under_test_id, loki_config_id, service, total_lines, error_lines, warn_lines, organization_id, team_id, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'worker-pipeline')`,
+        perLevel ? [...values, JSON.stringify(levels)] : values,
       );
     }
   });
