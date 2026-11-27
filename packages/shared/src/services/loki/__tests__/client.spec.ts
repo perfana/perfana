@@ -88,6 +88,22 @@ describe('validateLogqlPipeline', () => {
     expect(validateLogqlPipeline('$entities |= "x" # comment')).toMatch(/Comments/);
     expect(validateLogqlPipeline('$entities |= "$entities"')).toMatch(/outside a quoted string/);
   });
+
+  // Value: protects=pipeline cannot add grouping/aggregation/placeholders or break out via quotes; fails_when=keyword/function/quote/$ checks are dropped; why_new=only unwrap/parens covered; seam=none; no_claim=RE2 semantics
+  it('refuses grouping, aggregation functions, stray placeholders, unbalanced quotes and oversize queries', () => {
+    expect(validateLogqlPipeline('$entities | json) by (app')).toMatch(/parenthes/);
+    expect(validateLogqlPipeline('$entities | json | x="a" without app')).toMatch(/"without" is not allowed/);
+    expect(validateLogqlPipeline('$entities | json | offset 1h')).toMatch(/"offset" is not allowed/);
+    expect(validateLogqlPipeline('$entities | label_format x=sum(y)')).toMatch(/Leave out "sum\(/);
+    expect(validateLogqlPipeline('$entities |= "x" or vector(1)')).toMatch(/Leave out "vector\(/);
+    expect(validateLogqlPipeline('$entities |= $other')).toMatch(/placeholders/);
+    expect(validateLogqlPipeline('$entities |= "unclosed')).toMatch(/double quote/);
+    expect(validateLogqlPipeline('$entities |~ `unclosed')).toMatch(/backtick/);
+    expect(validateLogqlPipeline('$entities[a{b] |= "x"')).not.toBeNull();
+    expect(validateLogqlPipeline('$entities |= "' + 'x'.repeat(4000) + '"')).toMatch(/4000/);
+    // a "by" or "{" inside a string is literal, not a keyword
+    expect(validateLogqlPipeline('$entities |= "group by {app}"')).toBeNull();
+  });
 });
 
 describe('buildMetricExpr', () => {
