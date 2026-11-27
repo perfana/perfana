@@ -135,15 +135,17 @@ missing label as one empty series, which the panel names `(none)`.
 
 ## What the card shows
 
-`GET /loki/runs/:testRunId/summary[?baseline=]` returns, without asking Loki:
+`GET /loki/runs/:testRunId/summary[?baseline=]` returns, without asking Loki, everything over the
+**whole test run**, ramp-up and ramp-down included: the snapshot is taken over the run window, so the
+panel figures and error rates are too (`LokiService.fullRunSeries`, an aggregate of the run's
+`ds_metrics` rows bounded by its window), never `ds_metric_statistics`, which leaves the ramp-up out.
+Mixing the two made an application's tab show more errors than the All tab.
 
 0. **`baseline`: what every "vs baseline" figure compared with** (`LokiService.resolveBaseline`).
-   `?baseline=control-group` (`CONTROL_GROUP_BASELINE`) is the run's control group: its pooled
-   `ds_control_group_statistics` for the error rate, its five newest other runs for patterns and
-   applications (each reads a snapshot per run). `?baseline=<test run id>` is that one run, which
+   `?baseline=control-group` (`CONTROL_GROUP_BASELINE`) is the run's control group: all its other runs for the error rate
+   (`errorRateRunIds`), its five newest other runs for patterns and applications (each reads a snapshot per run). `?baseline=<test run id>` is that one run, which
    must be in the same system, environment and workload (else 404, the same answer for a run that
-   does not exist and one the caller cannot see); its error rate comes from its own level panel in
-   `ds_metric_statistics`. Absent, the control group, else the workload's five previous completed
+   does not exist and one the caller cannot see); its error rate comes from its own level panel. Absent, the control group, else the workload's five previous completed
    runs (`previous-runs`, each run's error ratio from its own level panel, averaged over the runs
    so a run with longer buckets does not weigh more), else `none`. The response
    carries `{ kind, testRunIds }`, and the card's **Baseline** picker (the Compare card's, shared as
@@ -152,16 +154,24 @@ missing label as one empty series, which the panel names `(none)`.
 1. **Error rate vs baseline.** From the level panel (split by the connection's level label,
    aggregation `count`): error lines / all lines, where `error` is any of error, err, fatal,
    critical, crit, panic, emerg, alert, severe. The baseline is the same ratio over the run's
-   baseline (item 0): the control group's pooled `ds_control_group_statistics` (the group the
-   latest ADAPT conclusion names), or a pinned run's level panel, or the mean of the previous runs'
-   per-run ratios. A ratio, so it compares across runs with different bucket sizes, which raw counts per
+   baseline (item 0): the mean of each baseline run's own ratio over its whole run (the control
+   group the latest ADAPT conclusion names, a pinned run, or the previous runs). A ratio, so it compares across runs with different bucket sizes, which raw counts per
    bucket do not. The card calls it worse at 1.5x the baseline ratio and ignores differences under
    0.1 percentage point.
 2. **Top log patterns**, from the snapshot, each marked `isNew` when its normalised key is in no
    baseline run's snapshot (item 0); `null` when no baseline run has a snapshot, so "new" is never claimed without evidence.
-   Each links to Explore with Loki's pattern filter (`|> "<pattern>"`, Loki 3.1+).
+   Each links to Explore: with Loki's pattern filter (`|> "<pattern>"`, Loki 3.1+) for a
+   patterns-API pattern, with a regex of its literal parts (`patternLineFilter`) for a sampled one,
+   whose whitespace was collapsed and text cut, so `|>` could never match it. Every Explore link
+   takes all of the connection's streams in one selector when they combine (`mergeMappings`), or
+   the application's own stream; it used to take the first stream only.
 3. **Latest error and warning lines**, from the snapshot.
-4. **Panels** with series totals (mean × buckets for additive aggregations), share of the panel,
+   On an application's tab the level panel, which is not split by application, shows that
+   application's lines per level from `loki_run_services.level_lines` (migration 1841). A snapshot
+   taken before 1841 has only error and warning counts, so the rest reads "other levels" until the
+   run is force-refetched. Its panel links come from `GET /loki/runs/:testRunId/panel-links?service=`,
+   narrowed to that application.
+4. **Panels** with series totals over the whole run (the sum of its buckets for additive aggregations), share of the panel,
    peak per bucket, an Explore link and the Open in Graphs / Compare / Trends menu.
 
 ### The snapshot (`loki-insights.ts`)
@@ -189,8 +199,9 @@ which Loki 3 derives for every stream). Independent of the panels: a snapshot, t
 pass as the patterns.
 
 - **Counts.** Per mapping, `sum by (<service_label>, <level_label>) (count_over_time(<selector>
-  [<step>s]))` over the run window, summed per service and split into total / error / warn lines,
-  written to `loki_run_services` (owned, four RLS policies, removed by the test-run delete and in
+  [<step>s]))` over the run window, summed per service and split into total / error / warn lines
+  and, since migration 1841, lines per level (`level_lines`, the 50 busiest levels; written only
+  when an `information_schema` probe finds the column), written to `loki_run_services` (owned, four RLS policies, removed by the test-run delete and in
   the SUT export by test run, like the other snapshots). `by` reads stream labels, structured metadata and parsed labels
   alike. Lines without the label are stored as `(none)`; the card does not offer it as a scope.
 - **Per-application patterns and lines** for the 20 services with most errors, then most lines

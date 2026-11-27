@@ -16,11 +16,11 @@ const run = {
   startTime: new Date('2026-11-27T10:00:00Z'), endTime: new Date('2026-11-27T11:00:00Z'), organizationId: 'org', teamId: null,
 };
 
-function makeDb(opts: { services?: boolean; config?: Partial<typeof CONFIG>; stored?: boolean } = {}) {
+function makeDb(opts: { services?: boolean; levels?: boolean; config?: Partial<typeof CONFIG>; stored?: boolean } = {}) {
   const tx = { query: vi.fn(async () => []) };
   const db = {
     query: vi.fn(async (sql: string) => {
-      if (sql.includes('to_regclass')) return [{ patterns: true, services: opts.services ?? false }];
+      if (sql.includes('to_regclass')) return [{ patterns: true, services: opts.services ?? false, levels: opts.levels ?? false }];
       if (sql.includes('FROM loki_queries')) return [{ loki_config_id: 'cfg' }];
       if (sql.includes('FROM loki_stream_mappings')) return [{ loki_config_id: 'cfg', matchers: [{ label: 'app', op: '=', value: 'shop' }], labels: [] }];
       if (sql.includes('FROM loki_configs')) return [{ ...CONFIG, ...opts.config }];
@@ -150,7 +150,7 @@ describe('per-application snapshot', () => {
       { labels: { service_name: 'b', detected_level: 'info' }, points: [{ value: 500 }] },
       { labels: { detected_level: 'error' }, points: [{ value: 9 }] },
     ], 'service_name', 'detected_level');
-    expect(totals.get('a')).toEqual({ service: 'a', total: 100, errors: 5, warns: 0 });
+    expect(totals.get('a')).toEqual({ service: 'a', total: 100, errors: 5, warns: 0, levels: { error: 5, info: 95 } });
     expect(pickServices([...totals.values()]).map((s) => s.service)).toEqual(['a', 'b']);
   });
 
@@ -181,6 +181,30 @@ describe('per-application snapshot', () => {
     expect(patterns.map((v) => [v[3], v.at(-1)])).toEqual([['all boom <_>', null], ['checkout boom <_>', 'checkout']]);
     const samples = calls.filter(([sql]) => (sql as string).includes('INSERT INTO loki_run_samples')).map(([, v]) => v as unknown[]);
     expect(samples.map((v) => [v[5], v.at(-1)])).toEqual([['checkout boom 1', 'checkout']]);
+  });
+
+  it.each([
+    [true, 'writes lines per level when migration 1841 is in'],
+    [false, 'writes the totals without level_lines before migration 1841'],
+  ] as const)('level_lines probe %s: %s', async (levels) => {
+    // Value: protects=level_lines is written only when the information_schema probe finds the column, as jsonb; fails_when=the probe is ignored (42703 before 1841) or levels go uncounted; why_new=only the no-column shape ran; seam=none; no_claim=the SQL against Postgres (mocked db)
+    fetchMock.mockImplementation(async (url: string, init: { body?: string }) => {
+      if (url.includes('/resources/patterns')) return json({ status: 'success', data: [] });
+      const expr = JSON.parse(init.body ?? '{}').queries?.[0]?.expr ?? '';
+      if (expr.startsWith('sum by (service_name, detected_level)')) return svcFrames([{ svc: 'checkout', level: 'error', n: 4 }, { svc: 'checkout', level: 'info', n: 96 }]);
+      return emptyLogs();
+    });
+    const { db, tx } = makeDb({ services: true, levels });
+    await snapshotLokiInsights(db as never, logger, run);
+    const [sql, values] = tx.query.mock.calls.map((c) => [String(c[0]), c[1] as unknown[]] as const).find(([q]) => q.includes('INSERT INTO loki_run_services'))!;
+    expect(sql.includes('level_lines')).toBe(levels);
+    expect(sql.includes('$10::jsonb')).toBe(levels);
+    if (levels) {
+      expect(values).toHaveLength(10);
+      expect(JSON.parse(values[9] as string)).toEqual({ info: 96, error: 4 });
+    } else {
+      expect(values).toHaveLength(9);
+    }
   });
 
   it('writes no service column before migration 1839', async () => {

@@ -145,6 +145,14 @@ export class LokiController {
 
   // --- test run --------------------------------------------------------------
 
+  @Get('runs/:testRunId/panel-links')
+  @ApiOperation({ summary: "Each Loki panel's Grafana Explore link narrowed to one application (the card's application tab)" })
+  @ApiQuery({ name: 'service', required: true, description: "A value of the connection's service label, or '(none)' for the lines without it" })
+  runPanelLinks(@Param('testRunId') testRunId: string, @Query('service') service: string, @UserCtx() ctx: UserContext) {
+    if (typeof service !== 'string' || service.length === 0 || service.length > 255) throw new BadRequestException('service must be 1-255 characters');
+    return this.loki.runPanelLinks(testRunId, service, ctx.userId, ctx.roles);
+  }
+
   @Get('runs/:testRunId/summary')
   @ApiOperation({ summary: 'What the test run page Loki card shows: streams, panel totals, error rate vs baseline, top patterns and error lines' })
   @ApiQuery({

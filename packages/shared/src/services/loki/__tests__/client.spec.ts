@@ -22,6 +22,8 @@ import {
   validateLogqlPipeline,
   validateMatchers,
   type LokiConnection,
+  mergeMappings,
+  patternLineFilter,
 } from '../client';
 import { grafanaAuthHeader } from '../../grafana/auth';
 
@@ -352,3 +354,37 @@ describe('detectLokiLevelSource', () => {
   });
 });
 
+
+describe('Explore link helpers', () => {
+  // Value: protects=Explore links query every stream (one selector) and a sampled pattern's filter finds its lines; fails_when=links fall back to the first stream or |> is used on a sampled pattern; why_new=new helpers; seam=none; no_claim=Explore itself
+  const m = (...pairs: Array<[string, string]>) => ({ matchers: pairs.map(([label, value]) => ({ label, op: '=' as const, value })) });
+
+  it('mergeMappings combines selectors that differ in one = label', () => {
+    expect(mergeMappings([m(['service_name', 'afterburner-be']), m(['service_name', 'afterburner-fe'])])?.matchers)
+      .toEqual([{ label: 'service_name', op: '=~', value: 'afterburner-be|afterburner-fe' }]);
+    expect(mergeMappings([m(['ns', 'perf'], ['app', 'a.b']), m(['ns', 'perf'], ['app', 'c'])])?.matchers)
+      .toEqual([{ label: 'ns', op: '=', value: 'perf' }, { label: 'app', op: '=~', value: 'a\\.b|c' }]);
+    expect(mergeMappings([m(['ns', 'a'], ['app', 'x']), m(['ns', 'b'], ['app', 'y'])])).toBeNull();
+    expect(mergeMappings([])).toBeNull();
+  });
+
+  it('patternLineFilter matches the line a sampled pattern was taken from', () => {
+    const line = '{\n    "level":"ERROR",\n    "thread":"http-nio-8080-exec-5"\n}io.Ex: failed after 120 ms.\n\tat a.B.c(B.java:42)';
+    const filter = patternLineFilter(lineShape(line), 'sampled');
+    expect(filter.startsWith('|~ ')).toBe(true);
+    const re = new RegExp(JSON.parse(filter.slice(3)).replace('(?s)', ''), 's');
+    expect(re.test(line)).toBe(true);
+    expect(patternLineFilter('a <_> b', 'loki')).toBe('|> "a <_> b"');
+  });
+
+  it('never alternates on a label held by =~ or !=, and a placeholders-only sampled pattern gets no filter', () => {
+    // Value: protects=only '=' labels become an alternation (merging =~/!= would change what the selector matches), and '<_> <_>' yields no |~ "(?s)" match-all; fails_when=the op check or empty-parts guard is removed; why_new=edges untested; seam=none; no_claim=Loki's parser
+    const mm = (...ms: Array<[string, '=' | '=~' | '!=', string]>) => ({ matchers: ms.map(([label, op, value]) => ({ label, op, value })) });
+    expect(mergeMappings([mm(['app', '=', 'a']), mm(['app', '=~', 'b.*'])])).toBeNull();
+    expect(mergeMappings([mm(['app', '=', 'a']), mm(['app', '!=', 'b'])])).toBeNull();
+    expect(mergeMappings([mm(['ns', '=~', 'p.*'], ['app', '=', 'a']), mm(['ns', '=~', 'p.*'], ['app', '=', 'b'])])?.matchers)
+      .toEqual([{ label: 'ns', op: '=~', value: 'p.*' }, { label: 'app', op: '=~', value: 'a|b' }]);
+    expect(patternLineFilter('<_> <_>', 'sampled')).toBe('');
+    expect(patternLineFilter('<_>', 'sampled')).toBe('');
+  });
+});

@@ -21,7 +21,7 @@ import type { RelatedTestRun } from '../compare/types';
 import { controlGroupOption } from '../compare/utils/compare-utils';
 import { BaselineTestRunSelect } from '../shared/BaselineTestRunSelect';
 import {
-  fetchLokiRunSummary, LokiErrorRate, LokiRunBaseline, LokiRunPanel, LokiRunPattern, LokiRunSample, LokiRunService, LokiRunSummary, NO_SERVICE,
+  fetchLokiPanelLinks, fetchLokiRunSummary, LokiErrorRate, LokiRunBaseline, LokiRunPanel, LokiRunPattern, LokiRunSample, LokiRunService, LokiRunSummary, NO_SERVICE,
 } from '@/lib/loki';
 import ExpandableCardHeader from '../shared/ExpandableCardHeader';
 import { buildSystemConfigUrl } from '@/lib/system-config-url';
@@ -174,6 +174,7 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
   const [baselineError, setBaselineError] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
   const baselineOptions = useBaselineOptions(testRun, expanded);
+  const appLinks = useAppPanelLinks(testRun.test_run_id, expanded ? app : null);
   useEffect(() => { setBaselineError(null); }, [testRun.test_run_id]);
 
   useEffect(() => {
@@ -321,8 +322,8 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
                       reloading={reloading}
                       error={baselineError}
                     />
-                    {configured.sources[0]?.exploreUrl && (
-                      <Button size="small" variant="outlined" endIcon={<OpenInNew fontSize="small" />} href={configured.sources[0].exploreUrl} target="_blank" rel="noopener noreferrer" sx={{ height: 40, whiteSpace: 'nowrap' }}>
+                    {(configured.exploreUrl ?? configured.sources[0]?.exploreUrl) && (
+                      <Button size="small" variant="outlined" endIcon={<OpenInNew fontSize="small" />} href={(configured.exploreUrl ?? configured.sources[0]?.exploreUrl)!} target="_blank" rel="noopener noreferrer" sx={{ height: 40, whiteSpace: 'nowrap' }}>
                         Open in Grafana Explore
                       </Button>
                     )}
@@ -353,11 +354,22 @@ export default function LokiCard({ testRun, expanded, onExpand }: LokiCardProps)
 
                 <Typography variant="subtitle1" fontWeight={600} sx={{ mt: 3, mb: 1 }}>Panels</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(auto-fit, minmax(360px, 1fr))' }, gap: 3 }}>
-                  {configured.panels.map((p) => (
-                    <PanelSummary key={panelKey(p)} panel={p} commentCounts={commentCounts} app={scope?.app ?? null} serviceLabel={serviceLabel} />
-                  ))}
+                  {configured.panels.map((p) => {
+                    const id = panelKey(p);
+                    return (
+                      <PanelSummary
+                        key={id}
+                        panel={p}
+                        commentCounts={commentCounts}
+                        app={scope?.app ?? null}
+                        service={scope?.app ? services.find((x) => x.service === scope.app) : undefined}
+                        link={scope?.app ? appLinks?.get(`${p.panelId}|${p.title}`) ?? null : p.link}
+                        serviceLabel={serviceLabel}
+                      />
+                    );
+                  })}
                 </Box>
-                {scope?.app && configured.panels.some((p) => p.splitBy !== serviceLabel) && (
+                {scope?.app && configured.panels.some((p) => p.splitBy !== serviceLabel && !p.isLevelPanel) && (
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                     Panels not split by {serviceLabel} show all applications.
                   </Typography>
@@ -565,7 +577,7 @@ function KpiStrip({ scope, trend }: { scope: ScopeView; trend: ReturnType<typeof
         />
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
           {scope.newPatterns === null
-            ? scope.patterns.length > 0 ? 'No baseline run has a pattern snapshot yet' : 'No pattern snapshot for this run'
+            ? scope.patterns.length > 0 ? 'No baseline run has a pattern snapshot yet' : scope.app ? 'No patterns for this application' : 'No pattern snapshot for this run'
             : `Not seen in the ${scope.baselineRuns} baseline run${scope.baselineRuns === 1 ? '' : 's'}`}
         </Typography>
       </Box>
@@ -754,15 +766,58 @@ function SamplesSection({ samples, app }: { samples: LokiRunSample[]; app: strin
   );
 }
 
-function PanelSummary({ panel, commentCounts, app, serviceLabel }: {
-  panel: LokiRunPanel; commentCounts: CommentItemCounts; app: string | null; serviceLabel: string;
+/**
+ * The selected application's levels, for the level panel, which is not split by application: from
+ * the run snapshot's lines per level for that application, which carry no per-bucket peak. A
+ * snapshot taken before per-level counts has only error and warn, and the rest as "other levels".
+ * Null outside an application tab.
+ */
+export function appLevelSeries(service: LokiRunService | undefined): LokiRunPanel['series'] | null {
+  if (!service) return null;
+  if (service.levels) {
+    return Object.entries(service.levels)
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, total]) => ({ name, total, mean: null, peak: null }));
+  }
+  const other = Math.max(0, service.totalLines - service.errorLines - service.warnLines);
+  return [
+    { name: 'error', total: service.errorLines },
+    { name: 'warn', total: service.warnLines },
+    { name: 'other levels', total: other },
+  ].filter((r) => r.total > 0).map((r) => ({ ...r, mean: null, peak: null }));
+}
+
+/**
+ * The panels' Explore links narrowed to the selected application, keyed `panelId|title`. Null on
+ * the All tab and while loading: a panel shows no link then rather than one for every application.
+ */
+function useAppPanelLinks(testRunId: string, app: string | null) {
+  const [links, setLinks] = useState<{ app: string; map: Map<string, string | null> } | null>(null);
+  useEffect(() => {
+    if (app === null) return;
+    let cancelled = false;
+    fetchLokiPanelLinks(testRunId, app)
+      .then((rows) => { if (!cancelled) setLinks({ app, map: new Map(rows.map((r) => [`${r.panelId}|${r.title}`, r.link])) }); })
+      .catch(() => { if (!cancelled) setLinks({ app, map: new Map() }); });
+    return () => { cancelled = true; };
+  }, [testRunId, app]);
+  return app !== null && links?.app === app ? links.map : null;
+}
+
+function PanelSummary({ panel, commentCounts, app, service, serviceLabel, link }: {
+  panel: LokiRunPanel; commentCounts: CommentItemCounts; app: string | null; service?: LokiRunService; serviceLabel: string;
+  /** This panel's Explore link for the scope on screen (all applications, or the selected one). */
+  link: string | null;
 }) {
   const additive = /^(count|bytes|sum\()/.test(panel.aggregation.trim());
+  const levels = app !== null && panel.isLevelPanel ? appLevelSeries(service) : null;
   // A panel split by the service label narrows to the selected application's row; its share stays
-  // a share of the whole panel, which is what "how much of the log volume is this app" asks.
-  const narrowed = app !== null && panel.splitBy === serviceLabel;
-  const rows = (narrowed ? panel.series.filter((s) => s.name === app) : panel.series).slice(0, MAX_ROWS);
-  const total = additive ? panel.series.reduce((n, s) => n + (s.total ?? 0), 0) : 0;
+  // a share of the whole panel, which is what "how much of the log volume is this app" asks. The
+  // level panel's shares are of the application's own lines.
+  const narrowed = levels !== null || (app !== null && panel.splitBy === serviceLabel);
+  const rows = (levels ?? (narrowed ? panel.series.filter((s) => s.name === app) : panel.series)).slice(0, MAX_ROWS);
+  const total = additive ? (levels ?? panel.series).reduce((n, s) => n + (s.total ?? 0), 0) : 0;
   const top = Math.max(1, ...rows.map((s) => (additive ? s.total : s.mean) ?? 0));
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const closeMenu = () => setMenuAnchor(null);
@@ -779,12 +834,17 @@ function PanelSummary({ panel, commentCounts, app, serviceLabel }: {
           <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'ui-monospace, monospace' }}>
             {panel.aggregation}{panel.splitBy ? ` by ${panel.splitBy}` : ''}
           </Typography>
+          {levels && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              {app} only, from the run&apos;s log snapshot
+            </Typography>
+          )}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <RowCommentButton card="loki" itemKey={panelKey(panel)} itemLabel={panel.title} counts={commentCounts} />
-          {panel.link && (
-            <Tooltip title="Open this query in Grafana Explore for the run window">
-              <IconButton size="small" component={Link} href={panel.link} target="_blank" rel="noopener noreferrer" aria-label={`Open ${panel.title} in Grafana Explore`}>
+          {link && (
+            <Tooltip title={app ? `Open this query for ${app} in Grafana Explore for the run window` : 'Open this query in Grafana Explore for the run window'}>
+              <IconButton size="small" component={Link} href={link} target="_blank" rel="noopener noreferrer" aria-label={`Open ${panel.title} in Grafana Explore`}>
                 <OpenInNew fontSize="small" />
               </IconButton>
             </Tooltip>

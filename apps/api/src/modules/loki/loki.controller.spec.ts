@@ -18,3 +18,23 @@ describe('LokiController label values', () => {
     expect(service.listLabelValues).toHaveBeenCalledWith(ID, 'service_name', 'u', [], expect.any(Number), undefined);
   });
 });
+
+// Value: protects=panel-links refuses an empty or over-255-char service before the service runs (the column is varchar(255)); fails_when=the guard is removed or the bound moves; why_new=new route; seam=none; no_claim=the global ValidationPipe
+describe('LokiController panel links', () => {
+  const ctx = { userId: 'u', roles: ['r'] } as never;
+  const service = { runPanelLinks: jest.fn(async () => []) };
+  const controller = new LokiController(service as never);
+  beforeEach(() => service.runPanelLinks.mockClear());
+
+  it.each([['empty', ''], ['256 characters', 'a'.repeat(256)], ['absent', undefined]])('refuses a %s service', (_name, value) => {
+    expect(() => controller.runPanelLinks('run-1', value as never, ctx)).toThrow(BadRequestException);
+    expect(service.runPanelLinks).not.toHaveBeenCalled();
+  });
+
+  it('passes 1 and 255 characters through, with the caller', () => {
+    controller.runPanelLinks('run-1', '(none)', ctx);
+    controller.runPanelLinks('run-1', 'a'.repeat(255), ctx);
+    expect(service.runPanelLinks).toHaveBeenNthCalledWith(1, 'run-1', '(none)', 'u', ['r']);
+    expect(service.runPanelLinks).toHaveBeenCalledTimes(2);
+  });
+});

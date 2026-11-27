@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.111] - 2026-11-27
+
+### Added
+- **The Loki Logs card names every log level per application.** On an application's tab, the "Log lines by level" panel shows that application's own lines per level (`info 4,768`), from the run's log snapshot, rather than every application's. Migration 1841 adds `loki_run_services.level_lines`; runs snapshotted earlier show error, warn and "other levels" until they are force-refetched.
+- **Panel Explore links follow the application tab.** On an application's tab, each panel's Grafana Explore link queries that application only: its own stream when it has one, otherwise every stream narrowed to it with a label filter. A new `GET /loki/runs/:testRunId/panel-links?service=` route serves them.
+
+### Changed
+- **The Loki Logs card shows the whole test run everywhere,** ramp-up and ramp-down included. Panel totals and the error rate now count the run's full window, the same window as the patterns, the latest lines, the Applications table and the Explore links, so an application's tab no longer shows more errors than the All tab. The baseline error rate is the average of each baseline run's own full-run rate (with a control group: all its runs), so the "vs baseline" figure on an existing run changes after this release.
+
+### Fixed
+- **Grafana Explore links from the Loki Logs card open the right lines.** They used only the first stream selector, so an application on another stream opened an empty Explore view and panel links counted one application only. They now query every stream in one selector, or the application's own stream. Links from the "(no service_name)" row select the lines without that label instead of every line.
+- **Explore links for a sampled log pattern find its lines.** Perfana's own grouping shortens lines and collapses their whitespace, which `|>` can never match; those patterns now link with a regex built from their literal parts. Patterns from Loki's patterns API keep `|>`.
+- **The header "Open in Grafana Explore" button opens every stream** of the connection, not just the first.
+- An application with no error patterns says "No patterns for this application" instead of "No pattern snapshot for this run".
+- The card no longer reads `ds_metrics` without a time bound for a run with no start time, and reads each baseline run within its own window.
+
 ## [0.2.97.110] - 2026-11-27
 
 ### Added
