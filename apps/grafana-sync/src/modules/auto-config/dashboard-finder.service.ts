@@ -356,7 +356,7 @@ export class DashboardFinderService {
     );
   }
 
-  /** The Loki twin of findSplunkPanelsByUidPattern, over `loki_queries` and the `loki-` uids. */
+  /** The Loki twin of findSplunkPanelsByUidPattern, over `loki_queries` and the `perfana-loki-` uids. */
   async findLokiPanelsByUidPattern(
     uidPattern: string,
     panelTitle: string,
@@ -366,7 +366,7 @@ export class DashboardFinderService {
     organizationId: string | undefined,
   ): Promise<Array<{ applicationDashboard: ApplicationDashboard; panelId: number }>> {
     return this.findQueryPanelsByUidPattern(
-      { table: 'loki_queries', uidLike: 'loki-%' },
+      { table: 'loki_queries', uidLike: 'perfana-loki-%' },
       uidPattern,
       panelTitle,
       application,
@@ -380,7 +380,7 @@ export class DashboardFinderService {
   private async findQueryPanelsByUidPattern(
     source: {
       table: 'dynatrace_queries' | 'splunk_queries' | 'loki_queries';
-      uidLike: 'dynatrace-%' | 'splunk-%' | 'loki-%';
+      uidLike: 'dynatrace-%' | 'splunk-%' | 'perfana-loki-%';
     },
     uidPattern: string,
     panelTitle: string,

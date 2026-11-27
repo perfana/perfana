@@ -54,7 +54,7 @@ it("fans out over every Loki dashboard, each SLO on that workload's own panel id
   await service.processProfileBenchmarks(testRun, ['loki'], [pb()]);
 
   expect(finder.findLokiPanelsByUidPattern).toHaveBeenCalledWith(
-    '^loki-',
+    '^perfana-loki-',
     'Error lines by service',
     'SHOP',
     'acceptatie',

@@ -81,6 +81,7 @@ export function inferSourceTypeFromDashboardUid(dashboardUid: string | null | un
   if (dashboardUid.startsWith('dynatrace-')) return 'dynatrace';
   if (dashboardUid.startsWith('performance-test-metrics-')) return 'performance_test';
   if (dashboardUid.startsWith('splunk-')) return 'splunk';
-  if (dashboardUid.startsWith('loki-')) return 'loki';
+  // perfana-loki-, never bare loki-: the Loki mixin's real Grafana dashboards (loki-reads, ...) use it.
+  if (dashboardUid.startsWith('perfana-loki-')) return 'loki';
   return 'grafana';
 }

@@ -9,7 +9,7 @@ const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } 
 
 const QUERY = {
   id: 'q1', loki_config_id: 'cfg', dashboard_label: 'Loki logs', application_dashboard_id: 'ad1',
-  metrics_source_id: 'ms1', dashboard_uid: 'loki-loki-logs', panel_title: 'Log lines by level', panel_id: 1,
+  metrics_source_id: 'ms1', dashboard_uid: 'perfana-loki-loki-logs', panel_title: 'Log lines by level', panel_id: 1,
   logql: '$entities', split_by: 'detected_level', aggregation: 'count', metric_unit: 'short', max_series: 20,
 };
 const CONFIG = {
@@ -80,7 +80,7 @@ describe('LokiCollector', () => {
     // The live lookback widens the window behind the cursor.
     expect(Number(body.from)).toBeLessThanOrEqual(from.getTime() - LOKI_INGEST_LOOKBACK_MS + 60_000);
     const [docs] = batchProcessor.processLokiDocuments.mock.calls[0];
-    expect(docs[0]).toMatchObject({ applicationDashboardId: 'ad1', dashboardUid: 'loki-loki-logs', panelId: 1 });
+    expect(docs[0]).toMatchObject({ applicationDashboardId: 'ad1', dashboardUid: 'perfana-loki-loki-logs', panelId: 1 });
     expect(docs[0].data.some((d: { metricName: string; value: number }) => d.metricName === 'error' && d.value === 3)).toBe(true);
   });
 

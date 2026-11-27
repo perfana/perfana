@@ -22,7 +22,8 @@ export function getSourceType(dashboard: {
   // prefix is what classifies a Splunk placeholder today. Returning the metrics source's
   // source_type from that endpoint would retire every arm of this fallback.
   if (uid.startsWith('splunk-')) return 'splunk';
-  if (uid.startsWith('loki-')) return 'loki';
+  // perfana-loki-, never bare loki-: the Loki mixin's real Grafana dashboards (loki-reads, ...) use it.
+  if (uid.startsWith('perfana-loki-')) return 'loki';
   return 'grafana';
 }
 

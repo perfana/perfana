@@ -472,9 +472,11 @@ describe('DataScienceController', () => {
         } as AvailableSourcesRequestDto);
         expect(result).toEqual({ grafana: false, dynatrace: false, splunk: false, loki: true });
         expect(String(dataSource.query.mock.calls[3][0])).toContain('FROM loki_queries WHERE enabled');
-        // Only a loki- row whose grafana_dashboards row is synthetic is excluded: a real Grafana
-        // dashboard about Loki (the Loki mixin's loki-reads, ...) shares the prefix and still counts.
-        expect(String(dataSource.query.mock.calls[4][0])).toContain("NOT (dashboard_uid LIKE 'loki-%' AND grafana_dashboard_id IN (SELECT id FROM grafana_dashboards WHERE grafana_json IS NULL))");
+        // Only Perfana's own placeholders are excluded: the Loki mixin's real dashboards (loki-reads, ...)
+        // share the bare loki- prefix and still count as Grafana.
+        const sql = String(dataSource.query.mock.calls[4][0]);
+        expect(sql).toContain("NOT LIKE 'perfana-loki-%'");
+        expect(sql).not.toContain("'loki-%'");
       });
 
       it('should return dynatrace=true when dynatrace_queries row exists', async () => {

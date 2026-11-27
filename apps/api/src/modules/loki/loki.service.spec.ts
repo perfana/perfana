@@ -150,7 +150,7 @@ describe('LokiService mappings and panels', () => {
     }, 'u', []);
     expect(saved).toMatchObject({ panelId: 3, dashboardLabel: 'Loki logs', metricsSourceId: 'source-id' });
     const insert = dataSource.manager.query.mock.calls[2] as unknown as [string, unknown[]];
-    expect(insert[1]).toEqual(expect.arrayContaining([GI, 'loki-loki-logs']));
+    expect(insert[1]).toEqual(expect.arrayContaining([GI, 'perfana-loki-loki-logs']));
   });
 });
 
@@ -415,21 +415,21 @@ describe('LokiService label cache and synthetic dashboards', () => {
     expect(cache.has('cfg:values:l599')).toBe(true);
   });
 
-  it('takes a uid of its own when a real Grafana dashboard already holds loki-<label>', async () => {
+  it('takes a uid of its own when a real Grafana dashboard already holds its uid', async () => {
     const { service, dataSource } = build();
     const sqls: Array<{ sql: string; params: unknown[] }> = [];
     dataSource.manager.query.mockImplementation((async (sql: string, params: unknown[] = []) => {
       sqls.push({ sql, params });
       if (sql.includes('FROM application_dashboards WHERE id')) return [];
-      // A real (synced) dashboard holds loki-reads; nothing holds the suffixed uid yet.
-      if (sql.includes('FROM grafana_dashboards WHERE uid')) return params[0] === 'loki-reads' ? [{ id: 'real', synthetic: false }] : [];
+      // A real (synced) dashboard holds perfana-loki-reads; nothing holds the suffixed uid yet.
+      if (sql.includes('FROM grafana_dashboards WHERE uid')) return params[0] === 'perfana-loki-reads' ? [{ id: 'real', synthetic: false }] : [];
       if (sql.includes('INSERT INTO grafana_dashboards')) return [{ id: 'synthetic' }];
       return [];
     }) as never);
     const ensure = (service as unknown as { ensureArtificialDashboard: (...a: unknown[]) => Promise<unknown> }).ensureArtificialDashboard.bind(service);
     await ensure({ id: SUT, organization_id: ORG_A, team_id: null }, { systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load' }, 'Reads', { id: CFG, grafanaInstanceId: GI, label: 'logs' }).catch(() => undefined);
     const insert = sqls.find((q) => q.sql.includes('INSERT INTO grafana_dashboards'))!;
-    expect(insert.params[2]).toMatch(/^loki-reads-[0-9a-f]{8}$/);
+    expect(insert.params[2]).toMatch(/^perfana-loki-reads-[0-9a-f]{8}$/);
     const app = sqls.find((q) => q.sql.includes('INSERT INTO application_dashboards'))!;
     expect(app.params[3]).toBe('synthetic');
     expect(app.params[5]).toBe(insert.params[2]);

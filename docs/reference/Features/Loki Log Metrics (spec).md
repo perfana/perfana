@@ -49,7 +49,8 @@ the instance) and again by the worker at collection (`lokiConfigBelongsTo`), fai
   op one of `= != =~ !~`) in place of index / sourcetype / host, and `selector`, the canonical
   `buildStreamSelector(matchers)` text, which carries the unique slot and is what the UI shows.
 - `loki_queries` — Splunk's query table with `logql` in place of `spl`; default dashboard label
-  `Loki logs`, artificial dashboard uid `loki-<slug>`.
+  `Loki logs`, artificial dashboard uid `perfana-loki-<slug>` (not `loki-`: the Loki mixin's real
+  Grafana dashboards, `loki-reads` and so on, use that, and several places tell a placeholder by its prefix).
 - `loki_run_patterns`, `loki_run_samples` — per-run snapshots (below), varchar `test_run_id` with no
   FK (the test-run delete removes them), `system_under_test_id` FK cascade (the SUT delete does).
 
@@ -214,7 +215,7 @@ a database that has 1838 and not 1839.
 ## Profile SLO
 
 `loki-panels` is `splunk-panels` with the nouns changed: no profile dashboard, `dashboard_uid` a
-regex over `loki-` uids (default `^loki-`), keyed on the panel title, fanned out per workload by
+regex over `perfana-loki-` uids (default `^perfana-loki-`), keyed on the panel title, fanned out per workload by
 grafana-sync through `loki_queries`, provisioned SLOs stored with `benchmarks.source = 'loki'`.
 
 ## Not done

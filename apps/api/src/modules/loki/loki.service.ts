@@ -998,7 +998,10 @@ export class LokiService {
       `${scope.systemUnderTestId}-${scope.testEnvironment}-${scope.workload}-loki-${dashboardLabel}`,
     );
     const slug = dashboardLabel.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    let dashboardUid = `loki-${slug || applicationDashboardId.slice(0, 8)}`;
+    // `perfana-loki-`, not `loki-`: Loki's own dashboards (the Loki mixin's loki-reads, loki-logs, ...)
+    // use that one, and several places tell a Loki placeholder by its uid prefix (web, grafana-sync,
+    // the metrics-source dual-write, data-science's available sources).
+    let dashboardUid = `perfana-loki-${slug || applicationDashboardId.slice(0, 8)}`;
 
     const existing = await em.query<Array<{ id: string }>>('SELECT id FROM application_dashboards WHERE id = $1', [applicationDashboardId]);
     if (existing.length === 0) {
@@ -1008,9 +1011,8 @@ export class LokiService {
         [uid, grafanaInstanceId],
       );
       let gd = await findSynthetic(dashboardUid);
-      // Loki's own dashboards (the Loki mixin's loki-reads, loki-logs, ...) live on the same Grafana
-      // and share the prefix. Never hang Loki panels off a real dashboard, and never add a second
-      // row under its uid, since a uid is unique within an instance: take a uid of our own instead.
+      // Never hang Loki panels off a real dashboard that happens to hold the uid, and never add a
+      // second row under it, since a uid is unique within an instance: take a uid of our own instead.
       if (gd.length > 0 && !gd.some((r) => r.synthetic)) {
         dashboardUid = `${dashboardUid}-${applicationDashboardId.slice(0, 8)}`;
         gd = await findSynthetic(dashboardUid);

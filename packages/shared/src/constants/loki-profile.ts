@@ -14,10 +14,11 @@ export const LOKI_PROFILE_SOURCE = 'loki-panels';
 export const LOKI_BENCHMARK_SOURCE = 'loki';
 
 /**
- * Every Loki dashboard. The uid is `loki-` + the slugged dashboard label. Runs in Postgres (`~`,
- * ARE dialect): keep it to constructs both engines share.
+ * Every Loki dashboard. The uid is `perfana-loki-` + the slugged dashboard label (not `loki-`: the
+ * Loki mixin's real Grafana dashboards use that). Runs in Postgres (`~`, ARE dialect): keep it to
+ * constructs both engines share.
  */
-export const LOKI_DASHBOARD_UID_PATTERN_DEFAULT = '^loki-';
+export const LOKI_DASHBOARD_UID_PATTERN_DEFAULT = '^perfana-loki-';
 
 /** The panels POST /loki/queries/starter creates, and what a profile SLO can target before any exist. */
 export const LOKI_STARTER_PANEL_TITLES = ['Log lines by level', 'Error lines by service', 'Log volume by service'] as const;
