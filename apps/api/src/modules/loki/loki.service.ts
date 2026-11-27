@@ -61,6 +61,8 @@ import {
 } from './dto/loki.dto';
 
 const LABELS_TTL_MS = 10 * 60 * 1000;
+/** Label lookups kept at most: the key carries caller-chosen labels and matchers. */
+const LABELS_CACHE_MAX = 500;
 /** Error lines over all lines from a level panel's mean per level; null with no lines. */
 function levelRatio(rows: Array<{ metric_name: string | null; mean: number | null }>): number | null {
   let all = 0;
@@ -989,16 +991,24 @@ export class LokiService {
       `${scope.systemUnderTestId}-${scope.testEnvironment}-${scope.workload}-loki-${dashboardLabel}`,
     );
     const slug = dashboardLabel.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const dashboardUid = `loki-${slug || applicationDashboardId.slice(0, 8)}`;
+    let dashboardUid = `loki-${slug || applicationDashboardId.slice(0, 8)}`;
 
     const existing = await em.query<Array<{ id: string }>>('SELECT id FROM application_dashboards WHERE id = $1', [applicationDashboardId]);
     if (existing.length === 0) {
       const grafanaInstanceId = config.grafanaInstanceId;
-      const gd = await em.query<Array<{ id: string }>>(
-        'SELECT id FROM grafana_dashboards WHERE uid = $1 AND grafana_instance_id = $2',
-        [dashboardUid, grafanaInstanceId],
+      const findSynthetic = async (uid: string) => em.query<Array<{ id: string; synthetic: boolean }>>(
+        'SELECT id, grafana_json IS NULL AS synthetic FROM grafana_dashboards WHERE uid = $1 AND grafana_instance_id = $2',
+        [uid, grafanaInstanceId],
       );
-      let grafanaDashboardId = gd[0]?.id;
+      let gd = await findSynthetic(dashboardUid);
+      // Loki's own dashboards (the Loki mixin's loki-reads, loki-logs, ...) live on the same Grafana
+      // and share the prefix. Never hang Loki panels off a real dashboard, and never add a second
+      // row under its uid, since a uid is unique within an instance: take a uid of our own instead.
+      if (gd.length > 0 && !gd.some((r) => r.synthetic)) {
+        dashboardUid = `${dashboardUid}-${applicationDashboardId.slice(0, 8)}`;
+        gd = await findSynthetic(dashboardUid);
+      }
+      let grafanaDashboardId = gd.find((r) => r.synthetic)?.id;
       if (!grafanaDashboardId) {
         const inserted = await em.query<Array<{ id: string }>>(
           `INSERT INTO grafana_dashboards (grafana_instance_id, grafana_id, uid, name, panels, organization_id)
@@ -1088,7 +1098,13 @@ export class LokiService {
     if (!refresh && hit && Date.now() - hit.at < LABELS_TTL_MS) return hit.values;
     try {
       const values = await load();
-      this.labelCache.set(key, { at: Date.now(), values });
+      const now = Date.now();
+      // Expired entries are only skipped on read, so sweep them here, then drop the oldest
+      // (a Map iterates in insertion order) past the cap.
+      for (const [k, v] of this.labelCache) if (now - v.at >= LABELS_TTL_MS) this.labelCache.delete(k);
+      this.labelCache.delete(key);
+      while (this.labelCache.size >= LABELS_CACHE_MAX) this.labelCache.delete(this.labelCache.keys().next().value!);
+      this.labelCache.set(key, { at: now, values });
       return values;
     } catch (err) {
       throw this.toHttp(err);

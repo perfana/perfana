@@ -327,9 +327,10 @@ export class DataScienceController {
       // - performance-test-metrics-*  created by the worker pipeline
       // - dynatrace-*                 created by the Dynatrace integration
       // - splunk-*                    created by the Splunk integration
-      // - loki-*                      created by the Loki integration
+      // - loki-* with a synthetic grafana_dashboards row (grafana_json NULL), created by the Loki
+      //   integration; a real Grafana dashboard about Loki (loki-reads, ...) shares the prefix
       const grafanaResult = await this.dataSource.query(
-        `SELECT EXISTS(SELECT 1 FROM application_dashboards WHERE (${grafanaConditions.join(' OR ')}) AND dashboard_uid NOT LIKE 'performance-test-metrics-%' AND dashboard_uid NOT LIKE 'dynatrace-%' AND dashboard_uid NOT LIKE 'splunk-%' AND dashboard_uid NOT LIKE 'loki-%') AS has_rows`,
+        `SELECT EXISTS(SELECT 1 FROM application_dashboards WHERE (${grafanaConditions.join(' OR ')}) AND dashboard_uid NOT LIKE 'performance-test-metrics-%' AND dashboard_uid NOT LIKE 'dynatrace-%' AND dashboard_uid NOT LIKE 'splunk-%' AND NOT (dashboard_uid LIKE 'loki-%' AND grafana_dashboard_id IN (SELECT id FROM grafana_dashboards WHERE grafana_json IS NULL))) AS has_rows`,
         grafanaParams,
       );
 

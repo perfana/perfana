@@ -392,3 +392,37 @@ describe('LokiService baseline resolution', () => {
     expect(sqls.some((q) => q.includes('ds_control_group_statistics'))).toBe(false);
   });
 });
+
+describe('LokiService label cache and synthetic dashboards', () => {
+  // Value: protects=the label cache stays bounded and a Loki dashboard never hangs off a real Grafana dashboard that shares its uid; fails_when=the cap or the sweep is removed, or a real loki-* row is reused; why_new=both are review fixes; seam=none; no_claim=the SQL against Postgres (mocked)
+  it('keeps at most 500 label lookups, oldest first out', async () => {
+    const { service } = build();
+    const cached = (service as unknown as { cached: (k: string, r: boolean, l: () => Promise<string[]>) => Promise<string[]> }).cached.bind(service);
+    for (let i = 0; i < 600; i++) await cached(`cfg:values:l${i}`, false, async () => [`v${i}`]);
+    const cache = (service as unknown as { labelCache: Map<string, unknown> }).labelCache;
+    expect(cache.size).toBe(500);
+    expect(cache.has('cfg:values:l0')).toBe(false);
+    expect(cache.has('cfg:values:l599')).toBe(true);
+  });
+
+  it('takes a uid of its own when a real Grafana dashboard already holds loki-<label>', async () => {
+    const { service, dataSource } = build();
+    const sqls: Array<{ sql: string; params: unknown[] }> = [];
+    dataSource.manager.query.mockImplementation((async (sql: string, params: unknown[] = []) => {
+      sqls.push({ sql, params });
+      if (sql.includes('FROM application_dashboards WHERE id')) return [];
+      // A real (synced) dashboard holds loki-reads; nothing holds the suffixed uid yet.
+      if (sql.includes('FROM grafana_dashboards WHERE uid')) return params[0] === 'loki-reads' ? [{ id: 'real', synthetic: false }] : [];
+      if (sql.includes('INSERT INTO grafana_dashboards')) return [{ id: 'synthetic' }];
+      return [];
+    }) as never);
+    const ensure = (service as unknown as { ensureArtificialDashboard: (...a: unknown[]) => Promise<unknown> }).ensureArtificialDashboard.bind(service);
+    await ensure({ id: SUT, organization_id: ORG_A, team_id: null }, { systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load' }, 'Reads', { id: CFG, grafanaInstanceId: GI, label: 'logs' }).catch(() => undefined);
+    const insert = sqls.find((q) => q.sql.includes('INSERT INTO grafana_dashboards'))!;
+    expect(insert.params[2]).toMatch(/^loki-reads-[0-9a-f]{8}$/);
+    const app = sqls.find((q) => q.sql.includes('INSERT INTO application_dashboards'))!;
+    expect(app.params[3]).toBe('synthetic');
+    expect(app.params[5]).toBe(insert.params[2]);
+  });
+});
+
