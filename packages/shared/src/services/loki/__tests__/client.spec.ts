@@ -196,6 +196,16 @@ describe('lokiPanelPoints', () => {
     expect(r.seriesBeforeCap).toBe(3);
   });
 
+  // Value: protects=max(f) panels combine one series across mappings by max, and never fold capped series into a summed OTHER; fails_when=combine falls through to addition, or OTHER is built for non-additive aggregations; why_new=only sum/count and avg are covered; seam=none; no_claim=Loki's own max_over_time (mocked fetch)
+  it('takes the max across mappings for max(f), and drops capped series rather than summing them into OTHER', async () => {
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(jsonResponse({ results: { A: { frames: [seriesFrame({ route: 'a' }, [[t(1), 7]]), seriesFrame({ route: 'b' }, [[t(1), 1]])] } } }))
+      .mockResolvedValueOnce(jsonResponse({ results: { A: { frames: [seriesFrame({ route: 'a' }, [[t(1), 12]])] } } }));
+    const r = await lokiPanelPoints(conn, { logql: '$entities | json', aggregation: 'max(ms)', splitBy: 'route', panelTitle: 'x', maxSeries: 1 }, [shop, db], from, to, 60, undefined, { fetchImpl });
+    expect(r.points).toEqual([{ time: new Date('2026-11-27T10:00:00.000Z'), series: 'a', value: 12 }]);
+    expect(r.seriesBeforeCap).toBe(2);
+  });
+
   it('turns a query error inside a 200 into a LokiError, marking load refusals retryable', async () => {
     const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({ results: { A: { status: 429, error: 'too many outstanding requests' } } }));
     await expect(lokiPanelPoints(conn, { logql: '$entities', panelTitle: 'x' }, [shop], from, to, 60, undefined, { fetchImpl }))
@@ -321,6 +331,19 @@ describe('detectLokiLevelSource', () => {
       .mockResolvedValueOnce(counts([[{ level: 'INFO' }, 5649]]));
     await expect(detectLokiLevelSource(conn, '{service_name=~".+"}', { label: 'detected_level' }, { fetchImpl }))
       .resolves.toMatchObject({ parser: 'json', label: 'level', coverage: 1 });
+  });
+
+  // Value: protects=below the 50% target the probe keeps the candidate covering the MOST lines, not the first or none; fails_when=the fallback returns null or keeps the first low-coverage hit; why_new=existing cases all end on a >=50% winner; seam=none; no_claim=Loki's real label discovery (mocked fetch)
+  it('keeps the best-covered candidate when none reaches half the lines', async () => {
+    const counts = (series: Array<[Record<string, string>, number]>) =>
+      jsonResponse({ results: { A: { frames: series.map(([l, n]) => seriesFrame(l, [[t, n]])) } } });
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(counts([[{}, 90], [{ detected_level: 'info' }, 10]]))   // none/detected_level: 10%
+      .mockResolvedValueOnce(counts([[{}, 100]]))                                     // json/detected_level: nothing
+      .mockResolvedValueOnce(counts([[{}, 60], [{ level: 'error' }, 40]]))            // json/level: 40%
+      .mockResolvedValue(counts([[{}, 100]]));                                        // logfmt: nothing
+    await expect(detectLokiLevelSource(conn, '{a=~".+"}', { label: 'detected_level' }, { fetchImpl }))
+      .resolves.toEqual({ parser: 'json', label: 'level', levels: ['error'], coverage: 0.4 });
   });
 
   it('answers null, not an error, when no candidate finds a level or every query fails', async () => {

@@ -273,6 +273,44 @@ describe('LokiService run insights per application', () => {
   });
 });
 
+describe('LokiService run summary', () => {
+  // Value: protects=a level panel holding only (none) yields no error rate, never the per-application fallback, and a workload with no enabled panel is unconfigured; fails_when=the levelMissing guard is dropped so errorRateFromServices reports a rate the lines cannot support, or disabled panels count; why_new=runSummary itself had no test; seam=none; no_claim=the SQL (mocked query runner and repositories)
+  const RUN = { testRunId: 'run-1', systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load', startTime: new Date('2026-11-27T10:00:00Z'), endTime: new Date('2026-11-27T11:00:00Z') };
+  const LEVEL_PANEL = {
+    lokiConfigId: CFG, applicationDashboardId: 'dash', metricsSourceId: 'ms', panelId: 1, dashboardLabel: 'Loki logs',
+    panelTitle: 'Log lines by level', logql: '$entities', splitBy: 'detected_level', aggregation: 'count', metricUnit: 'short', enabled: true,
+  };
+
+  function setup(queries: unknown[]) {
+    const b = build();
+    b.testRunRepo.findOne.mockResolvedValue(RUN);
+    b.queryRepo.find.mockResolvedValue(queries as never);
+    b.mappingRepo.createQueryBuilder.mockReturnValue({
+      where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn(async () => [{ id: 'm1', lokiConfigId: CFG, level: 'sut', selector: '{app="shop"}', matchers: [{ label: 'app', op: '=', value: 'shop' }], labels: [] }]),
+    });
+    b.configRepo.find.mockResolvedValue([{ id: CFG, organizationId: ORG_A, datasourceUid: 'loki', levelLabel: 'detected_level', levelParser: 'none', serviceLabel: 'service_name', label: 'logs', grafanaInstance: grafana }] as never);
+    b.dataSource.manager.query.mockImplementation((async (sql: string) => {
+      if (sql.includes('FROM ds_metric_statistics')) return [{ application_dashboard_id: 'dash', panel_id: 1, metric_name: '(none)', mean: 100, max_value: 120, count: 60 }];
+      if (sql.includes('to_regclass')) return [{ patterns: true, services: true }];
+      if (sql.includes('FROM loki_run_services WHERE test_run_id = $1')) return [{ service: 'checkout', total: '1000', errors: '50', warns: '0', loki_config_id: CFG }];
+      return [];
+    }) as never);
+    return b;
+  }
+
+  it('shows no error rate when the level label is on none of the lines, even with a per-application snapshot', async () => {
+    const summary = await setup([LEVEL_PANEL]).service.runSummary('run-1', 'u', []);
+    expect(summary).toMatchObject({ configured: true, levelLabelMissing: true, errorRate: null });
+    expect((summary as { panels: Array<{ isLevelPanel: boolean; series: Array<{ total: number | null }> }> }).panels[0])
+      .toMatchObject({ isLevelPanel: true, series: [{ name: '(none)', total: 6000 }] });
+  });
+
+  it('is unconfigured when every panel of the workload is disabled', async () => {
+    await expect(setup([{ ...LEVEL_PANEL, enabled: false }]).service.runSummary('run-1', 'u', [])).resolves.toEqual({ configured: false });
+  });
+});
+
 describe('LokiService baseline resolution', () => {
   // Value: protects=which runs every "vs baseline" figure on the Loki card compares against; fails_when=a pinned run outside the workload is accepted, or the default stops preferring the control group; why_new=resolveBaseline is new; seam=none; no_claim=the SQL itself (mocked query runner)
   const RUN = { testRunId: 'run-9', systemUnderTestId: SUT, testEnvironment: 'acc', workload: 'load' };

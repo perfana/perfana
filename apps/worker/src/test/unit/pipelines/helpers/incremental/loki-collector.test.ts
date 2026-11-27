@@ -100,6 +100,46 @@ describe('LokiCollector', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // Value: protects=a Loki load refusal (429/"too many outstanding requests") is retried with backoff and the panel's data still lands; fails_when=withRetry stops retrying retryable LokiErrors; why_new=only a non-retryable panel error is covered; seam=none; no_claim=real backoff timing (fake timers, mocked fetch)
+  it('retries a panel Loki refused under load, and keeps its data', async () => {
+    vi.useFakeTimers();
+    try {
+      const t = Date.parse('2026-11-17T10:30:00Z');
+      fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify({ results: { A: { status: 429, error: 'too many outstanding requests' } } }), { status: 200 }))
+        .mockResolvedValue(new Response(JSON.stringify(frames([{ level: 'error', points: [[t, 3]] }])), { status: 200 }));
+      const { collector, batchProcessor } = makeCollector();
+      const pending = collector.collect('run-1', liveRun, undefined, from, to);
+      await vi.advanceTimersByTimeAsync(2500);
+      const result = await pending;
+      expect(result).toMatchObject({ success: true, errors: [] });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(batchProcessor.processLokiDocuments.mock.calls[0][0][0].data.length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Value: protects=a completed run is collected from exactly the requested window (no live lookback), and a panel with no dashboard is reported, not fatal; fails_when=the lookback applies to completed runs (rows outside the decompressed span) or a dashboard-less panel fails the tick; why_new=only live runs covered; seam=none; no_claim=decompression itself (mocked db)
+  it('adds no lookback on a completed run, and reports a panel without a dashboard without failing the tick', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(frames([])), { status: 200 }));
+    const { collector } = makeCollector();
+    const db = (collector as unknown as { db: { query: ReturnType<typeof vi.fn> } }).db;
+    const base = db.query.getMockImplementation()!;
+    db.query.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.includes('FROM loki_queries')
+        ? [QUERY, { ...QUERY, id: 'q2', panel_id: 2, panel_title: 'Orphan', application_dashboard_id: null, dashboard_uid: null }]
+        : base(sql, params));
+    const result = await collector.collect('run-1', { ...liveRun, completed: true, endTime: new Date('2026-11-17T11:00:00Z') } as never, undefined, from, to);
+    expect(result.success).toBe(true);
+    expect(result.errors.join()).toContain('"Orphan" has no dashboard');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The first evaluation is one bucket after the bucket holding `from`: exactly, with no lookback behind it.
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const bucketMs = parseInt(body.queries[0].step, 10) * 1000;
+    expect(Number(body.from)).toBe(Math.floor(from.getTime() / bucketMs) * bucketMs + bucketMs);
+  });
+
   it('fails the tick when the connection is gone', async () => {
     const result = await makeCollector({ config: null }).collector.collect('run-1', liveRun, undefined, from, to);
     expect(result.success).toBe(false);
