@@ -29,7 +29,11 @@ const summary = () => ({
   patternsSource: 'patterns',
   newPatterns: 1,
   baselineRunCount: 3,
-  samples: [{ time: '2026-11-20T10:30:00.123Z', level: 'error', line: 'boom & <b>bang</b>', labels: {}, service: 'checkout' }],
+  // The worker samples each line twice: for all streams (service null) and for its application.
+  samples: [
+    { time: '2026-11-20T10:30:00.123Z', level: 'error', line: 'boom & <b>bang</b>', labels: {}, service: null },
+    { time: '2026-11-20T10:30:00.123Z', level: 'error', line: 'boom & <b>bang</b>', labels: {}, service: 'checkout' },
+  ],
   services: [
     { service: 'checkout', totalLines: 4000, errorLines: 250, warnLines: 10, levels: null, errorRatePct: 6.25, baseline: { errorRatePct: 1, runs: 3 }, isNew: false, newPatterns: 1, exploreUrl: 'https://grafana.example/s1' },
     { service: 'cart', totalLines: 6000, errorLines: 50, warnLines: 5, levels: null, errorRatePct: 0.83, baseline: null, isNew: true, newPatterns: 0, exploreUrl: null },
@@ -59,7 +63,7 @@ describe('LokiLogsRenderer', () => {
     expect(html).toContain('GC pause');
     expect(html).not.toContain('request served'); // info left out by default
     expect(html).not.toContain('checkout only'); // per-application scope not in the whole-run list
-    expect(html).not.toContain('Latest error lines'); // off by default
+    expect(html).not.toContain('Latest error and warning lines'); // off by default
   });
 
   it('escapes patterns and log lines', async () => {
@@ -68,6 +72,8 @@ describe('LokiLogsRenderer', () => {
     expect(html).not.toContain('<script>');
     expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('boom &amp; &lt;b&gt;bang&lt;/b&gt;');
+    expect(html.split('boom &amp;').length - 1).toBe(1); // the all-streams copy only, not its per-application twin
+    expect(html).toContain('Latest error and warning lines');
   });
 
   it('narrows everything to the chosen applications', async () => {
@@ -118,5 +124,72 @@ describe('lokiSettings / errorRateTrend', () => {
     expect(errorRateTrend(0.5, 1)).toBe('better');
     expect(errorRateTrend(0.05, 0)).toBe('same');
     expect(errorRateTrend(1, null)).toBeNull();
+  });
+});
+
+describe('LokiLogsRenderer edge cases', () => {
+  // Added by the /ship pre-landing review.
+  // Value: protects=a filtered section shows no error rate when the level label is missing, and a free-text
+  // level that names an Object member renders as a neutral pill; fails_when=the levelLabelMissing guard is
+  // dropped from the pooled rate (0.00% under its own warning) or the level lookup reads inherited members
+  // (pill() throws and the section becomes an error placeholder); why_new=no case combined services with
+  // levelLabelMissing or used an unknown level; seam=none; no_claim=what the worker stores as a level.
+  it('shows no pooled rate without a level label and survives a level named after an Object member', async () => {
+    const s = summary();
+    const noLevel = { ...s, levelLabelMissing: true, services: s.services.map((x) => ({ ...x, errorLines: 0, errorRatePct: 0 })) };
+    const filtered = await setup(noLevel).renderer.renderLokiLogsSection(section({ services: ['checkout'] }), testRun);
+    expect(filtered).not.toContain('0.00%');
+    expect(filtered).toContain('4,000'); // the log line count stays
+
+    const odd = { ...s, patterns: [{ ...s.patterns[0]!, level: 'constructor' }] };
+    const html = await setup(odd).renderer.renderLokiLogsSection(section({ patternLevels: 'all' }), testRun);
+    expect(html).toContain('data-pill="neutral"');
+    expect(html).not.toContain('Section incomplete');
+  });
+
+  // Added by the /ship test coverage audit.
+  // Value: protects=a stored, unauthenticated-shareable report never carries a non-http(s) link from
+  // snapshot data, warns when the level label is missing, and renders without a run; fails_when=the
+  // https?:// scheme guard in link() is loosened (a javascript: href ships in the report), the
+  // levelLabelMissing warning is dropped, or a null run reaches reportSummary; why_new=existing cases
+  // use only https URLs and a fully labelled summary; seam=none; no_claim=Confluence's own URL handling.
+  it('drops non-http(s) links, warns on a missing level label, and handles a missing run', async () => {
+    const s = summary();
+    const bad = {
+      ...s,
+      levelLabelMissing: true,
+      exploreUrl: 'javascript:alert(1)',
+      services: [{ ...s.services[0], exploreUrl: 'javascript:alert(2)' }],
+    };
+    const { loki, renderer } = setup(bad);
+    const html = await renderer.renderLokiLogsSection(section(), testRun);
+    expect(html).not.toMatch(/href="javascript:/i);
+    expect(html).not.toContain('Open all streams');
+    expect(html).toContain('checkout'); // the name stays, as plain text
+    expect(html).toContain('carries the level label &quot;level&quot;');
+
+    const none = await renderer.renderLokiLogsSection(section(), null);
+    expect(none).toContain('No test run data available');
+    expect(loki.reportSummary).toHaveBeenCalledTimes(1);
+  });
+
+  // Added by the /ship test coverage audit.
+  // Value: protects=maxRows truncates tables and says so, the baseline chip words each baseline kind,
+  // and a panel with no series reads "no data"; fails_when=maxRows stops slicing or the "top N of M"
+  // caption is lost (a truncated table reads as complete), a baseline kind is mislabelled, or an empty
+  // panel is dropped silently; why_new=existing cases cover only the default row count, the
+  // control-group chip and a panel with data; seam=none; no_claim=the ordering LokiService returns.
+  it('truncates with a caption, words each baseline kind, and marks an empty panel', async () => {
+    const s = summary();
+    const prev = { ...s, baseline: { kind: 'previous-runs', testRunIds: ['r1'] }, panels: [{ ...s.panels[0], series: [] }] };
+    const html = await setup(prev).renderer.renderLokiLogsSection(section({ maxRows: 1, includePanels: true }), testRun);
+    expect(html).toContain('Applications (top 1 of 2 by errors)');
+    expect(html).not.toContain('>cart<');
+    expect(html).toContain('Top log patterns (errors and warnings), top 1 of 2');
+    expect(html).toContain('vs 1 previous run<');
+    expect(html).toContain('no data');
+
+    const noBaseline = await setup({ ...s, baseline: { kind: 'none', testRunIds: [] } }).renderer.renderLokiLogsSection(section(), testRun);
+    expect(noBaseline).toContain('no baseline');
   });
 });

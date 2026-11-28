@@ -16,6 +16,16 @@ describe('htmlToStorage', () => {
     expect(htmlToStorage(page('<p>p95 &lt; 200 ms &amp;&amp; err &gt; 1%</p>')).storage).toBe('<p>p95 &lt; 200 ms &amp;&amp; err &gt; 1%</p>');
   });
 
+  // Value: protects=control characters a log line carries (ANSI colour codes) never reach the XML 1.0 storage body,
+  // which Confluence rejects whole; fails_when=escapeText stops stripping C0 controls or leaves a CSI sequence's
+  // tail behind; why_new=no case fed a control character; seam=none; no_claim=Confluence's own parser (string check).
+  it('strips control characters and ANSI colour sequences, keeping tab and newline', () => {
+    const { storage } = htmlToStorage(page('<pre>\x1b[31mERROR\x1b[0m boom\x07\tat x\nnext</pre><p>a\x00b\x1fc</p>'));
+    expect(storage).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/); // eslint-disable-line no-control-regex
+    expect(storage).toContain('ERROR boom\tat x\nnext');
+    expect(storage).toContain('<p>abc</p>');
+  });
+
   it('turns tables into plain tables, keeping only colspan/rowspan', () => {
     const { storage } = htmlToStorage(page(
       '<table class="t" style="width:100%"><thead><tr><th style="x" colspan="2" onclick="y">Name</th></tr></thead><tbody><tr><td rowspan="3">a</td><td>b</td></tr></tbody></table>',

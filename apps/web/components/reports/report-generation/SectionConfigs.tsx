@@ -2070,9 +2070,14 @@ export function LokiLogsConfigForm({ config, onChange, text, onTextChange, testR
         size="small"
         type="number"
         label="Rows per table"
-        value={config.maxRows ?? 10}
+        // Empty stays empty (the default, 10, applies) so a value can be cleared and retyped.
+        value={config.maxRows ?? ''}
+        placeholder="10"
         inputProps={{ min: 1, max: 50 }}
-        onChange={(e) => set({ maxRows: Math.min(50, Math.max(1, Number(e.target.value) || 10)) })}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          set({ maxRows: e.target.value === '' || !Number.isFinite(n) ? undefined : Math.min(50, Math.max(1, Math.floor(n))) });
+        }}
       />
       <Autocomplete
         multiple

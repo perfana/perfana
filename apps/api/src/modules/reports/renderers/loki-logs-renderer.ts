@@ -82,6 +82,8 @@ const TREND_PILL: Record<'worse' | 'better' | 'same', [string, PillKind]> = {
   same: ['In line', 'neutral'],
 };
 const LEVEL_KIND: Record<string, PillKind> = { error: 'bad', warn: 'warn', info: 'info' };
+// A level is free text from the logs: 'constructor' must not resolve to an inherited member.
+const levelKind = (level: string): PillKind => (Object.hasOwn(LEVEL_KIND, level) ? LEVEL_KIND[level]! : 'neutral');
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : `${v < 0.01 && v > 0 ? '<0.01' : v.toFixed(2)}%`);
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
@@ -152,7 +154,9 @@ export function renderBody(summary: Configured, s: ReturnType<typeof lokiSetting
   if (only) {
     const lines = services.reduce((a, x) => a + x.totalLines, 0);
     const errors = services.reduce((a, x) => a + x.errorLines, 0);
-    rate = lines > 0 ? { pct: (errors / lines) * 100, lines, errors, baseline: null } : null;
+    // No level label means no error lines to count: show no rate rather than a 0% that reads as clean,
+    // as LokiService does for the whole run.
+    rate = lines > 0 && !summary.levelLabelMissing ? { pct: (errors / lines) * 100, lines, errors, baseline: null } : null;
   } else if (summary.errorRate) {
     const r: ErrorRate = summary.errorRate;
     rate = { pct: r.errorRatePct, lines: r.totalLines, errors: r.errorLines, baseline: r.baseline };
@@ -174,7 +178,7 @@ export function renderBody(summary: Configured, s: ReturnType<typeof lokiSetting
   ];
   parts.push(`<div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; margin:8px 0 20px;">${tiles.join('')}</div>`);
 
-  if (s.applications && services.length > 0) parts.push(applicationsTable(services.slice(0, s.maxRows), services.length, summary.connection?.serviceLabel ?? 'service_name'));
+  if (s.applications && services.length > 0) parts.push(applicationsTable(services.slice(0, s.maxRows), services.length, summary.connection?.serviceLabel ?? 'service_name', summary.levelLabelMissing));
   if (s.patterns) parts.push(patternsTable(summary, s, only));
   if (s.samples) parts.push(samplesTable(summary, s, only));
   if (s.panels) parts.push(panelsTable(summary, s.maxRows));
@@ -197,10 +201,10 @@ function table(head: string, rows: string[], caption: string): string {
     </div>`;
 }
 
-function applicationsTable(rows: Configured['services'], total: number, label: string): string {
+function applicationsTable(rows: Configured['services'], total: number, label: string, noLevel: boolean): string {
   const head = `<th style="${TH_TEXT}">Application (${escapeHtml(label)})</th><th style="${TH_NUM}">Lines</th><th style="${TH_NUM}">Errors</th><th style="${TH_NUM}">Warnings</th><th style="${TH_NUM}">Error rate</th><th style="${TH_NUM}">Baseline</th><th style="${TH_TEXT}">Status</th>`;
   const body = rows.map((x) => {
-    const t = errorRateTrend(x.errorRatePct, x.baseline?.errorRatePct);
+    const t = noLevel ? null : errorRateTrend(x.errorRatePct, x.baseline?.errorRatePct);
     const status = [
       x.isNew ? pill('New', 'warn') : '',
       t === 'worse' ? pill('Higher', 'bad') : t === 'better' ? pill('Lower', 'good') : '',
@@ -211,7 +215,7 @@ function applicationsTable(rows: Configured['services'], total: number, label: s
       <td style="${TD_NUM}">${formatInt(x.totalLines)}</td>
       <td style="${TD_NUM}">${formatInt(x.errorLines)}</td>
       <td style="${TD_NUM}">${formatInt(x.warnLines)}</td>
-      <td style="${TD_NUM}">${pct(x.errorRatePct)}</td>
+      <td style="${TD_NUM}">${noLevel ? '—' : pct(x.errorRatePct)}</td>
       <td style="${TD_NUM}">${pct(x.baseline?.errorRatePct)}</td>
       <td style="${TD}">${status}</td>
     </tr>`;
@@ -238,7 +242,7 @@ function patternsTable(summary: Configured, s: ReturnType<typeof lokiSettings>, 
   const head = `<th style="${TH_TEXT}">Pattern</th><th style="${TH_TEXT}">Level</th>${only ? `<th style="${TH_TEXT}">Application</th>` : ''}<th style="${TH_NUM}">Count</th><th style="${TH_TEXT}">vs baseline</th><th style="${TH_TEXT}"></th>`;
   const body = rows.map((p) => `<tr>
       <td style="${TD}"><code style="${CODE}">${escapeHtml(clip(p.pattern, PATTERN_CHARS))}</code></td>
-      <td style="${TD}">${p.level ? pill(p.level, LEVEL_KIND[p.level] ?? 'neutral') : '—'}</td>
+      <td style="${TD}">${p.level ? pill(p.level, levelKind(p.level)) : '—'}</td>
       ${only ? `<td style="${TD}">${escapeHtml(p.service ?? '')}</td>` : ''}
       <td style="${TD_NUM}">${formatInt(p.count)}</td>
       <td style="${TD}">${p.isNew === true ? pill('New', 'warn') : p.isNew === false ? 'seen before' : '—'}</td>
@@ -249,15 +253,20 @@ function patternsTable(summary: Configured, s: ReturnType<typeof lokiSettings>, 
 
 function samplesTable(summary: Configured, s: ReturnType<typeof lokiSettings>, only: Set<string> | null): string {
   const lines = summary.samples
-    .filter((l) => !only || (l.service !== null && only.has(l.service)))
+    // The worker samples each line twice: once for all streams (service null) and once for its application.
+    // Same scoping as the patterns table, so an unfiltered table lists each line once.
+    .filter((l) => (only ? l.service !== null && only.has(l.service) : l.service === null))
     .filter((l) => l.level === 'error' || (s.levels !== 'error' && l.level === 'warn') || s.levels === 'all')
     .slice(0, s.maxRows);
-  const caption = 'Latest error lines';
-  if (lines.length === 0) return `<h3 style="margin:24px 0 8px; font-size:14px; color:${REPORT_COLORS.ink};">${caption}</h3>${emptyState('No error lines were sampled for this run.')}`;
+  const caption = s.levels === 'error' ? 'Latest error lines' : s.levels === 'warn' ? 'Latest error and warning lines' : 'Latest sampled lines';
+  if (lines.length === 0) {
+    const why = summary.samples.length === 0 ? 'No log lines were sampled for this run.' : 'No sampled line matches these settings.';
+    return `<h3 style="margin:24px 0 8px; font-size:14px; color:${REPORT_COLORS.ink};">${caption}</h3>${emptyState(why)}`;
+  }
   const head = `<th style="${TH_TEXT}">Time (UTC)</th><th style="${TH_TEXT}">Level</th><th style="${TH_TEXT}">Application</th><th style="${TH_TEXT}">Line</th>`;
   const body = lines.map((l) => `<tr>
       <td style="${TD} white-space:nowrap;">${escapeHtml(l.time.replace('T', ' ').replace(/\.\d+Z$|Z$/, ''))}</td>
-      <td style="${TD}">${l.level ? pill(l.level, LEVEL_KIND[l.level] ?? 'neutral') : '—'}</td>
+      <td style="${TD}">${l.level ? pill(l.level, levelKind(l.level)) : '—'}</td>
       <td style="${TD}">${escapeHtml(l.service ?? '—')}</td>
       <td style="${TD}"><code style="${CODE}">${escapeHtml(clip(l.line, SAMPLE_LINE_CHARS))}</code></td>
     </tr>`);

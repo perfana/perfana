@@ -26,6 +26,7 @@ import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
 import { CommentsRenderer } from '../renderers/comments-renderer';
+import { LokiLogsRenderer } from '../renderers/loki-logs-renderer';
 import { ReportsModule } from '../reports.module';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
@@ -188,6 +189,12 @@ describe('ReportHtmlCompilerService', () => {
           provide: CommentsRenderer,
           useValue: {
             renderCommentsSection: jest.fn().mockResolvedValue('<div>comments</div>'),
+          },
+        },
+        {
+          provide: LokiLogsRenderer,
+          useValue: {
+            renderLokiLogsSection: jest.fn().mockResolvedValue('<div>loki_logs</div>'),
           },
         },
         {
@@ -369,6 +376,24 @@ describe('ReportHtmlCompilerService', () => {
 
       it('wires CommentsRenderer into ReportsModule, since the compiler takes it @Optional', () => {
         expect(Reflect.getMetadata('providers', ReportsModule)).toContain(CommentsRenderer);
+      });
+
+      // Added by the /ship test coverage audit.
+      // Value: protects=a loki_logs section reaches LokiLogsRenderer with the caller's identity and the
+      // renderer is wired into ReportsModule; fails_when=the 'loki_logs' case is dropped or the provider
+      // is not registered (it is @Optional, so either degrades silently to a placeholder in every
+      // generated report); why_new=no compiler spec dispatched 'loki_logs'; seam=none;
+      // no_claim=what the renderer draws (renderer mocked).
+      it('should render a loki_logs section through LokiLogsRenderer, not the placeholder, and wire it into ReportsModule', async () => {
+        const testRun = makeTestRun();
+        const sections = [makeSection('loki_logs', 0)];
+        const result = await service.renderSections(sections, testRun, null, 'user-1', ['user']);
+        const loki = (service as unknown as { lokiLogsRenderer: jest.Mocked<LokiLogsRenderer> }).lokiLogsRenderer;
+
+        expect(loki.renderLokiLogsSection).toHaveBeenCalledWith(sections[0], testRun, 'user-1', ['user']);
+        expect(result).toContain('<div>loki_logs</div>');
+        expect(placeholderRenderer.renderPlaceholderSection).not.toHaveBeenCalled();
+        expect(Reflect.getMetadata('providers', ReportsModule)).toContain(LokiLogsRenderer);
       });
 
       it('should delegate unknown section types to placeholderRenderer', async () => {

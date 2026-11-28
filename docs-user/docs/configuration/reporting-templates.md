@@ -55,7 +55,7 @@ What follows is set in the section's settings:
 | **Applications** | on | Lines, errors, warnings and error rate per application, against the baseline, worst first. An application missing from every baseline run is marked **New**. |
 | **Top log patterns** | on | The most frequent log patterns, each marked **New** when no baseline run had it, with a link to the lines in Grafana Explore. |
 | **Only new patterns** | off | Leaves the patterns the baseline already had out of that table. Turn it on for a short "what is new in this release" report. |
-| **Latest error lines** | off | The newest sampled error lines, verbatim. Log lines can carry user ids, hostnames or tokens: check them before you share or publish the report. |
+| **Latest error lines** | off | The newest sampled lines at the chosen **Levels**, verbatim. Log lines can carry user ids, hostnames or tokens: check them before you share or publish the report. |
 | **Loki panel totals** | off | The top series of each Loki panel over the whole run. |
 | **Levels** | Errors and warnings | Which levels the pattern and line tables list. |
 | **Rows per table** | 10 | Up to 50. |
