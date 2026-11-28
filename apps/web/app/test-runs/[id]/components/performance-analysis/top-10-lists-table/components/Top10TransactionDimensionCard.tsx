@@ -14,6 +14,7 @@ import {
 import { Top10TransactionItem, Top10TableDimension, Top10TableSortField, Top10TableSortOrder } from '../types';
 import { Top10TransactionTableHeader } from './Top10TransactionTableHeader';
 import { Top10TransactionTableRow } from './Top10TransactionTableRow';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
 
 export interface Top10TransactionDimensionCardProps {
   dimension: Top10TableDimension;
@@ -24,6 +25,7 @@ export interface Top10TransactionDimensionCardProps {
   hasDrillDownOptions: boolean;
   onSort: (dimensionIndex: number, field: Top10TableSortField) => void;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>, item: Top10TransactionItem) => void;
+  commentCounts: CommentItemCounts;
 }
 
 export function Top10TransactionDimensionCard({
@@ -35,6 +37,7 @@ export function Top10TransactionDimensionCard({
   hasDrillDownOptions,
   onSort,
   onOpenActionMenu,
+  commentCounts,
 }: Top10TransactionDimensionCardProps) {
   return (
     <Paper
@@ -90,6 +93,7 @@ export function Top10TransactionDimensionCard({
                   hasDrillDownOptions={hasDrillDownOptions}
                   showErrorCount={dimension.showErrorCount}
                   onOpenActionMenu={onOpenActionMenu}
+                  commentCounts={commentCounts}
                 />
               ))
             )}
