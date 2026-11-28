@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { AddEntityDialog } from './AddEntityDialog';
 import { DynatraceEntity } from '../types';
 
@@ -63,5 +63,48 @@ describe('AddEntityDialog layout stability', () => {
 
     rerender(<AddEntityDialog {...props} entities={[host(1)]} entitiesLoading={false} />);
     expect(screen.getByLabelText('Tag')).toBeEnabled();
+  });
+
+  // Production freeze: picking a tag re-fetches with tag("<key>") server-side. When that
+  // narrowed fetch comes back empty, the tag lists used to be empty too, so both fields
+  // disabled themselves holding the filter and the dialog was stuck until Cancel.
+  it('keeps a selected tag clearable when the narrowed fetch returns no hosts', () => {
+    render(
+      <AddEntityDialog
+        {...props}
+        entities={[]}
+        entitiesLoading={false}
+        selectedTagKey="[ENVIRONMENT]app"
+        selectedTagValue="billing"
+      />
+    );
+    expect(screen.getByLabelText('Tag')).toBeEnabled();
+    expect(screen.getByLabelText('Tag')).toHaveValue('[ENVIRONMENT]app');
+    expect(screen.getByLabelText('Value')).toBeEnabled();
+    expect(screen.getByLabelText('Value')).toHaveValue('billing');
+  });
+
+  // A context tag (ENVIRONMENT, AWS, KUBERNETES...) is only matched by tag("[CONTEXT]key");
+  // offering the bare key sent a selector that matched nothing.
+  it('offers context tags with their context, and filters hosts by it', () => {
+    const ctxHost: DynatraceEntity = {
+      ...host(9),
+      tags: [{ key: 'app', value: 'billing', context: 'ENVIRONMENT' }],
+    };
+    render(
+      <AddEntityDialog
+        {...props}
+        entities={[host(1), ctxHost]}
+        entitiesLoading={false}
+        selectedTagKey="[ENVIRONMENT]app"
+      />
+    );
+    expect(screen.getByText('web-9')).toBeInTheDocument();
+    expect(screen.queryByText('web-1')).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByLabelText('Tag'));
+    expect(screen.getByRole('option', { name: '[ENVIRONMENT]app' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'env' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'app' })).not.toBeInTheDocument();
   });
 });
