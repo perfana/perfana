@@ -18,8 +18,19 @@ export interface DynatraceEntity {
   tags?: Array<{
     key: string;
     value?: string;
+    // 'CONTEXTLESS' for manual/auto tags; otherwise the source ('ENVIRONMENT',
+    // 'AWS', 'KUBERNETES', ...). A context tag only matches tag("[context]key").
+    context?: string;
   }>;
 }
+
+/**
+ * The tag key as Dynatrace's entitySelector needs it: a context tag is only
+ * matched by tag("[CONTEXT]key"), never by its bare key — the bare key returns
+ * zero entities.
+ */
+export const selectorTagKey = (t: { key: string; context?: string }): string =>
+  t.context && t.context !== 'CONTEXTLESS' ? `[${t.context}]${t.key}` : t.key;
 
 export interface DynatraceEntityMapping {
   id: string;
