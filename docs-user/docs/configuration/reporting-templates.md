@@ -42,7 +42,34 @@ A report is a snapshot: comments added after you generate it appear only in a re
 
 Set the section's **Layout** to **Investigations** to print the run's published [investigations](../test-runs/comments.md#walk-through-an-investigation) instead of its threads. A section with no title of its own is headed **Investigations**. Every published investigation of the run is included, oldest publication first, with its title, author and conclusion, and then each step in order: its number, tag, card and row, the comment, and the author's note for that step. A step on a Graphs marker is headed by the marker's chart, and a step on a Configuration row shows the comparison it was written against, as in the **By card** layout. A step whose comment was deleted prints **Comment deleted** with its tag and note. An AI agent's investigation names the person who published it and marks the agent, for example *Anna published · proposed by Claude analysis agent* followed by an **AI** chip, and a step written by an agent carries the **AI** chip next to its author. Drafts are never printed, comments that are in no investigation are left out, and the **Cards** filter does not apply. A run with no published investigation shows "No published investigations for this run." To have both the threads and the investigations in one report, add two Comments sections. Sections saved before this option existed keep the **By card** layout.
 
+## The Loki Logs section
+
+Add a **Loki Logs** section to put what the run's logs said into its report: the findings of the Loki Logs card on the run page, frozen at generation. It needs [Loki panels](../integrations/connect-loki.md) on the run's workload; without them the section says so.
+
+The section always opens with four figures: the **error rate** (error lines as a share of all lines) against the baseline, with **Higher**, **Lower** or **In line** beside it, and the counts of **log lines**, **error lines** and **new patterns**. The baseline is the run's control group, or its previous runs when it has none, and is named at the top of the section.
+
+What follows is set in the section's settings:
+
+| Setting | Default | What it adds |
+|---|---|---|
+| **Applications** | on | Lines, errors, warnings and error rate per application, against the baseline, worst first. An application missing from every baseline run is marked **New**. |
+| **Top log patterns** | on | The most frequent log patterns, each marked **New** when no baseline run had it, with a link to the lines in Grafana Explore. |
+| **Only new patterns** | off | Leaves the patterns the baseline already had out of that table. Turn it on for a short "what is new in this release" report. |
+| **Latest error lines** | off | The newest sampled lines at the chosen **Levels**, verbatim. Log lines can carry user ids, hostnames or tokens: check them before you share or publish the report. |
+| **Loki panel totals** | off | The top series of each Loki panel over the whole run. |
+| **Levels** | Errors and warnings | Which levels the pattern and line tables list. |
+| **Rows per table** | 10 | Up to 50. |
+| **Applications** filter | all | Narrows every figure and table to the applications you pick (values of the connection's application label). Add one section per application to report them separately. |
+
+**Suggested setups**
+- *Release report*: the defaults. One look tells a reader whether the logs got worse and which application and pattern to blame.
+- *Regression hunt*: **Only new patterns** on, **Levels** set to **Errors**, **Latest error lines** on.
+- *Per-team report*: one section per application, each with the **Applications** filter set and **Applications** off.
+
+The section reads the pattern and line snapshot taken when the run was analysed, never Loki itself, so it does not depend on how long Loki keeps the logs. It is published to Confluence as tables, with **New**, **Higher** and level badges as status lozenges and the Explore links kept.
+
 **Related**
+- [Connect Loki](../integrations/connect-loki.md)
 - [Comment on a test run](../test-runs/comments.md)
 - [Generate a report](../test-runs/generate-report.md)
 - [Create a system under test](create-system-under-test.md)

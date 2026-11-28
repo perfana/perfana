@@ -149,6 +149,25 @@ describe('sectionSummary', () => {
     expect(sectionSummary(section({ type: 'comments', config: { cards: ['graphs', 'slo', 'trends'] } }))).toBe('3 cards');
   });
 
+  // Added by the /ship test coverage audit.
+  // Value: protects=the collapsed Loki Logs header says which tables the section draws and which
+  // applications it is narrowed to; fails_when=a default flips (applications/patterns are on unless
+  // false, samples/panels off unless true), onlyNewPatterns stops renaming the patterns part, or the
+  // >2 applications count collapses wrongly; why_new=no loki_logs case in this spec; seam=none;
+  // no_claim=what the API renderer draws for the same config.
+  it('summarizes a loki_logs section by its tables and application filter', () => {
+    expect(sectionSummary(section({ type: 'loki_logs', config: {} }))).toBe('error rate, applications, patterns');
+    expect(
+      sectionSummary(section({
+        type: 'loki_logs',
+        config: { includeApplications: false, onlyNewPatterns: true, includeSamples: true, includePanels: true, services: ['checkout', 'cart'] },
+      })),
+    ).toBe('error rate, new patterns, error lines, panels · checkout, cart');
+    expect(
+      sectionSummary(section({ type: 'loki_logs', config: { includePatterns: false, onlyNewPatterns: true, services: ['a', 'b', 'c'] } })),
+    ).toBe('error rate, applications · 3 apps');
+  });
+
   it('summarizes a comments section in the stories layout as such, whatever its card filter', () => {
     expect(sectionSummary(section({ type: 'comments', config: { layout: 'stories', cards: ['graphs'] } }))).toBe('Investigations');
     expect(sectionSummary(section({ type: 'comments', config: { layout: 'by-card' } }))).toBe('All cards');

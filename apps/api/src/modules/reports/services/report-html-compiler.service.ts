@@ -34,6 +34,7 @@ import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
 import { CommentsRenderer } from '../renderers/comments-renderer';
+import { LokiLogsRenderer } from '../renderers/loki-logs-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
 import { REPORT_DETAILS_CSS, REPORT_GROUP_FILTER_CSS } from '../renderers/report-style';
@@ -263,6 +264,7 @@ export class ReportHtmlCompilerService {
     private readonly testRunRepo: Repository<TestRun>,
     // Optional and last for the same positional-construction reason as above.
     @Optional() private readonly commentsRenderer?: CommentsRenderer,
+    @Optional() private readonly lokiLogsRenderer?: LokiLogsRenderer,
   ) {}
 
   /**
@@ -591,6 +593,10 @@ export class ReportHtmlCompilerService {
       case 'comments':
         return this.commentsRenderer
           ? await this.commentsRenderer.renderCommentsSection(section, testRun, userId, roles)
+          : this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
+      case 'loki_logs':
+        return this.lokiLogsRenderer
+          ? await this.lokiLogsRenderer.renderLokiLogsSection(section, testRun, userId, roles)
           : this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
       case 'index':
         return this.indexRenderer.renderIndexSection(

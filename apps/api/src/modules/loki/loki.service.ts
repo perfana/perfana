@@ -602,6 +602,23 @@ export class LokiService {
     const run = await withRequestEm(this.testRunRepo).findOne({ where: { testRunId } });
     if (!run) throw new NotFoundException('Test run not found');
     await this.loadSut(run.systemUnderTestId, userId, roles, 'read', 'Test run not found');
+    return this.buildRunSummary(run, baselineParam);
+  }
+
+  /**
+   * The same summary for the report's Loki Logs section. A report renders in a background job with
+   * no user (`userId` empty, the reports' system-call convention, see ReportDataFetcherService
+   * `resolveOrgFilter`); the run was authorized when the report was requested. A preview carries the
+   * user, and is authorized like the card.
+   */
+  async reportSummary(testRunId: string, userId: string, roles: string[]) {
+    const run = await withRequestEm(this.testRunRepo).findOne({ where: { testRunId } });
+    if (!run) throw new NotFoundException('Test run not found');
+    if (userId) await this.loadSut(run.systemUnderTestId, userId, roles, 'read', 'Test run not found');
+    return this.buildRunSummary(run);
+  }
+
+  private async buildRunSummary(run: TestRun, baselineParam?: string) {
 
     const scope = { systemUnderTestId: run.systemUnderTestId, testEnvironment: run.testEnvironment, workload: run.workload };
     const queries = (await withRequestEm(this.queryRepo).find({ where: scope, order: { panelId: 'ASC' } })).filter((q) => q.enabled);

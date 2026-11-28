@@ -26,6 +26,7 @@ export type ReportSectionType =
   | 'error_analysis'
   | 'dynatrace_hosts'
   | 'comments'
+  | 'loki_logs'
   | 'index';
 
 /**

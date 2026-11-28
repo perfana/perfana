@@ -37,6 +37,7 @@ export const REPORT_SECTION_TYPES = [
   'error_analysis',
   'dynatrace_hosts',
   'comments',
+  'loki_logs',
 ] as const;
 
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
@@ -1061,6 +1062,7 @@ export function getSectionTypeLabel(type: ReportSectionType): string {
     error_analysis: 'Error Analysis',
     dynatrace_hosts: 'Dynatrace Hosts',
     comments: 'Comments',
+    loki_logs: 'Loki Logs',
     index: 'Index',
   };
   return labels[type] || type;

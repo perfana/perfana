@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { GraphPresetsAPI } from '@/lib/graph-presets';
 import { TrendsPresetsAPI } from '@/lib/trends-presets';
+import { fetchLokiRunSummary } from '@/lib/loki';
 import {
   HeaderConfigForm,
   headerPreviewTitle,
@@ -17,6 +18,7 @@ import {
   TrendsConfigForm,
   ComparisonsConfigForm,
   Top10ListsConfigForm,
+  LokiLogsConfigForm,
 } from './SectionConfigs';
 
 // Mock authenticatedFetch so data-fetching effects don't blow up in tests
@@ -45,6 +47,10 @@ jest.mock('@/lib/graph-presets', () => ({
       { id: 'preset-2', name: 'Docker CPU', seriesConfig: [{}], isGlobal: true },
     ]),
   },
+}));
+
+jest.mock('@/lib/loki', () => ({
+  fetchLokiRunSummary: jest.fn(),
 }));
 
 jest.mock('./preview/HtmlSectionPreview', () => ({
@@ -613,5 +619,47 @@ describe('IndexConfigForm', () => {
     const previewButton = screen.getByRole('button', { name: /preview section/i });
     expect(previewButton).toBeInTheDocument();
     expect(previewButton).toBeDisabled();
+  });
+});
+
+// Added by the /ship test coverage audit.
+// Value: protects=the Loki Logs config form offers this run's applications, keeps a saved one the run
+// lacks, clamps "Rows per table" to 1..50 and hides "Only new patterns" while patterns are off;
+// fails_when=the summary fetch stops feeding the options, the saved-value union is dropped, the clamp is
+// removed (an unbounded table) or the dependent switch shows while patterns are off; why_new=no spec
+// rendered LokiLogsConfigForm; seam=none; no_claim=the API renderer honouring the same config.
+describe('LokiLogsConfigForm', () => {
+  const mockSummary = fetchLokiRunSummary as jest.Mock;
+  beforeEach(() => {
+    mockSummary.mockReset();
+    mockSummary.mockResolvedValue({ configured: true, services: [{ service: 'checkout' }, { service: 'cart' }] });
+  });
+
+  it("offers the run's applications plus a saved one the run lacks", async () => {
+    render(<LokiLogsConfigForm config={{ services: ['legacy-app'] }} onChange={() => {}} onTextChange={() => {}} testRunId="tr-1" />);
+    await waitFor(() => expect(mockSummary).toHaveBeenCalledWith('tr-1'));
+    const input = screen.getByRole('combobox', { name: /applications/i });
+    fireEvent.mouseDown(input);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'checkout' })).toBeInTheDocument());
+    expect(screen.getByRole('option', { name: 'cart' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'legacy-app' })).toBeInTheDocument();
+  });
+
+  it('clamps rows per table and hides only-new-patterns while patterns are off', async () => {
+    const onChange = jest.fn();
+    const { rerender } = render(<LokiLogsConfigForm config={{}} onChange={onChange} onTextChange={() => {}} testRunId="tr-1" />);
+    await waitFor(() => expect(mockSummary).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText(/rows per table/i), { target: { value: '999' } });
+    expect(onChange).toHaveBeenLastCalledWith({ maxRows: 50 });
+    fireEvent.change(screen.getByLabelText(/rows per table/i), { target: { value: '0' } });
+    expect(onChange).toHaveBeenLastCalledWith({ maxRows: 1 });
+    // An emptied field stays empty (the renderer's default applies) so the user can retype a value.
+    rerender(<LokiLogsConfigForm config={{ maxRows: 7 }} onChange={onChange} onTextChange={() => {}} testRunId="tr-1" />);
+    fireEvent.change(screen.getByLabelText(/rows per table/i), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ maxRows: undefined });
+
+    expect(screen.getByText('Only new patterns')).toBeInTheDocument();
+    rerender(<LokiLogsConfigForm config={{ includePatterns: false }} onChange={onChange} onTextChange={() => {}} testRunId="tr-1" />);
+    expect(screen.queryByText('Only new patterns')).not.toBeInTheDocument();
   });
 });

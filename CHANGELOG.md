@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.115] - 2026-11-28
+
+### Added
+- **A Loki Logs report section.** It puts the Loki Logs card's findings in a report: the error rate against the baseline (control group, else previous runs) with log, error-line and new-pattern counts, then per-application error rates, the top log patterns marked NEW, and optionally the latest error lines and the Loki panel totals. Levels, rows per table and an application filter are set per section. It reads the analysis snapshot, not Loki, and publishes to Confluence as tables with status lozenges and Explore links.
+
+### Fixed
+- **Publishing a report to Confluence no longer fails on a coloured log line.** Control characters and ANSI colour codes, which Confluence's storage format rejects, are stripped from every section on the way out; one such character used to make Confluence refuse the whole page.
+
 ## [0.2.97.114] - 2026-11-28
 
 ### Fixed

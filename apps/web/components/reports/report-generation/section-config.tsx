@@ -6,6 +6,7 @@ import {
   ErrorOutline as ErrorIcon,
   FormatListNumbered as ListNumberedIcon,
   Notes as NotesIcon,
+  ReceiptLong as LogsIcon,
   Rule as RuleIcon,
   ShowChart as GraphIcon,
   Speed as SpeedIcon,
@@ -121,6 +122,12 @@ export const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; 
     label: 'Comments',
     description: "The run's comment threads by card, with each Graphs marker drawn on its chart",
     color: '#827717',
+  },
+  loki_logs: {
+    icon: <LogsIcon />,
+    label: 'Loki Logs',
+    description: 'Log error rate against the baseline, applications, top log patterns marked NEW and sampled error lines',
+    color: '#00838f',
   },
   index: {
     icon: <TocIcon />,

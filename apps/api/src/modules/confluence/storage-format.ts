@@ -39,7 +39,13 @@ const pillKindByFill = (style: string): string | undefined => {
 // Comparisons "Show rows" chip filter, which is CSS checkboxes and nothing but loose words without them.
 const SKIP_CLASSES = ['page-header', 'chart-hover-band', 'report-band-filter', 'no-confluence'];
 
-const escapeText = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Storage format is XML 1.0, which forbids C0 controls other than tab, LF and CR: one ANSI colour code in a
+// log line (ESC) and Confluence rejects the whole page. The CSI sequence goes with its ESC, so "\x1b[31mERROR"
+// reads "ERROR" rather than "[31mERROR".
+// eslint-disable-next-line no-control-regex
+const XML_INVALID = /\x1b\[[0-9;?]*[ -/]*[@-~]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+const escapeText = (s: string): string =>
+  s.replace(XML_INVALID, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escapeAttr = (s: string): string => escapeText(s).replace(/"/g, '&quot;');
 
 export interface StorageConversion {
