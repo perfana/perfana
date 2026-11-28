@@ -45,7 +45,9 @@ import {
   filterVirtualUserStats,
 } from './utils/scenario-filter';
 import { LiveWindowSelector, type RefreshState } from './components/LiveWindowSelector';
-import { useCommentItemFocus } from '../comments/CommentsContext';
+import { useCommentItemCounts, useCommentItemFocus } from '../comments/CommentsContext';
+import { TabCommentMark } from '../comments/ItemCommentHeader';
+import { commentItemTab } from './utils/comment-item-keys';
 import Top10ListsTable from './Top10ListsTable';
 import Top10ListsRequests from './Top10ListsRequests';
 import Top10ListsUrls from './Top10ListsUrls';
@@ -244,6 +246,13 @@ export default function PerformanceAnalysisCard({
   // until the transactions have loaded or when the run has no such transaction.
   const [clearTransactionFilter, setClearTransactionFilter] = useState<{ scenario: string; seq: number } | null>(null);
   const focusTransactionRow = useCallback((itemKey: string): boolean => {
+    // A Top 10 or Error Analysis anchor: open its tab and report success once the tab has
+    // loaded and rendered the row (the tab keeps its own filters, which start empty).
+    const tab = commentItemTab(itemKey);
+    if (tab !== null) {
+      setActiveTab(tab);
+      return !!document.querySelector(`[data-comment-item="${CSS.escape(itemKey)}"]`);
+    }
     const parsed = parseTransactionItemKey(itemKey);
     if (!parsed) return false;
     const { scenario, transaction } = parsed;
@@ -260,6 +269,8 @@ export default function PerformanceAnalysisCard({
     return true;
   }, [transactions, setActiveTab, expandScenario, expandedRows, handleRowClick]);
   useCommentItemFocus('performance', focusTransactionRow);
+  const commentCounts = useCommentItemCounts('performance', expanded);
+  const tabMark = (tab: number) => <TabCommentMark counts={commentCounts} itemKey={(k) => commentItemTab(k) === tab} />;
 
   const handleExpand = () => {
     const wasCollapsed = !expanded;
@@ -567,10 +578,10 @@ export default function PerformanceAnalysisCard({
                 }}
               >
                 <Tab label="Overview" />
-                <Tab label="Top 10 Lists Transactions" />
-                <Tab label="Top 10 Lists Requests" />
-                <Tab label="Top 10 Lists URLs" />
-                <Tab label="Error Analysis" />
+                <Tab label={<span>Top 10 Lists Transactions{tabMark(1)}</span>} />
+                <Tab label={<span>Top 10 Lists Requests{tabMark(2)}</span>} />
+                <Tab label={<span>Top 10 Lists URLs{tabMark(3)}</span>} />
+                <Tab label={<span>Error Analysis{tabMark(4)}</span>} />
               </Tabs>
             </Box>
 

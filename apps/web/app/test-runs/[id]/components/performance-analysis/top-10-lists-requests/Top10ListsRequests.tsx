@@ -8,6 +8,7 @@ import {
 } from '@mui/material';
 import { useTop10Data } from './hooks';
 import { Top10DimensionCard, Top10ActionMenu } from './components';
+import { useCommentItemCounts } from '../../comments/CommentsContext';
 import { Top10Filter } from '../components';
 import type { Top10ListsRequestsProps } from './types';
 
@@ -34,6 +35,7 @@ export default function Top10ListsRequests({
     handleOpenActionMenu,
     handleCloseActionMenu,
   } = useTop10Data({ testRunId, selectedScenarios, excludeRampUp, nameFilter });
+  const commentCounts = useCommentItemCounts('performance', true);
 
   const hasDrillDownOptions = hasDistributedTracing || hasDynatrace;
 
@@ -72,6 +74,7 @@ export default function Top10ListsRequests({
             hasDrillDownOptions={hasDrillDownOptions}
             onSort={handleSort}
             onOpenActionMenu={handleOpenActionMenu}
+            commentCounts={commentCounts}
           />
         ))}
       </Box>

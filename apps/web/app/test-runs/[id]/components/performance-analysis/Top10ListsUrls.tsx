@@ -29,6 +29,9 @@ import { ClippedUrl, URL_CELL_MAX_WIDTH_SX } from '@/components/ui/clipped-url';
 import { formatImpactShare, sumImpact } from '@perfana/shared/utils';
 import { fetchRunSamplers, RunSampler } from './utils/run-samplers';
 import { throughputSeconds } from './utils/throughput-seconds';
+import RowCommentButton from '../comments/RowCommentButton';
+import { useCommentItemCounts } from '../comments/CommentsContext';
+import { commentItemLabel, ROW_COMMENT_HOVER_SX, top10ItemKey } from './utils/comment-item-keys';
 
 interface Top10Item {
   url: string;
@@ -57,6 +60,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
   const [sortFields, setSortFields] = useState<Record<number, SortField>>({});
   const [sortOrders, setSortOrders] = useState<Record<number, SortOrder>>({});
   const [nameFilter, setNameFilter] = useState('');
+  const commentCounts = useCommentItemCounts('performance', true);
 
   useEffect(() => {
     fetchData();
@@ -392,7 +396,9 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                       sortedData.map((item, idx) => (
                         <TableRow
                           key={idx}
+                          data-comment-item={top10ItemKey('urls', dimension.title, item.url)}
                           sx={{
+                            ...ROW_COMMENT_HOVER_SX,
                             '&:hover': {
                               backgroundColor: 'action.hover',
                             },
@@ -417,7 +423,17 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                             />
                           </TableCell>
                           <TableCell sx={URL_CELL_MAX_WIDTH_SX}>
-                            <ClippedUrl url={item.url} variant="body2" color="text.primary" sx={{ fontSize: '0.85rem' }} />
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <ClippedUrl url={item.url} variant="body2" color="text.primary" sx={{ fontSize: '0.85rem' }} />
+                              </Box>
+                              <RowCommentButton
+                                card="performance"
+                                itemKey={top10ItemKey('urls', dimension.title, item.url)}
+                                itemLabel={commentItemLabel(dimension.title, item.url)}
+                                counts={commentCounts}
+                              />
+                            </Box>
                           </TableCell>
                           {dimension.showErrorCount && (
                             <TableCell

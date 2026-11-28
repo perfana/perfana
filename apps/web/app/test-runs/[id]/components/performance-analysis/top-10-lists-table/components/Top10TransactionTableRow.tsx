@@ -5,10 +5,14 @@ import {
   TableCell,
   Chip,
   IconButton,
+  Box,
 } from '@mui/material';
 import { MoreVert as MoreVertIcon } from '@mui/icons-material';
 import { Top10TransactionItem, Top10TableDimension } from '../types';
 import { getRankingChipStyles } from '../utils';
+import RowCommentButton from '../../../comments/RowCommentButton';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import { commentItemLabel, ROW_COMMENT_HOVER_SX, top10ItemKey } from '../../utils/comment-item-keys';
 
 export interface Top10TransactionTableRowProps {
   item: Top10TransactionItem;
@@ -17,6 +21,7 @@ export interface Top10TransactionTableRowProps {
   hasDrillDownOptions: boolean;
   showErrorCount?: boolean;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>, item: Top10TransactionItem) => void;
+  commentCounts: CommentItemCounts;
 }
 
 export function Top10TransactionTableRow({
@@ -26,12 +31,16 @@ export function Top10TransactionTableRow({
   hasDrillDownOptions,
   showErrorCount,
   onOpenActionMenu,
+  commentCounts,
 }: Top10TransactionTableRowProps) {
   const chipStyles = getRankingChipStyles(index);
+  const commentKey = top10ItemKey('transactions', dimension.title, item.scenarioName, item.transactionName);
 
   return (
     <TableRow
+      data-comment-item={commentKey}
       sx={{
+        ...ROW_COMMENT_HOVER_SX,
         '&:hover': {
           backgroundColor: 'action.hover',
         },
@@ -65,7 +74,15 @@ export function Top10TransactionTableRow({
         }}
         title={item.transactionName}
       >
-        {item.transactionName}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>{item.transactionName}</Box>
+          <RowCommentButton
+            card="performance"
+            itemKey={commentKey}
+            itemLabel={commentItemLabel(dimension.title, item.scenarioName, item.transactionName)}
+            counts={commentCounts}
+          />
+        </Box>
       </TableCell>
       {showErrorCount && (
         <TableCell

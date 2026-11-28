@@ -10,6 +10,7 @@ import { useTop10TableData } from './hooks';
 import { Top10TransactionDimensionCard, Top10TransactionActionMenu } from './components';
 import { Top10Filter } from '../components';
 import type { Top10ListsTableProps } from './types';
+import { useCommentItemCounts } from '../../comments/CommentsContext';
 
 export default function Top10ListsTable({
   testRunId,
@@ -35,6 +36,7 @@ export default function Top10ListsTable({
     handleCloseActionMenu,
   } = useTop10TableData({ testRunId, selectedScenarios, excludeRampUp, nameFilter });
 
+  const commentCounts = useCommentItemCounts('performance', true);
   const hasDrillDownOptions = hasDistributedTracing || hasDynatrace;
 
   if (loading) {
@@ -71,6 +73,7 @@ export default function Top10ListsTable({
             hasDrillDownOptions={hasDrillDownOptions}
             onSort={handleSort}
             onOpenActionMenu={handleOpenActionMenu}
+            commentCounts={commentCounts}
           />
         ))}
       </Box>
