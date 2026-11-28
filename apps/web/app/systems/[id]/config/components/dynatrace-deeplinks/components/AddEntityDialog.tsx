@@ -30,6 +30,7 @@ import {
   DynatraceConfig,
   DynatraceEntity,
   EntityMappingLevel,
+  selectorTagKey,
 } from '../types';
 import { ENTITY_TYPES } from '../utils';
 import { fetchHostLabelOptions } from '@/lib/host-labels';
@@ -156,16 +157,26 @@ export function AddEntityDialog({
   // the set so values for that key are complete even on large fleets.
   // ponytail: values living only on entities past the 10k cap still won't show;
   // narrow with the tag key first. Acceptable — 10k is far beyond real fleets here.
+  // Keys are context-qualified ("[ENVIRONMENT]app"), because that is what the
+  // server's tag() selector needs; the bare key matches nothing.
+  // The selected key/value stay in their option lists even when the narrowed
+  // fetch returns no entity carrying them (0 hosts, or a refused selector):
+  // otherwise the fields disable themselves holding the filter, and the only
+  // way out of the dialog's empty state is Cancel.
   const tagKeys = Array.from(
-    new Set(typeEntities.flatMap((e) => (e.tags || []).map((t) => t.key)))
+    new Set([
+      ...typeEntities.flatMap((e) => (e.tags || []).map(selectorTagKey)),
+      ...(selectedTagKey ? [selectedTagKey] : []),
+    ])
   ).sort();
   const tagValues = Array.from(
-    new Set(
-      typeEntities
+    new Set([
+      ...typeEntities
         .flatMap((e) => e.tags || [])
-        .filter((t) => t.key === selectedTagKey && t.value)
-        .map((t) => t.value as string)
-    )
+        .filter((t) => selectorTagKey(t) === selectedTagKey && t.value)
+        .map((t) => t.value as string),
+      ...(selectedTagValue ? [selectedTagValue] : []),
+    ])
   ).sort();
 
   const nameQuery = searchInput.trim().toLowerCase();
@@ -173,7 +184,7 @@ export function AddEntityDialog({
     if (nameQuery && !e.displayName.toLowerCase().includes(nameQuery)) return false;
     if (!selectedTagKey) return true;
     return (e.tags || []).some(
-      (t) => t.key === selectedTagKey && (!selectedTagValue || t.value === selectedTagValue)
+      (t) => selectorTagKey(t) === selectedTagKey && (!selectedTagValue || t.value === selectedTagValue)
     );
   });
 
@@ -342,8 +353,7 @@ export function AddEntityDialog({
                 options={tagValues}
                 value={tagValues.includes(selectedTagValue) ? selectedTagValue : null}
                 onChange={(_, newValue) => onTagValueChange(newValue || '')}
-                disabled={entitiesLoading || !selectedTagKey || tagValues.length === 0}
-                renderInput={(params) => (
+                disabled={entitiesLoading || !selectedTagKey || tagValues.length === 0}                renderInput={(params) => (
                   <TextField {...params} label="Value" placeholder="Any value" />
                 )}
               />

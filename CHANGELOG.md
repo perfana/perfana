@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.114] - 2026-11-28
+
+### Fixed
+- **The Add Dynatrace Entity dialog no longer locks up after a tag is picked.** Picking a tag re-fetches the hosts carrying it; when that came back empty, the Tag and Value fields disabled themselves while still holding the filter, and only Cancel got out. The picked tag and value now stay selectable and clearable. Tags with a Dynatrace context (`ENVIRONMENT`, `AWS`, `KUBERNETES`, ...) are now offered and filtered as `[CONTEXT]key`, the only form Dynatrace's `tag()` selector matches; the bare key matched no host, which is what emptied the list on instances with imported tags.
+
 ## [0.2.97.113] - 2026-11-28
 
 ### Added
