@@ -355,6 +355,17 @@ describe('LokiService run summary', () => {
     expect((await withMappings([[['ns', 'a'], ['app', 'x']], [['ns', 'b'], ['app', 'y']]])).exploreUrl).toBeNull();
   });
 
+  it('reportSummary serves the report job (no user) and authorizes a preview (a user) like the card', async () => {
+    // Value: protects=a background-generated report gets the Loki summary while a user-carried preview stays access-checked; fails_when=the userId guard is dropped (every generated report section 404s) or inverted (a preview skips authorization); why_new=Loki report section; seam=none; no_claim=the report request's own authorization
+    const job = setup([LEVEL_PANEL]);
+    await expect(job.service.reportSummary('run-1', '', [])).resolves.toMatchObject({ configured: true });
+    expect(job.authz.canAccessResource).not.toHaveBeenCalled();
+
+    const denied = setup([LEVEL_PANEL]);
+    denied.authz.canAccessResource.mockResolvedValue({ allowed: false });
+    await expect(denied.service.reportSummary('run-1', 'u', [])).rejects.toThrow('Test run not found');
+  });
+
   it('is unconfigured when every panel of the workload is disabled', async () => {
     await expect(setup([{ ...LEVEL_PANEL, enabled: false }]).service.runSummary('run-1', 'u', [])).resolves.toEqual({ configured: false });
   });

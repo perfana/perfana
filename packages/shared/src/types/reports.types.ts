@@ -603,6 +603,7 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   error_analysis: 'Error Analysis',
   dynatrace_hosts: 'Dynatrace Hosts',
   comments: 'Comments',
+  loki_logs: 'Loki Logs',
 } as const;
 
 /**
@@ -642,6 +643,7 @@ export const SECTION_RENDER_TITLES: Record<ReportSectionType, string> = {
   error_analysis: 'Error Analysis',
   dynatrace_hosts: 'Dynatrace Hosts',
   comments: 'Comments',
+  loki_logs: 'Loki Logs',
 } as const;
 
 /**

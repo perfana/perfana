@@ -13,6 +13,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
+import { fetchLokiRunSummary } from '@/lib/loki';
 import type { ReportSectionType, ReportSectionConfig } from '@/lib/api/reports';
 import { REPORT_LIMITS } from '@/lib/api/reports';
 import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
@@ -1983,6 +1984,112 @@ export function CommentsConfigForm({ config, onChange, text, onTextChange, testR
           />
         )}
       />}
+    </SectionConfigShell>
+  );
+}
+
+// ==================== Loki Logs Config ====================
+
+/** @public Every field optional: an empty config is the recommended default. */
+export interface LokiLogsConfig {
+  includeApplications?: boolean;
+  includePatterns?: boolean;
+  onlyNewPatterns?: boolean;
+  patternLevels?: 'error' | 'warn' | 'all';
+  includeSamples?: boolean;
+  includePanels?: boolean;
+  maxRows?: number;
+  /** Values of the connection's application label; empty = every application. */
+  services?: string[];
+}
+
+interface LokiLogsConfigFormProps {
+  config: LokiLogsConfig;
+  onChange: (config: LokiLogsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
+  testRunId?: string;
+  allSections?: ReportSectionConfig[];
+}
+
+export function LokiLogsConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: LokiLogsConfigFormProps) {
+  // Application names come from this run's snapshot; a saved one the run lacks stays selectable.
+  const [services, setServices] = useState<string[]>([]);
+  useEffect(() => {
+    if (!testRunId) return;
+    let cancelled = false;
+    fetchLokiRunSummary(testRunId)
+      .then((s) => { if (!cancelled && s.configured) setServices((s.services ?? []).map((x) => x.service)); })
+      .catch(() => { if (!cancelled) setServices([]); });
+    return () => { cancelled = true; };
+  }, [testRunId]);
+
+  const set = (patch: Partial<LokiLogsConfig>) => onChange({ ...config, ...patch });
+  const toggle = (key: keyof LokiLogsConfig, label: string, fallback: boolean, helper?: string) => (
+    <FormControlLabel
+      control={<Switch checked={(config[key] as boolean | undefined) ?? fallback} onChange={(e) => set({ [key]: e.target.checked })} />}
+      label={helper ? <Box><Typography variant="body2">{label}</Typography><Typography variant="caption" color="text.secondary">{helper}</Typography></Box> : label}
+    />
+  );
+  const selected = config.services ?? [];
+  const options = Array.from(new Set([...services, ...selected]));
+
+  return (
+    <SectionConfigShell
+      sectionTitle="Loki Logs"
+      sectionType="Loki Logs"
+      previewType="loki_logs"
+      previewConfig={config}
+      text={text}
+      onTextChange={onTextChange}
+      testRunId={testRunId}
+      allSections={allSections}
+    >
+      <Typography variant="caption" color="text.secondary">
+        Always shows the error rate against the baseline (the run&apos;s control group, else its previous runs), log and error line counts and the number of new patterns.
+      </Typography>
+      {toggle('includeApplications', 'Applications', true, 'Error rate per application against the baseline, worst first')}
+      {toggle('includePatterns', 'Top log patterns', true, 'Most frequent patterns, NEW when no baseline run had them')}
+      {(config.includePatterns ?? true) && toggle('onlyNewPatterns', 'Only new patterns', false, 'Leave out patterns the baseline runs already had')}
+      {toggle('includeSamples', 'Latest error lines', false, 'Raw log lines; may contain identifiers, check before sharing')}
+      {toggle('includePanels', 'Loki panel totals', false)}
+      <FormControl size="small">
+        <InputLabel id="loki-levels">Levels</InputLabel>
+        <Select
+          labelId="loki-levels"
+          label="Levels"
+          value={config.patternLevels ?? 'warn'}
+          onChange={(e) => set({ patternLevels: e.target.value as LokiLogsConfig['patternLevels'] })}
+        >
+          <MenuItem value="error">Errors</MenuItem>
+          <MenuItem value="warn">Errors and warnings</MenuItem>
+          <MenuItem value="all">All levels</MenuItem>
+        </Select>
+      </FormControl>
+      <TextField
+        size="small"
+        type="number"
+        label="Rows per table"
+        value={config.maxRows ?? 10}
+        inputProps={{ min: 1, max: 50 }}
+        onChange={(e) => set({ maxRows: Math.min(50, Math.max(1, Number(e.target.value) || 10)) })}
+      />
+      <Autocomplete
+        multiple
+        freeSolo
+        size="small"
+        options={options}
+        value={selected}
+        onChange={(_e, value) => set({ services: value.map(String).filter(Boolean) })}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Applications"
+            placeholder={selected.length ? '' : 'All applications'}
+            helperText="Empty = the whole run. Narrows every figure and table to these applications."
+          />
+        )}
+      />
     </SectionConfigShell>
   );
 }

@@ -35,6 +35,8 @@ import { Top10ListsRenderer } from './renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from './renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from './renderers/dynatrace-hosts-renderer';
 import { CommentsRenderer } from './renderers/comments-renderer';
+import { LokiLogsRenderer } from './renderers/loki-logs-renderer';
+import { LokiModule } from '../loki/loki.module';
 import { DynatraceModule } from '../dynatrace/dynatrace.module';
 import { PlaceholderRenderer } from './renderers/placeholder-renderer';
 import { IndexRenderer } from './renderers/index-renderer';
@@ -46,6 +48,7 @@ import { SeriesGroupResolver } from '../metrics/series-group-resolver';
     CommonModule, // Provides AuthorizationService
     AuditModule, // Phase 5a — provides AuditService + AuditResourceRegistry
     DynatraceModule, // DynatraceService for the Dynatrace Hosts section
+    LokiModule, // LokiService for the Loki Logs section
   ],
   controllers: [ReportGenerationController, ReportTemplateController, ReportShareController],
   providers: [
@@ -83,6 +86,7 @@ import { SeriesGroupResolver } from '../metrics/series-group-resolver';
     ErrorAnalysisRenderer,
     DynatraceHostsRenderer,
     CommentsRenderer,
+    LokiLogsRenderer,
     PlaceholderRenderer,
     IndexRenderer,
   ],

@@ -96,6 +96,7 @@ import {
   ComparisonsConfigForm,
   DynatraceHostsConfigForm,
   CommentsConfigForm,
+  LokiLogsConfigForm,
   Top10ListsConfigForm,
   ErrorAnalysisConfigForm,
   findSectionAnchorWarnings,
@@ -1315,6 +1316,8 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
         return <DynatraceHostsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} allSections={allSections} />;
       case 'comments':
         return <CommentsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
+      case 'loki_logs':
+        return <LokiLogsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       default:
         return null;
     }

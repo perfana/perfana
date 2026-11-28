@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.113] - 2026-11-28
+
+### Added
+- **A Loki Logs report section.** It puts the Loki Logs card's findings in a report: the error rate against the baseline (control group, else previous runs) with log, error-line and new-pattern counts, then per-application error rates, the top log patterns marked NEW, and optionally the latest error lines and the Loki panel totals. Levels, rows per table and an application filter are set per section. It reads the analysis snapshot, not Loki, and publishes to Confluence as tables with status lozenges and Explore links.
+
 ## [0.2.97.112] - 2026-11-28
 
 ### Fixed

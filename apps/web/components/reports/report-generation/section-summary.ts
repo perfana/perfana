@@ -8,6 +8,7 @@ import type {
   Top10ListsConfig,
   DynatraceHostsConfig,
   CommentsConfig,
+  LokiLogsConfig,
 } from './SectionConfigs';
 import { COMMENT_CARD_LABELS } from '@perfana/shared/constants/comment-cards';
 
@@ -103,6 +104,17 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
       return [cards.length === 0 ? 'All cards' : cards.length <= 2 ? cards.join(', ') : `${cards.length} cards`, text]
         .filter(Boolean)
         .join(' · ');
+    }
+    case 'loki_logs': {
+      const cfg = (section.config ?? {}) as LokiLogsConfig;
+      const parts = [
+        cfg.includeApplications !== false ? 'applications' : null,
+        cfg.includePatterns !== false ? (cfg.onlyNewPatterns ? 'new patterns' : 'patterns') : null,
+        cfg.includeSamples ? 'error lines' : null,
+        cfg.includePanels ? 'panels' : null,
+      ].filter(Boolean);
+      const apps = cfg.services?.length ? (cfg.services.length <= 2 ? cfg.services.join(', ') : `${cfg.services.length} apps`) : null;
+      return [['error rate', ...parts].join(', '), apps, text].filter(Boolean).join(' · ');
     }
     default:
       // ponytail: no naming field in these configs — the text is the only distinguisher
