@@ -9,7 +9,7 @@ interface ExpandableCardHeaderProps {
   title: string;
   expanded: boolean;
   onToggle: () => void;
-  /** System-under-test config URL (`buildSystemConfigUrl`); renders a cog that opens it in a new tab. */
+  /** System-under-test config URL (`buildSystemConfigUrl`); renders a cog, expanded only, that opens it in a new tab. */
   settingsUrl?: string;
 }
 
@@ -72,7 +72,7 @@ export default function ExpandableCardHeader({
         >
           {title}
         </Typography>
-        {settingsButton}
+        {/* No cog while collapsed: every card shows its settings only when expanded. */}
         <Tooltip title="Expand">
           <IconButton
             aria-label={`Expand ${lowerTitle}`}

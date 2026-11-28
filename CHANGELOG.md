@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.112] - 2026-11-28
+
+### Fixed
+- **The Loki Logs and Splunk Logs cards show their settings cog only when expanded,** like every other card.
+
 ## [0.2.97.111] - 2026-11-27
 
 ### Added

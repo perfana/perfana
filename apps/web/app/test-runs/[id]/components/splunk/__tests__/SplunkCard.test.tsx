@@ -87,8 +87,15 @@ it('offers no Open-in menu for a panel with no series', async () => {
 it('opens the system config on the Splunk tab, scoped to the run', async () => {
   mockSummary.mockResolvedValue(configured);
   const open = jest.spyOn(window, 'open').mockImplementation(() => null);
-  render(<SplunkCard testRun={{ test_run_id: 'run-1', system_under_test_id: 'sut-1', test_environment: 'acc', workload: 'load' }} expanded={false} onExpand={() => {}} />);
+  render(<SplunkCard testRun={{ test_run_id: 'run-1', system_under_test_id: 'sut-1', test_environment: 'acc', workload: 'load' }} expanded onExpand={() => {}} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Configure splunk logs' }));
   expect(open).toHaveBeenCalledWith('/systems/sut-1/config?tab=splunk&environment=acc&workload=load&fromTestRun=run-1', '_blank');
   open.mockRestore();
+});
+
+it('shows the settings cog only when expanded', async () => {
+  mockSummary.mockResolvedValue(configured);
+  render(<SplunkCard testRun={{ test_run_id: 'run-1', system_under_test_id: 'sut-1', test_environment: 'acc', workload: 'load' }} expanded={false} onExpand={() => {}} />);
+  await screen.findByRole('button', { name: 'Expand splunk logs' });
+  expect(screen.queryByRole('button', { name: 'Configure splunk logs' })).not.toBeInTheDocument();
 });
