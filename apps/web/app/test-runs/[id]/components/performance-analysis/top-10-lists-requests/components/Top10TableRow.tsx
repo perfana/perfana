@@ -12,6 +12,9 @@ import { MoreVert as MoreVertIcon } from '@mui/icons-material';
 import { Top10Item, Top10Dimension } from '../types';
 import { getRankingChipStyles } from '../utils';
 import { ClippedUrl, URL_CELL_MAX_WIDTH_SX } from '@/components/ui/clipped-url';
+import RowCommentButton from '../../../comments/RowCommentButton';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import { commentItemLabel, ROW_COMMENT_HOVER_SX, top10ItemKey } from '../../utils/comment-item-keys';
 
 export interface Top10TableRowProps {
   item: Top10Item;
@@ -20,6 +23,7 @@ export interface Top10TableRowProps {
   hasDrillDownOptions: boolean;
   showErrorCount?: boolean;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>, item: Top10Item) => void;
+  commentCounts: CommentItemCounts;
 }
 
 export function Top10TableRow({
@@ -29,12 +33,16 @@ export function Top10TableRow({
   hasDrillDownOptions,
   showErrorCount,
   onOpenActionMenu,
+  commentCounts,
 }: Top10TableRowProps) {
   const chipStyles = getRankingChipStyles(index);
+  const commentKey = top10ItemKey('requests', dimension.title, item.scenarioName, item.transactionName, item.requestName, item.url);
 
   return (
     <TableRow
+      data-comment-item={commentKey}
       sx={{
+        ...ROW_COMMENT_HOVER_SX,
         '&:hover': {
           backgroundColor: 'action.hover',
         },
@@ -74,9 +82,17 @@ export function Top10TableRow({
       </TableCell>
       <TableCell sx={{ wordBreak: 'break-all', ...URL_CELL_MAX_WIDTH_SX }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: '0.85rem' }}>
-            {item.requestName}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: '0.85rem', flex: 1, minWidth: 0 }}>
+              {item.requestName}
+            </Typography>
+            <RowCommentButton
+              card="performance"
+              itemKey={commentKey}
+              itemLabel={commentItemLabel(dimension.title, item.transactionName, item.requestName)}
+              counts={commentCounts}
+            />
+          </Box>
           {item.url && item.url !== item.requestName && (
             <Box sx={{ mt: 0.5 }}>
               <ClippedUrl url={item.url} />

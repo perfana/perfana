@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.113] - 2026-11-28
+
+### Added
+- **Comment on rows in the Performance Analysis Top 10 lists and Error Analysis tab.** Every row in Top 10 Lists Transactions, Requests and URLs, and every transaction · sampler group in Error Analysis, takes a comment like an Overview transaction row. A Top 10 comment is tied to its list, not just the transaction. A tab holding commented rows shows a comment icon in its label, and **Show in context** opens that tab and scrolls to the row. No API or schema change: the anchors are item keys on the existing `performance` card.
+
 ## [0.2.97.112] - 2026-11-28
 
 ### Fixed

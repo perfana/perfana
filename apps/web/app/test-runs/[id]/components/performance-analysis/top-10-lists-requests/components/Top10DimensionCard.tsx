@@ -14,6 +14,7 @@ import {
 import { Top10Item, Top10Dimension, Top10SortField, Top10SortOrder } from '../types';
 import { Top10TableHeader } from './Top10TableHeader';
 import { Top10TableRow } from './Top10TableRow';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
 
 export interface Top10DimensionCardProps {
   dimension: Top10Dimension;
@@ -24,6 +25,7 @@ export interface Top10DimensionCardProps {
   hasDrillDownOptions: boolean;
   onSort: (dimensionIndex: number, field: Top10SortField) => void;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>, item: Top10Item) => void;
+  commentCounts: CommentItemCounts;
 }
 
 export function Top10DimensionCard({
@@ -35,6 +37,7 @@ export function Top10DimensionCard({
   hasDrillDownOptions,
   onSort,
   onOpenActionMenu,
+  commentCounts,
 }: Top10DimensionCardProps) {
   return (
     <Paper
@@ -90,6 +93,7 @@ export function Top10DimensionCard({
                   hasDrillDownOptions={hasDrillDownOptions}
                   showErrorCount={dimension.showErrorCount}
                   onOpenActionMenu={onOpenActionMenu}
+                  commentCounts={commentCounts}
                 />
               ))
             )}

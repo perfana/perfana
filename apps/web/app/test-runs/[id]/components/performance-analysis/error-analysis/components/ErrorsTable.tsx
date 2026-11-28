@@ -28,6 +28,10 @@ import FancyChip from '../../../shared/FancyChip';
 import { ErrorByTransaction, ErrorByTransactionGroup } from '../types';
 import { groupErrorsByTransactionSampler } from '../utils/error-formatters';
 import { ClippedUrl, URL_CELL_SX } from '@/components/ui/clipped-url';
+import RowCommentButton from '../../../comments/RowCommentButton';
+import { useCommentItemCounts } from '../../../comments/CommentsContext';
+import type { CommentItemCounts } from '@/lib/test-run-comments';
+import { commentItemLabel, errorGroupItemKey, ROW_COMMENT_HOVER_SX } from '../../utils/comment-item-keys';
 
 interface ErrorsTableProps {
   errorsByTransaction: ErrorByTransaction[];
@@ -37,18 +41,23 @@ interface ErrorsTableProps {
 function GroupRow({
   group,
   onViewDetails,
+  commentCounts,
 }: {
   group: ErrorByTransactionGroup;
   onViewDetails: (transaction: ErrorByTransaction) => void;
+  commentCounts: CommentItemCounts;
 }) {
   const [open, setOpen] = useState(false);
+  const commentKey = errorGroupItemKey(group.transactionName, group.samplerName);
 
   return (
     <>
       {/* Parent row */}
       <TableRow
         hover
+        data-comment-item={commentKey}
         sx={{
+          ...ROW_COMMENT_HOVER_SX,
           cursor: 'pointer',
           '& > *': { borderBottom: open ? 'none' : undefined },
         }}
@@ -59,7 +68,17 @@ function GroupRow({
             {open ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
           </IconButton>
         </TableCell>
-        <TableCell sx={{ fontWeight: 600 }}>{group.transactionName}</TableCell>
+        <TableCell sx={{ fontWeight: 600 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>{group.transactionName}</Box>
+            <RowCommentButton
+              card="performance"
+              itemKey={commentKey}
+              itemLabel={commentItemLabel('Errors', group.transactionName, group.samplerName)}
+              counts={commentCounts}
+            />
+          </Box>
+        </TableCell>
         <TableCell>
           <FancyChip label={group.samplerName} colorTheme="blue" />
         </TableCell>
@@ -176,6 +195,7 @@ function GroupRow({
 
 export function ErrorsTable({ errorsByTransaction, onViewDetails }: ErrorsTableProps) {
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  const commentCounts = useCommentItemCounts('performance', true);
 
   // All unique response codes across the dataset (sorted)
   const allCodes = useMemo(() => {
@@ -303,6 +323,7 @@ export function ErrorsTable({ errorsByTransaction, onViewDetails }: ErrorsTableP
                   key={`${group.transactionName}\0${group.samplerName}`}
                   group={group}
                   onViewDetails={onViewDetails}
+                  commentCounts={commentCounts}
                 />
               ))
             )}

@@ -20,7 +20,7 @@ Comments are plain text, up to 10,000 characters.
 
 ## Comment on a row
 
-Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis**, a row in **Anomaly detection**, an SLO, a Splunk panel, a Loki panel or log pattern, a Dynatrace service, a tracing service, a Pyroscope profiler, a configuration item on **Configuration** or a dashboard tile on **Dashboards**.
+Some cards take comments on a single row or section as well as on the whole card: a transaction in **Performance analysis** (on the Overview tab, in each Top 10 list, and an error group on the Error Analysis tab), a row in **Anomaly detection**, an SLO, a Splunk panel, a Loki panel or log pattern, a Dynatrace service, a tracing service, a Pyroscope profiler, a configuration item on **Configuration** or a dashboard tile on **Dashboards**.
 
 1. Hover over the row. An outlined comment icon appears at its end.
 2. Click it.
@@ -28,6 +28,8 @@ Some cards take comments on a single row or section as well as on the whole card
 3. Write the comment and click **Comment**.
 
 A row with threads shows a filled comment icon, with a dot when someone else wrote there since you last looked. To comment on the whole card instead, click the close icon next to the row name in the composer.
+
+A comment on a **Performance analysis** Top 10 row belongs to that list: the same transaction in another Top 10 list does not show it. A tab of the card that holds commented rows shows a small comment icon in its label. **Show in context** opens the right tab and scrolls to the row; if the tab's own filters, the scenario filter or the **Analysis timerange** switch hide the row, the thread still opens but there is no row to scroll to.
 
 When you open a comment on a configuration item or a dashboard tile, from its link, **Show in context** or an investigation step, the card shows only that item, whatever filters you had set. A bar above the list reads *Showing the item from a comment:* with the item's name, and **Show all** brings back your own filters as you left them. A comment on a configuration item also records which run the card was comparing with: **Restore view** selects that run again, with **Undo** to go back, and the report prints the comparison under the comment. A comment written on the **Traces Diff** tab of the Distributed tracing card, or the **Diff** view of the Pyroscope card, records that it was written on the diff and what it compared: the baseline run, or with **Two time ranges in this run** both ranges as times from the run's start; on the tracing card it also records a summary of the **Compare Traces** result on screen (trace counts, average duration against the baseline, likely root causes, new and missing spans, new errors) and the request it was computed for. That line shows under the comment and in the report. It has no **Restore view**.
 
